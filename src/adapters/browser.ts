@@ -30,7 +30,6 @@ interface StoreProfile {
   readonly dismiss?: readonly string[];
   /** Wait for this before scraping; usually the results container. */
   readonly ready?: string;
-  readonly pages: number;
   /**
    * Some storefronts (mcubegames, gamenation — both Next.js apps) never
    * change the URL for pagination at all; page 2+ only exists behind a
@@ -106,7 +105,6 @@ const PROFILES: Record<string, StoreProfile> = {
     platformHint: "SWITCH",
     ready: "div.s-main-slot",
     dismiss: ["input[data-action-type='DISMISS']", "button:has-text('Continue shopping')"],
-    pages: 3,
   },
 
   flipkart: {
@@ -125,7 +123,6 @@ const PROFILES: Record<string, StoreProfile> = {
     platformHint: "SWITCH",
     ready: "div[data-id], a[href*='/p/']",
     dismiss: ["button._2KpZ6l._2doB4z", "span._30XB9F", "button:has-text('✕')"],
-    pages: 3,
   },
 
   playasia: {
@@ -135,7 +132,6 @@ const PROFILES: Record<string, StoreProfile> = {
     linkSelectors: ["a"],
     outOfStockSelectors: [".out-of-stock", ".sold-out"],
     defaultRegion: "UNKNOWN",
-    pages: 2,
   },
 
   // ---- gamestheshop, gamenation and mcubegames below were confirmed
@@ -155,7 +151,6 @@ const PROFILES: Record<string, StoreProfile> = {
     defaultRegion: "IN",
     platformHint: "SWITCH",
     ready: "div.ak-card",
-    pages: 3,
   },
 
   gamenation: {
@@ -181,7 +176,6 @@ const PROFILES: Record<string, StoreProfile> = {
     // Pagination is a client-side button with no URL change; the real
     // "Next page" control is aria-labelled, unlike mcubegames below.
     nextPageSelectors: ["button[aria-label='Next page']"],
-    pages: 10,
   },
 
   mcubegames: {
@@ -204,11 +198,11 @@ const PROFILES: Record<string, StoreProfile> = {
     // just a chevron icon, so it's targeted by that icon's class instead —
     // .last() because the same icon could plausibly appear elsewhere (a
     // carousel, a dropdown) and pagination sits at the bottom of the page.
+    // No page count here — it stops when clickNextPage can't find/click a
+    // next control anymore, which tracks the real catalogue size (however
+    // many pages that turns out to be) instead of a number that goes stale
+    // the moment the catalogue grows.
     nextPageSelectors: ["button:has(svg.lucide-chevron-right)"],
-    // 10 pages, not all 42 — each click-and-wait costs several seconds, and
-    // the per-store collect deadline is 180s. Raise this later if 10 proves
-    // safely within budget.
-    pages: 10,
   },
 
   e2zstore: {
@@ -225,13 +219,22 @@ const PROFILES: Record<string, StoreProfile> = {
     defaultRegion: "IN",
     platformHint: "SWITCH",
     ready: "li.product, div.product",
-    pages: 3,
   },
 };
 
 const UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
   "(KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36";
+
+/**
+ * A backstop, not a target — every store stops paging on its own real
+ * signal (an empty page, or no next control left to click), whatever page
+ * count that turns out to be. This exists only to bound a genuinely broken
+ * loop, so it's set generously high and shared by every store rather than
+ * tuned per store to whatever page count happened to be true on the day it
+ * was checked.
+ */
+const MAX_PAGES_SAFETY = 300;
 
 let shared: Browser | undefined;
 
@@ -290,7 +293,12 @@ export const browserAdapter: Adapter = {
       await page.route("**/*.{png,jpg,jpeg,webp,gif,svg,woff,woff2}", (r) => r.abort());
 
       for (const template of store.searchUrls) {
-        for (let p = 1; p <= profile.pages; p++) {
+        // No per-store page count — the loop below already stops itself the
+        // real way (an empty page, or clickNextPage finding no next control
+        // left to press). This is purely a last-resort guard against a
+        // genuinely broken loop that never produces either signal; it
+        // should never be the thing that actually ends a real run.
+        for (let p = 1; p <= MAX_PAGES_SAFETY; p++) {
           try {
             let rows: Extracted[];
             let method: string;

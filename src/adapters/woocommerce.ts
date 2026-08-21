@@ -9,7 +9,11 @@ import type { Adapter, FetchOutcome, RawListing, StoreConfig } from "../core/typ
  */
 const PATHS = ["/wp-json/wc/store/v1/products", "/wp-json/wc/store/products"];
 const PER_PAGE = 100;
-const MAX_PAGES = 20;
+// A backstop, not a target — the loop below already stops for real once a
+// page comes back with fewer than PER_PAGE items. This just bounds a
+// genuinely broken feed that never does, so it's generous rather than tuned
+// to whatever any one store's real page count happens to be today.
+const MAX_PAGES = 100;
 
 interface WooProduct {
   id: number;
