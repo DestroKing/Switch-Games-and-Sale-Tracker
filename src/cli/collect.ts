@@ -19,15 +19,17 @@ const HTTP_CONCURRENCY = 8;
 const BROWSER_CONCURRENCY = 2;
 
 /**
- * No single store may hold the run hostage.
- *
- * The HTTP client retries three times at a 20s timeout with quadratic backoff,
- * and the adapters page up to 20 times. A store that accepts connections and
- * then never answers therefore costs ~20 minutes of silence before the run
- * moves on. That is indistinguishable from a hang, and it is why the store
- * name is now printed before the work rather than after it.
+ * No single store may hold the run hostage. Sized per KIND, not per store —
+ * an HTTP store is bounded tightly regardless of catalogue size, since
+ * http.ts's own per-request timeout/retry budget caps each page it fetches
+ * either way. A BROWSER store has no such luck: it now pages for as long as
+ * the site's own "next" control keeps working, so its budget has to cover a
+ * genuinely large catalogue, not a guess about any one store's page count.
+ * That's still a shared, universal number — never a per-store override that
+ * would need updating the next time some catalogue grows.
  */
-const STORE_DEADLINE_MS = 180_000;
+const HTTP_DEADLINE_MS = 180_000;
+const BROWSER_DEADLINE_MS = 600_000;
 
 function withDeadline<T>(work: Promise<T>, ms: number, label: string): Promise<T> {
   let timer: ReturnType<typeof setTimeout>;
@@ -74,7 +76,8 @@ export async function collect(): Promise<void> {
     }
 
     try {
-      const outcome = await withDeadline(adapter.fetch(store), STORE_DEADLINE_MS, store.id);
+      const deadline = store.kind === "BROWSER" ? BROWSER_DEADLINE_MS : HTTP_DEADLINE_MS;
+      const outcome = await withDeadline(adapter.fetch(store), deadline, store.id);
       if (outcome.status === "failed") {
         record(runId, store.id, "failed", 0, Date.now() - started, outcome.reason);
         console.log(`  ${store.id}: FAILED - ${outcome.reason}`);

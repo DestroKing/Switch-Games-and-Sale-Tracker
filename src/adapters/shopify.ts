@@ -21,7 +21,11 @@ interface ShopifyProduct {
 }
 
 const PAGE_SIZE = 250;
-const MAX_PAGES = 20;
+// A backstop, not a target — the loop below already stops for real once a
+// page comes back with fewer than PAGE_SIZE items. This just bounds a
+// genuinely broken feed that never does, so it's generous rather than tuned
+// to whatever any one store's real page count happens to be today.
+const MAX_PAGES = 100;
 
 /**
  * Shopify exposes the entire catalogue as JSON at /products.json with no auth
