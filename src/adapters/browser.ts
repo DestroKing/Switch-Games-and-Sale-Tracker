@@ -315,7 +315,7 @@ export const browserAdapter: Adapter = {
               // when driven by a URL parameter instead.
               const clicked = await clickNextPage(page, profile.nextPageSelectors);
               if (!clicked) break; // reached the last page
-              await page.waitForTimeout(1500);
+              await page.waitForTimeout(800);
               ({ rows, method } = await extract(page, store, profile));
               if (rows.length === 0) await dump(page, `${store.id}-p${p}`);
             } else {
@@ -357,7 +357,13 @@ export const browserAdapter: Adapter = {
           } catch (e) {
             problems.push(`p${p}: ${e instanceof Error ? e.message : String(e)}`);
           }
-          await page.waitForTimeout(2500 + Math.random() * 2500);
+          // Was 2.5-5s, tuned for tiny independent shops where that gap is
+          // free. A real 40+ page category listing pays that cost on every
+          // page — for a headless browser session on a major site (not a
+          // raw HTTP hammering loop), a shorter, still-real gap is enough
+          // courtesy without being the reason a large, correctly-scoped
+          // catalogue can't finish inside its own time budget.
+          await page.waitForTimeout(800 + Math.random() * 800);
         }
       }
     } finally {
