@@ -76,9 +76,20 @@ export async function probe(apply = true): Promise<ProbeResult[]> {
     if (store.enabled && (effectiveKind === "SHOPIFY" || effectiveKind === "WOOCOMMERCE")) {
       const categories = await listCategories(store, effectiveKind);
       if (categories.length > 0) {
-        const shown = categories.slice(0, 20).map((c) => `${c.name} (${c.slug})`).join(", ");
-        const more = categories.length > 20 ? ` … +${categories.length - 20} more` : "";
-        say(`      categories: ${shown}${more}`);
+        // A general retailer can have 100+ categories with the one Switch
+        // category buried alphabetically past the display cap — pssales
+        // alone has 224, nearly all regional Xbox listings. Whatever looks
+        // Switch-related always survives the cap, even if it's the 90th
+        // category, since that's specifically what setting `collections`
+        // in stores.ts needs.
+        const relevant = categories.filter((c) => /nintendo|switch/i.test(c.name) || /nintendo|switch/i.test(c.slug));
+        const rest = categories.filter((c) => !relevant.includes(c));
+        const ordered = [...relevant, ...rest];
+        const cap = Math.max(20, relevant.length);
+        const shown = ordered.slice(0, cap).map((c) => `${c.name} (${c.slug})`).join(", ");
+        const more = ordered.length > cap ? ` … +${ordered.length - cap} more` : "";
+        const flag = relevant.length > 0 ? ` [${relevant.length} look Switch-related]` : "";
+        say(`      categories${flag}: ${shown}${more}`);
       }
     }
   }
