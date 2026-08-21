@@ -143,12 +143,13 @@ function persist(runId: number, store: StoreConfig, listings: readonly RawListin
   const db = getDb();
   const now = nowIso();
 
-  const upsertListing = db.prepare<{ id: number }, [string, string, string, string, string, string, string | null, string, string]>(
-    `INSERT INTO listing (store_id, sku, url, raw_title, platform, region, image_url, first_seen, last_seen)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+  const upsertListing = db.prepare<{ id: number }, [string, string, string, string, string, string, string, string | null, string, string]>(
+    `INSERT INTO listing (store_id, sku, url, raw_title, platform, region, condition, image_url, first_seen, last_seen)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(store_id, sku) DO UPDATE SET
        url = excluded.url, raw_title = excluded.raw_title,
        platform = excluded.platform, region = excluded.region,
+       condition = excluded.condition,
        last_seen = excluded.last_seen
      RETURNING id`,
   );
@@ -163,7 +164,7 @@ function persist(runId: number, store: StoreConfig, listings: readonly RawListin
     let count = 0;
     for (const l of rows) {
       const row = upsertListing.get(
-        store.id, l.sku, l.url, l.title, l.platform, l.region,
+        store.id, l.sku, l.url, l.title, l.platform, l.region, l.condition,
         l.imageUrl ?? null, now, now,
       );
       if (!row) continue;

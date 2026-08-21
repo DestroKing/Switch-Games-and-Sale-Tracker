@@ -46,6 +46,7 @@ CREATE TABLE IF NOT EXISTS listing (
   raw_title   TEXT NOT NULL,
   platform    TEXT NOT NULL,
   region      TEXT NOT NULL,
+  condition   TEXT NOT NULL DEFAULT 'NEW',
   image_url   TEXT,
   first_seen  TEXT NOT NULL,
   last_seen   TEXT NOT NULL,
@@ -98,11 +99,26 @@ CREATE TABLE IF NOT EXISTS run_store (
 
 let db: Database | undefined;
 
+/**
+ * `CREATE TABLE IF NOT EXISTS` only ever applies to a table that doesn't
+ * exist yet — a database file from before the `condition` column existed
+ * keeps missing it forever otherwise. Guarded by PRAGMA table_info rather
+ * than a bare ALTER TABLE, since re-running it on a database that already
+ * has the column would throw "duplicate column name".
+ */
+function migrate(handle: Database): void {
+  const cols = handle.query<{ name: string }, []>(`PRAGMA table_info(listing)`).all();
+  if (!cols.some((c) => c.name === "condition")) {
+    handle.exec(`ALTER TABLE listing ADD COLUMN condition TEXT NOT NULL DEFAULT 'NEW'`);
+  }
+}
+
 export function getDb(): Database {
   if (db) return db;
   mkdirSync(dirname(DB_PATH), { recursive: true });
   db = new Database(DB_PATH, { create: true });
   db.exec(SCHEMA);
+  migrate(db);
   return db;
 }
 

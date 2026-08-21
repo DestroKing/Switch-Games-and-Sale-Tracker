@@ -21,6 +21,9 @@ export type Platform = "SWITCH" | "SWITCH2" | "UNKNOWN";
  */
 export type Region = "IN" | "ASIA_EN" | "ASIA_ZH" | "JP" | "US" | "EU" | "UNKNOWN";
 
+/** Inferred per-listing from the store's own text, not asserted per store — see inferCondition(). */
+export type Condition = "NEW" | "PRE_OWNED";
+
 export type AdapterKind = "SHOPIFY" | "WOOCOMMERCE" | "JSON_API" | "BROWSER" | "MANUAL";
 
 export type Tier = 1 | 2 | 3;
@@ -60,6 +63,7 @@ export interface RawListing {
   readonly inStock: boolean;
   readonly platform: Platform;
   readonly region: Region;
+  readonly condition: Condition;
   readonly imageUrl?: string;
 }
 
