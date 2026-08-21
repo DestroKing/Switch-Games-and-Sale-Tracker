@@ -1,4 +1,4 @@
-import type { Platform, Region } from "./types.ts";
+import type { Condition, Platform, Region } from "./types.ts";
 
 /* ------------------------------------------------------------------ prices */
 
@@ -212,6 +212,36 @@ export function inferRegion(title: string, storeDefault: Region): Region {
     if (pattern.test(title)) return region;
   }
   return storeDefault;
+}
+
+/* -------------------------------------------------------------- condition */
+
+/**
+ * Real Indian retail categories say this outright — nistore's own Store API
+ * returns a category literally named "Pre-Owned Games" on the listings that
+ * belong to it, which lands in `context` the same way any other category
+ * name does. Detecting it from that real per-listing text (title +
+ * whatever categories/tags the store hands back) is why this needs no
+ * per-store config: a store's own tagging is the source of truth, not a
+ * guess about which of its collections are secondhand.
+ */
+const PRE_OWNED = [
+  /\bpre[- ]?owned\b/i,
+  /\bused\b/i,
+  /\brefurbished\b/i,
+  /\bopen\s*box\b/i,
+  /\bsecond[\s-]?hand\b/i,
+  /\brenewed\b/i,
+];
+
+/**
+ * Absent an explicit marker, a listing is assumed new — that is what a
+ * retail cartridge listing overwhelmingly is, and "UNKNOWN" as the default
+ * would make the filter useless on the vast majority of stores that never
+ * say "new" outright because there's nothing else it could be.
+ */
+export function inferCondition(context: string): Condition {
+  return PRE_OWNED.some((r) => r.test(context)) ? "PRE_OWNED" : "NEW";
 }
 
 /* ------------------------------------------------------------ title clean */

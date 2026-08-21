@@ -1,0 +1,6 @@
+# Windows launchers must keep CRLF. A .bat file with LF-only endings can break
+# `goto` label resolution in cmd.exe, which fails in ways that look like the
+# script is simply being ignored.
+*.bat  text eol=crlf
+*.ps1  text eol=crlf
+*.sh   text eol=lf

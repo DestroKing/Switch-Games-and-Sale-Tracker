@@ -1,6 +1,6 @@
 import { chromium, type Browser, type Page } from "playwright";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { classify, firstRupeePrice, inferRegion, parsePrice } from "../core/parse.ts";
+import { classify, firstRupeePrice, inferCondition, inferRegion, parsePrice } from "../core/parse.ts";
 import type { Adapter, FetchOutcome, Platform, RawListing, Region, StoreConfig } from "../core/types.ts";
 
 /**
@@ -286,6 +286,16 @@ export const browserAdapter: Adapter = {
     const listings: RawListing[] = [];
     const problems: string[] = [];
     const methods = new Set<string>();
+    // Best-effort only — there's no structured "total count" API for a
+    // scraped site the way WooCommerce/Shopify have one. A generic "showing
+    // X of Y" text pattern is common enough to be worth a look, but a store
+    // that doesn't display one isn't a failure, just nothing to compare
+    // against. Set once, from whichever page happens to have it.
+    let claimedTotal: number | undefined;
+    // Raw row count, before the classifier drops consoles/accessories/etc —
+    // the number to compare against claimedTotal, since a store's own
+    // "X results" text counts everything in the category, not just games.
+    let rawSeen = 0;
 
     try {
       const page = await context.newPage();
@@ -324,8 +334,10 @@ export const browserAdapter: Adapter = {
             }
 
             methods.add(method);
+            claimedTotal ??= await readClaimedTotal(page);
             let newOnPage = 0;
             for (const row of rows) {
+              rawSeen++;
               const l = toListing(store, profile, row);
               if (!l) continue;
               listings.push(l);
@@ -343,17 +355,18 @@ export const browserAdapter: Adapter = {
             if (rows.length === 0) break; // a genuinely empty page — unambiguous
 
             // Some sites never return a clean empty page past the real last
-            // one — they keep showing "related"/suggested items instead, so
-            // rows.length alone never reaches 0 (this is why Amazon/Flipkart
-            // ran for the full deadline instead of stopping). Tracking new
-            // *listings* — after classification and dedup, not raw rows —
-            // catches that: once a page contributes nothing not already
-            // seen, twice in a row, there's nothing left worth paying more
-            // requests to find. Twice, not once, so a single page that
-            // happens to be all duplicates doesn't end a run that still had
-            // real pages ahead of it.
-            staleStreak = newOnPage === 0 ? staleStreak + 1 : 0;
-            if (staleStreak >= 2) break;
+            // one — they keep showing "related"/recommended items instead,
+            // which isn't a hard repeat: it reshuffles a bit page to page, so
+            // newOnPage rarely lands on exactly 0 even once real content ran
+            // out (this is how Flipkart got 276 raw pushes down to only 125
+            // unique — mostly-recycled filler with a sprinkling of "new"
+            // junk kept resetting the old strict check). A page counts as
+            // unproductive if less than 15% of it was actually new, and it
+            // takes four such pages in a row (not two) before giving up —
+            // more tolerance for noise, paid for by the pacing cut earlier.
+            const unproductive = newOnPage === 0 || newOnPage / rows.length < 0.15;
+            staleStreak = unproductive ? staleStreak + 1 : 0;
+            if (staleStreak >= 4) break;
           } catch (e) {
             problems.push(`p${p}: ${e instanceof Error ? e.message : String(e)}`);
           }
@@ -372,18 +385,33 @@ export const browserAdapter: Adapter = {
 
     const unique = dedupe(listings);
 
+    // Best-effort only — a store's own "showing X of Y" text, not a
+    // structured count the way WooCommerce/Shopify have one. Useful as a
+    // rough completeness signal (did paging stop with most of the catalogue
+    // still unseen?) but not authoritative, hence the tolerance below rather
+    // than treating any shortfall as definitive.
+    const completeness =
+      claimedTotal !== undefined
+        ? ` (store's own count reports ~${claimedTotal}, ${rawSeen} raw rows seen across all pages before game-only filtering — best-effort, not a structured total)`
+        : "";
+
     if (unique.length === 0) {
       return {
         status: "failed",
         reason:
           (problems.join("; ") || "page loaded but nothing extracted") +
+          completeness +
           ` — HTML dumped to diagnostics/${store.id}.html; run: bun run src/cli/inspect.ts ${store.id}`,
       };
     }
     const via = `via ${[...methods].join("+")}`;
-    return problems.length
-      ? { status: "partial", listings: unique, reason: `${problems.join("; ")} (${via})` }
-      : { status: "ok", listings: unique };
+    if (problems.length) {
+      return { status: "partial", listings: unique, reason: `${problems.join("; ")} (${via})${completeness}` };
+    }
+    if (claimedTotal !== undefined && rawSeen < claimedTotal * 0.9) {
+      return { status: "partial", listings: unique, reason: `stopped early${completeness} (${via})` };
+    }
+    return { status: "ok", listings: unique };
   },
 };
 
@@ -405,6 +433,27 @@ async function clickNextPage(page: Page, selectors: readonly string[]): Promise<
     }
   }
   return false;
+}
+
+/**
+ * Greps the page's own visible text for a generic "showing X of Y" /
+ * "Y results" style count. Sites phrase this differently and plenty show
+ * none at all — this is a best-effort signal, not a contract, so it's kept
+ * deliberately loose (several patterns, first match wins) rather than tuned
+ * to one store's exact wording.
+ */
+async function readClaimedTotal(page: Page): Promise<number | undefined> {
+  const text = await page.evaluate(() => document.body.innerText).catch(() => "");
+  const patterns = [
+    /of\s+([\d,]+)\s+(?:results?|items?|products?)/i,
+    /([\d,]+)\s+(?:results?|items?|products?)\s+found/i,
+    /showing[^.\n]*?of\s+([\d,]+)/i,
+  ];
+  for (const re of patterns) {
+    const n = Number(re.exec(text)?.[1]?.replace(/,/g, ""));
+    if (Number.isFinite(n) && n > 0) return n;
+  }
+  return undefined;
 }
 
 async function scrapePage(
@@ -639,6 +688,7 @@ function toListing(store: StoreConfig, profile: StoreProfile, r: Extracted): Raw
     inStock: r.inStock,
     platform,
     region: inferRegion(r.title, profile.defaultRegion),
+    condition: inferCondition(r.title),
   };
 }
 

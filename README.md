@@ -1,91 +1,146 @@
 # switch-tracker
 
 Local price tracker for Nintendo Switch / Switch 2 **physical cartridges**
-across Indian retailers, plus Play-Asia for import comparison. Bun +
-TypeScript + SQLite, Playwright for stores that block plain HTTP requests.
-Runs entirely on your machine.
+across Indian retailers, plus Play-Asia for import comparison. Python +
+FastAPI + SQLite, with Playwright for the stores that publish no product feed.
+Runs entirely on your own machine — nothing is uploaded anywhere.
 
-## Setup
+Everything is driven from one dashboard. There is no menu and nothing to
+hand-edit.
 
-**Windows:** double-click `switch-tracker.bat`. First run installs Bun +
-Chromium, then opens the menu.
+---
 
-Manual: `powershell -ExecutionPolicy Bypass -File .\setup.ps1`
+## Getting started (Windows)
 
-Before extracting a zip: right-click → Properties → **Unblock** (Windows
-blocks scripts from downloaded files otherwise). Avoid OneDrive-synced
-folders — the sync client locks the SQLite file mid-write.
+1. Put this folder somewhere sensible — **not inside OneDrive**. The sync
+   client locks the database mid-write and can corrupt it. `C:\switch-tracker\`
+   is fine. (The app warns you if it detects this.)
+2. Right-click `START.bat` → **Properties** → tick **Unblock** → OK.
+   Windows blocks scripts that came from another machine.
+3. Double-click **`START.bat`**.
 
-**macOS / Linux / WSL:** `chmod +x setup.sh && ./setup.sh && bun run menu`
+The first run installs everything — Python, the packages, and a browser engine
+— which takes 10–20 minutes and about 1 GB of downloads. Every run after that
+goes straight to the dashboard.
 
-## The menu
+Nothing needs administrator rights. It all installs into your own user folder.
 
-```
-1  Check stores        2  Collect prices      3  Open dashboard
-4  Fix a broken store  5  Update FX rate       6  Schedule twice daily
-7  Reset corrections   0  Quit
-```
+**macOS / Linux:** `uv sync && uv run playwright install chromium && uv run python -m switch_tracker`
 
-The bracketed number is the suggested next step; Enter takes it.
+---
 
-| # | Command | Does |
-|---|---|---|
-| 1 | `bun run probe` | Detects each store's real API, writes `stores.local.json` |
-| 2 | `bun run collect` | Fetches and saves prices — append-only, builds history |
-| 3 | `bun run dashboard` | Opens `localhost:4173` |
-| 4 | — | Guided browser walkthrough to fix a store returning nothing |
-| 5 | `bun run fx` | Refreshes the USD→INR rate |
-| 7 | — | Wipes `stores.local.json` |
+## The dashboard
 
-No hand-editing config — options 1 and 4 write their own corrections. Delete
-`stores.local.json` (or run option 7) to reset everything.
+Opens at `http://127.0.0.1:4173`, reachable only from this machine.
 
-## Dashboard
+| Button | What it does |
+|---|---|
+| **Collect prices** | Fetches current prices from every enabled store and appends them to the history |
+| **Check stores** | Detects what each store's website actually runs on and corrects the config itself |
+| **Update exchange rate** | Refreshes the USD→INR rate from the ECB |
+| **Fix a broken store** | Opens a store in a real browser window so you can click on the parts it failed to read |
+| **Reset corrections** | Undoes everything "Check stores" wrote |
 
-`localhost:4173`, local only. Three sections:
+Each button starts a separate background process and returns immediately. Live
+progress streams into the console panel underneath.
 
-- **Collector strip** — rows found per store, last run. A silent zero is the
+**You can close the tab.** The work is happening in another process, so
+closing, refreshing, or even restarting the app does not stop a collection —
+reopening picks the progress back up where it left off.
+
+Below the buttons:
+
+- **Collector** — one tile per store from the last run: how many listings it
+  found, and *why* if it found none. A store silently returning zero is the
   failure that otherwise hides for weeks.
-- **Moved since last run** — price changes, once there's a second run to
-  compare against.
-- **All listings** — search/filter by console, store, region, stock. Sorts
-  against the full table in SQL, not just whatever's loaded on screen.
+- **Moved since last run** — price changes, once there are two runs to compare.
+  When many listings in the same currency move by the same amount on the same
+  day, that is flagged as the rupee moving rather than a sale.
+- **All listings** — search and filter by console, store, region, condition and
+  stock. Sorting runs in the database across every row, not just the ones on
+  screen — "cheapest first" over a loaded page is a different, wrong answer.
 
-Covers what the configured stores actually sell, not every game in
-existence. Cartridges aren't matched across stores yet, so the same game at
-four stores is four separate rows.
+---
 
-## Fixing a broken store
+## Fixing a store that returns nothing
 
-```powershell
-bun run src/cli/inspect.ts <store>
-```
+Some stores have no product feed, so the app reads their pages the way a
+browser does. When one changes its layout, it starts returning nothing.
 
-Opens the real page. **Alt+click** the product card, then its title, price,
-and link, in that order — each click is scored and saved straight to
-`profiles.local.json`, nothing to paste into code by hand. Plain clicks
-still behave normally, so cookie banners etc. can be dismissed. A store that
-returns nothing also dumps `diagnostics/<store>.html` for a look.
+Pick it from the **Fix a broken store** dropdown. A real browser window opens
+on that store's page. **Alt+click** the product card, then its title, price,
+and link, in that order. Each click is scored against the real page and saved
+straight to your settings — there is nothing to copy or paste.
 
-## Scheduling
+Plain clicks still work normally, so you can dismiss cookie banners first.
 
-**Windows:**
+---
 
-```powershell
-powershell -ExecutionPolicy Bypass -File .\schedule-task.ps1
-```
+## Where your data lives
 
-Registers 07:30/21:30 daily via Task Scheduler, logs to `collect.log`.
+Everything writable is under `%LOCALAPPDATA%\switch-tracker\`:
 
-```powershell
-Start-ScheduledTask -TaskName switch-tracker
-Get-ScheduledTaskInfo -TaskName switch-tracker
-Unregister-ScheduledTask -TaskName switch-tracker -Confirm:$false
-```
+| File | What |
+|---|---|
+| `tracker.db` | The price history. This is the valuable one — back it up |
+| `stores.local.json` | Corrections written by "Check stores" |
+| `profiles.local.json` | Selectors saved by "Fix a broken store" |
+| `diagnostics/` | Page dumps from stores that returned nothing |
 
-**macOS / Linux (cron)** — use bun's absolute path, cron doesn't read your
-shell profile:
+Set `TRACKER_DATA_DIR` to put them somewhere else.
+
+The database is plain SQLite — open it with any SQLite tool.
+
+---
+
+## Building the standalone app
+
+`BUILD-EXE.bat` produces `dist\switch-tracker\`, which runs on a PC with no
+Python and no internet. Copy the **whole folder**; the browser engine lives
+inside it. It is around 900 MB.
+
+Then run `switch-tracker.exe` from inside that folder.
+
+`CHECK.bat` runs the built app's self-check and keeps the window open, which is
+the quickest way to confirm a build works. (Double-clicking the exe directly
+will flash and vanish if it exits — that is Windows closing the console, not a
+crash.)
+
+The app is unsigned, so Windows SmartScreen will warn on first run.
+
+---
+
+## What it does and does not cover
+
+It tracks what the configured stores actually sell, not every game in
+existence. Two things are deliberately not built yet:
+
+- **Matching across stores.** The same cartridge at four shops is four separate
+  rows. Every listing carries a `game_id` that is always empty, waiting for the
+  matcher.
+- **Alerts.** The price history and the currency-move detection are the
+  groundwork; nothing notifies you yet.
+
+Scope is games only. Consoles, Joy-Cons, cases, amiibo, eShop codes, Online
+memberships and repair services are filtered out, as are games for other
+consoles — even on stores that file them all under one category.
+
+---
+
+## Development
 
 ```bash
-30 7,21 * * * cd /path/to/switch-tracker && /home/you/.bun/bin/bun run collect >> collect.log 2>&1
+uv sync                      # dependencies
+uv run pytest                # 336 tests
+uv run ruff check src tests  # lint
+uv run mypy                  # types (strict)
+uv run python -m switch_tracker spike   # packaging self-check
 ```
+
+Design documents are in `docs/`: `python-rewrite-plan.md` (the original spec),
+`python-rewrite-hld.md` (architecture and the options that lost), and
+`python-rewrite-lld.md` (the build plan).
+
+The `src/` tree still contains the original TypeScript implementation. It is
+the behavioural reference for the port and will be removed once the Python
+version has been run against live stores.

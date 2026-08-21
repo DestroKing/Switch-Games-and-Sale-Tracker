@@ -1,5 +1,5 @@
 import { getJson } from "../core/http.ts";
-import { classify, inferRegion, parsePrice } from "../core/parse.ts";
+import { classify, inferCondition, inferRegion, parsePrice } from "../core/parse.ts";
 import type { Adapter, FetchOutcome, RawListing, StoreConfig } from "../core/types.ts";
 
 interface ShopifyVariant {
@@ -102,6 +102,7 @@ function toListing(store: StoreConfig, p: ShopifyProduct): RawListing | undefine
     inStock: variant.available !== false,
     platform,
     region: inferRegion(p.title, "IN"),
+    condition: inferCondition(context),
     ...(p.images?.[0]?.src ? { imageUrl: p.images[0].src } : {}),
   };
 }
