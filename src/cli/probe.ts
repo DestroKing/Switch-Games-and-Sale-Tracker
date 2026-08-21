@@ -1,7 +1,10 @@
+import { writeFileSync } from "node:fs";
 import { activeStores, setOverride, writeOverrides } from "../config/overrides.ts";
 import { adapterFor } from "../adapters/index.ts";
 import { get, getJson } from "../core/http.ts";
 import type { StoreConfig } from "../core/types.ts";
+
+const LOG_PATH = "check-stores.log";
 
 /**
  * What detect() can conclude. Only SHOPIFY and WOOCOMMERCE have a real
@@ -33,14 +36,19 @@ export interface ProbeResult {
  */
 export async function probe(apply = true): Promise<ProbeResult[]> {
   const results: ProbeResult[] = [];
+  const lines: string[] = [];
+  const say = (s = ""): void => {
+    console.log(s);
+    lines.push(s);
+  };
 
-  console.log();
-  console.log(pad("STORE", 22) + pad("EXPECTED", 14) + pad("FOUND", 15) + "");
-  console.log("-".repeat(72));
+  say();
+  say(pad("STORE", 22) + pad("EXPECTED", 14) + pad("FOUND", 15) + "");
+  say("-".repeat(72));
 
   for (const store of activeStores()) {
     if (store.kind === "BROWSER" || store.kind === "MANUAL") {
-      console.log(pad(store.id, 22) + pad(store.kind, 14) + "needs a real browser");
+      say(pad(store.id, 22) + pad(store.kind, 14) + "needs a real browser");
       continue;
     }
     const detected = await detect(store);
@@ -58,7 +66,7 @@ export async function probe(apply = true): Promise<ProbeResult[]> {
             : detected === "SHOPIFY_LOCKED"
               ? "will disable — /products.json blocked, needs a browser adapter"
               : "will disable — no known API, needs a browser adapter";
-    console.log(pad(store.id, 22) + pad(store.kind, 14) + pad(detected, 15) + mark);
+    say(pad(store.id, 22) + pad(store.kind, 14) + pad(detected, 15) + mark);
 
     // Print what categories/collections this store actually has, right here,
     // so scoping a mixed-catalogue store (a general retailer that also sells
@@ -70,7 +78,7 @@ export async function probe(apply = true): Promise<ProbeResult[]> {
       if (categories.length > 0) {
         const shown = categories.slice(0, 20).map((c) => `${c.name} (${c.slug})`).join(", ");
         const more = categories.length > 20 ? ` … +${categories.length - 20} more` : "";
-        console.log(`      categories: ${shown}${more}`);
+        say(`      categories: ${shown}${more}`);
       }
     }
   }
@@ -97,14 +105,20 @@ export async function probe(apply = true): Promise<ProbeResult[]> {
         disabled++;
       }
     }
-    console.log();
+    say();
     if (fixed || disabled) {
-      console.log(`  Applied: ${fixed} corrected, ${disabled} disabled.`);
-      console.log(`  Saved to stores.local.json — delete that file to undo everything.`);
+      say(`  Applied: ${fixed} corrected, ${disabled} disabled.`);
+      say(`  Saved to stores.local.json — delete that file to undo everything.`);
     } else {
-      console.log(`  Everything already matches. Nothing to change.`);
+      say(`  Everything already matches. Nothing to change.`);
     }
   }
+
+  // Written after every run — the printed table is long enough (categories
+  // included) that scrolling the terminal buffer to copy it is worse than
+  // just opening a file.
+  writeFileSync(LOG_PATH, lines.join("\n") + "\n");
+  console.log(`  Full output saved to ${LOG_PATH}`);
 
   return results;
 }
