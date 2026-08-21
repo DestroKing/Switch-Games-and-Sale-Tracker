@@ -98,13 +98,27 @@ const SWITCH = [
   /\bnintendo\b/i,
 ];
 
-/** Strong signals that something IS a game, used to rescue terse titles. */
-const GAME_WORDS = [
-  /\b(game|games)\b/i,
-  /\b(cartridge|cart|card)\b/i,
-  /\b(standard|deluxe|ultimate|collector|special|limited)\s*edition\b/i,
-  /\bphysical\b/i,
-  /\b(video\s*game)\b/i,
+/**
+ * An explicit marker for a DIFFERENT console must beat `storeHint` — a store
+ * hint means "assume Switch when the text says nothing about console," not
+ * "assume Switch even when the text names a different one." Without this,
+ * any store with `platformHint: "SWITCH"` that also happens to sell other
+ * consoles (a general retailer, not a Switch-only shop) leaks every PS4/PS5/
+ * Xbox title through as a false "Switch" match.
+ */
+const OTHER_CONSOLE = [
+  /\bplay\s*station\s*[1-5]?\b/i,
+  /\bps[1-5]\b/i,
+  /\bps\s*vita\b/i,
+  /\bxbox\b/i,
+  /\bwii\s*u\b/i,
+  /\bwii\b/i,
+  /\b3ds\b/i,
+  /\bnintendo\s*ds\b/i,
+  /\bgame\s*boy\b/i,
+  /\bgamecube\b/i,
+  /\bsteam\s*key\b/i,
+  /\b(pc|windows)\s*(game|version)\b/i,
 ];
 
 /**
@@ -135,9 +149,12 @@ export function classify(context: string, storeHint?: Platform): Classification 
 function platformOf(text: string, hint?: Platform): Platform {
   if (SWITCH2.some((r) => r.test(text))) return "SWITCH2";
   if (SWITCH.some((r) => r.test(text))) return "SWITCH";
-  // No marker in the text. Trust the store's context if it has one — a title
-  // pulled from a Switch-games collection is a Switch game.
-  if (hint && GAME_WORDS.some((r) => r.test(text))) return hint;
+  // Text names a different console outright. This must win over the store's
+  // hint, or a multi-platform retailer with platformHint: "SWITCH" leaks
+  // every PS4/Xbox/etc. title through as a false Switch match.
+  if (OTHER_CONSOLE.some((r) => r.test(text))) return "UNKNOWN";
+  // No console named at all. Trust the store's context if it has one — a
+  // title pulled from a Switch-games collection is a Switch game.
   return hint ?? "UNKNOWN";
 }
 
