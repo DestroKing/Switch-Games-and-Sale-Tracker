@@ -16,7 +16,12 @@ import { refreshRates, toInr } from "../fx/rates.ts";
  * sized for what it actually costs.
  */
 const HTTP_CONCURRENCY = 8;
-const BROWSER_CONCURRENCY = 2;
+// Was 2 — with only 2 slots, two large catalogues (Amazon, Flipkart) landing
+// in both at once left every other browser store waiting for the entire
+// run, not just running a bit later. Raised enough that a couple of large
+// stores can't fully block the rest, still capped well below the browser
+// store count so it's not opening a real Chromium context per store at once.
+const BROWSER_CONCURRENCY = 4;
 
 /**
  * No single store may hold the run hostage. Sized per KIND, not per store —

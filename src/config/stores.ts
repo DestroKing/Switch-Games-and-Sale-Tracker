@@ -80,9 +80,12 @@ export const STORES: readonly StoreConfig[] = [
     tier: 1,
     enabled: true,
     platformHint: "SWITCH",
+    // A real browse-node category listing, not a keyword search — covers
+    // both Switch and Switch 2 in one URL (confirmed ~47 pages), more
+    // precise and more complete than the old "k=nintendo+switch+games"
+    // free-text search.
     searchUrls: [
-      "https://www.amazon.in/s?k=nintendo+switch+games&i=videogames&page={p}",
-      "https://www.amazon.in/s?k=nintendo+switch+2+games&i=videogames&page={p}",
+      "https://www.amazon.in/s?i=videogames&rh=n%3A976460031%2Cn%3A13995115031%2Cn%3A13995151031&dc&ds=v1%3AiZuYA9QV0eVzZbIDkLndPnQhVZrwc%2BriiE0a8ssyvMY&qid=1787339967&rnid=13995115031&ref=sr_nr_n_1&page={p}",
     ],
     note: "Real bot detection. Cards keyed on data-component-type, which is stabler than Amazon's class names.",
   },
@@ -95,9 +98,10 @@ export const STORES: readonly StoreConfig[] = [
     tier: 1,
     enabled: true,
     platformHint: "SWITCH",
+    // A real category page with platform facets applied (Switch + Switch 2
+    // both, in one URL, confirmed ~7 pages) instead of a free-text search.
     searchUrls: [
-      "https://www.flipkart.com/search?q=nintendo%20switch%20games&page={p}",
-      "https://www.flipkart.com/search?q=nintendo%20switch%202%20games&page={p}",
+      "https://www.flipkart.com/gaming/games/physical-game/pr?sid=4rr%2Cfa6%2C32v&marketplace=FLIPKART&p%5B%5D=facets.platform%255B%255D%3DSwitch&p%5B%5D=facets.platform%255B%255D%3DSwitch%2B2&page={p}",
     ],
     note: "Obfuscated, rotating class names. Adapter prefers __INITIAL_STATE__ over CSS for this reason.",
   },
