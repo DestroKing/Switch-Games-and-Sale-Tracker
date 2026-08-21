@@ -22,6 +22,11 @@ export interface HttpResult {
   readonly ok: boolean;
   readonly status: number;
   readonly body: string;
+  /** Lower-cased header names — e.g. WooCommerce's own `x-wp-total` count,
+   * which is how a store's real product count can be checked against what
+   * was actually collected instead of just trusting the page loop stopped
+   * in the right place. */
+  readonly headers: Readonly<Record<string, string>>;
 }
 
 function sleep(ms: number): Promise<void> {
@@ -41,7 +46,11 @@ async function once(url: string, headers: Record<string, string>): Promise<HttpR
     signal: AbortSignal.timeout(TIMEOUT_MS),
     redirect: "follow",
   });
-  return { ok: res.ok, status: res.status, body: await res.text() };
+  const responseHeaders: Record<string, string> = {};
+  res.headers.forEach((value, key) => {
+    responseHeaders[key.toLowerCase()] = value;
+  });
+  return { ok: res.ok, status: res.status, body: await res.text(), headers: responseHeaders };
 }
 
 export function get(url: string, headers: Record<string, string> = {}): Promise<HttpResult> {
@@ -66,7 +75,7 @@ export function get(url: string, headers: Record<string, string> = {}): Promise<
         await sleep(1500 * attempt * attempt);
       }
     }
-    return { ok: false, status: 0, body: lastErr };
+    return { ok: false, status: 0, body: lastErr, headers: {} };
   });
 
   hostQueues.set(host, task.catch(() => undefined));

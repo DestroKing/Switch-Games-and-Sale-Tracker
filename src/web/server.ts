@@ -125,6 +125,7 @@ interface ListingQuery {
   platform: string;
   region: string;
   store: string;
+  condition: string;
   inStockOnly: boolean;
   sort: SortKey;
   dir: "asc" | "desc";
@@ -140,6 +141,7 @@ function parseQuery(p: URLSearchParams): ListingQuery {
     platform: p.get("platform") ?? "",
     region: p.get("region") ?? "",
     store: p.get("store") ?? "",
+    condition: p.get("condition") ?? "",
     inStockOnly: p.get("inStock") === "1",
     // Whitelisted rather than interpolated — these land in SQL text.
     sort: sort && sort in SORT_COLUMNS ? (sort as SortKey) : "price",
@@ -169,6 +171,10 @@ function listings(opt: ListingQuery) {
     where.push("l.store_id = ?");
     params.push(opt.store);
   }
+  if (opt.condition) {
+    where.push("l.condition = ?");
+    params.push(opt.condition);
+  }
   if (opt.inStockOnly) {
     where.push("latest.in_stock = 1");
   }
@@ -195,7 +201,7 @@ function listings(opt: ListingQuery) {
 
   const rows = db
     .query(
-      `${cte} SELECT l.id, l.raw_title, l.url, l.region, l.platform, s.name AS store,
+      `${cte} SELECT l.id, l.raw_title, l.url, l.region, l.platform, l.condition, s.name AS store,
               latest.inr_price, latest.native_price, latest.native_currency,
               latest.in_stock, latest.captured_at
        ${from}
@@ -223,6 +229,9 @@ function facets() {
       .all(),
     regions: db
       .query(`SELECT region, COUNT(*) AS n FROM listing GROUP BY region ORDER BY n DESC`)
+      .all(),
+    conditions: db
+      .query(`SELECT condition, COUNT(*) AS n FROM listing GROUP BY condition ORDER BY n DESC`)
       .all(),
   };
 }
