@@ -33,17 +33,29 @@ export const wooAdapter: Adapter = {
     const base = await resolvePath(store);
     if (!base) return { status: "failed", reason: "no Store API at either known path" };
 
-    const listings: RawListing[] = [];
-    for (let page = 1; page <= MAX_PAGES; page++) {
-      const url = `${store.baseUrl}${base}?per_page=${PER_PAGE}&page=${page}`;
-      const products = await getJson<WooProduct[]>(url);
-      if (!products || products.length === 0) break;
+    // Without a category restriction this walks the entire catalogue, which
+    // is wrong for a general retailer that also sells other consoles or
+    // non-game merchandise — the classifier catches most of that, but a
+    // store with a real "Nintendo Switch" category should just be scoped to
+    // it. Slugs come from GET /wp-json/wc/store/v1/products/categories,
+    // which "Check stores" now prints per store.
+    const categoryQueries = store.collections?.length
+      ? store.collections.map((slug) => `&category=${encodeURIComponent(slug)}`)
+      : [""];
 
-      for (const p of products) {
-        const listing = toListing(store, p);
-        if (listing) listings.push(listing);
+    const listings: RawListing[] = [];
+    for (const categoryQuery of categoryQueries) {
+      for (let page = 1; page <= MAX_PAGES; page++) {
+        const url = `${store.baseUrl}${base}?per_page=${PER_PAGE}&page=${page}${categoryQuery}`;
+        const products = await getJson<WooProduct[]>(url);
+        if (!products || products.length === 0) break;
+
+        for (const p of products) {
+          const listing = toListing(store, p);
+          if (listing) listings.push(listing);
+        }
+        if (products.length < PER_PAGE) break;
       }
-      if (products.length < PER_PAGE) break;
     }
 
     return listings.length > 0

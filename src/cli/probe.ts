@@ -1,6 +1,6 @@
 import { activeStores, setOverride, writeOverrides } from "../config/overrides.ts";
 import { adapterFor } from "../adapters/index.ts";
-import { get } from "../core/http.ts";
+import { get, getJson } from "../core/http.ts";
 import type { StoreConfig } from "../core/types.ts";
 
 /**
@@ -59,6 +59,20 @@ export async function probe(apply = true): Promise<ProbeResult[]> {
               ? "will disable — /products.json blocked, needs a browser adapter"
               : "will disable — no known API, needs a browser adapter";
     console.log(pad(store.id, 22) + pad(store.kind, 14) + pad(detected, 15) + mark);
+
+    // Print what categories/collections this store actually has, right here,
+    // so scoping a mixed-catalogue store (a general retailer that also sells
+    // other consoles or non-game merchandise) to just its Switch section is a
+    // copy-paste into `collections` in stores.ts instead of a manual API trip.
+    const effectiveKind = detected === "SHOPIFY" || detected === "WOOCOMMERCE" ? detected : store.kind;
+    if (store.enabled && (effectiveKind === "SHOPIFY" || effectiveKind === "WOOCOMMERCE")) {
+      const categories = await listCategories(store, effectiveKind);
+      if (categories.length > 0) {
+        const shown = categories.slice(0, 20).map((c) => `${c.name} (${c.slug})`).join(", ");
+        const more = categories.length > 20 ? ` … +${categories.length - 20} more` : "";
+        console.log(`      categories: ${shown}${more}`);
+      }
+    }
   }
 
   if (apply) {
@@ -122,6 +136,28 @@ async function detect(store: StoreConfig): Promise<Finding> {
   if (!home?.ok) return "UNREACHABLE";
   if (/cdn\.shopify\.com|Shopify\.shop/i.test(home.body)) return "SHOPIFY_LOCKED";
   return "UNKNOWN_HTML";
+}
+
+interface Category {
+  readonly name: string;
+  readonly slug: string;
+}
+
+async function listCategories(store: StoreConfig, kind: "SHOPIFY" | "WOOCOMMERCE"): Promise<Category[]> {
+  try {
+    if (kind === "WOOCOMMERCE") {
+      const cats = await getJson<{ name: string; slug: string }[]>(
+        `${store.baseUrl}/wp-json/wc/store/v1/products/categories?per_page=100`,
+      );
+      return (cats ?? []).map((c) => ({ name: c.name, slug: c.slug }));
+    }
+    const data = await getJson<{ collections?: { title: string; handle: string }[] }>(
+      `${store.baseUrl}/collections.json?limit=250`,
+    );
+    return (data?.collections ?? []).map((c) => ({ name: c.title, slug: c.handle }));
+  } catch {
+    return [];
+  }
 }
 
 async function hits(url: string, needle: string): Promise<boolean> {
