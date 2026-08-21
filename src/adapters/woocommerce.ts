@@ -39,9 +39,18 @@ export const wooAdapter: Adapter = {
     // store with a real "Nintendo Switch" category should just be scoped to
     // it. Slugs come from GET /wp-json/wc/store/v1/products/categories,
     // which "Check stores" now prints per store.
-    const categoryQueries = store.collections?.length
-      ? store.collections.map((slug) => `&category=${encodeURIComponent(slug)}`)
-      : [""];
+    //
+    // Filtering by the slug directly works on some installs (nistore,
+    // nekavo) and silently matches nothing on others (hgworld — the term
+    // was real, in product_cat, with 213 products, and `?category=<slug>`
+    // still returned zero). Resolving to the numeric term id first via the
+    // core WP REST API and filtering by that instead is the version that
+    // works everywhere; falling back to the raw slug only if that lookup
+    // itself comes back empty (e.g. product_cat isn't exposed there).
+    const categoryValues = store.collections?.length
+      ? await Promise.all(store.collections.map((slug) => resolveCategoryId(store, slug)))
+      : [undefined];
+    const categoryQueries = categoryValues.map((v) => (v ? `&category=${encodeURIComponent(v)}` : ""));
 
     const listings: RawListing[] = [];
     for (const categoryQuery of categoryQueries) {
@@ -63,6 +72,18 @@ export const wooAdapter: Adapter = {
       : { status: "failed", reason: "Store API reachable but returned no Switch products" };
   },
 };
+
+async function resolveCategoryId(store: StoreConfig, slug: string): Promise<string> {
+  try {
+    const terms = await getJson<{ id: number }[]>(
+      `${store.baseUrl}/wp-json/wp/v2/product_cat?slug=${encodeURIComponent(slug)}`,
+    );
+    const id = terms?.[0]?.id;
+    return id != null ? String(id) : slug;
+  } catch {
+    return slug;
+  }
+}
 
 async function resolvePath(store: StoreConfig): Promise<string | undefined> {
   for (const path of PATHS) {

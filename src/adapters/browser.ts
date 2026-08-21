@@ -304,7 +304,7 @@ export const browserAdapter: Adapter = {
               if (!clicked) break; // reached the last page
               await page.waitForTimeout(1500);
               ({ rows, method } = await extract(page, store, profile));
-              await dump(page, `${store.id}-p${p}`);
+              if (rows.length === 0) await dump(page, `${store.id}-p${p}`);
             } else {
               const url = template.replace("{p}", String(p));
               ({ rows, method } = await scrapePage(page, store, profile, url, p));
@@ -386,14 +386,17 @@ async function scrapePage(
 
   const result = await extract(page, store, profile);
 
-  // Always saved, not just on total zero-row failure — a wrong price or
-  // wrong title is invisible from a row count alone, and needs the same
-  // real markup a zero-row failure already got dumped, to fix instead of
-  // guess. Page 1 keeps the plain, unsuffixed filename other tooling and
-  // conversations already reference; later pages get their own file rather
-  // than overwriting it.
-  const suffix = pageNum > 1 ? `-p${pageNum}` : "";
-  await dump(page, `${store.id}${suffix}`);
+  // Only on a genuine zero-row failure — dumping every page on every run
+  // regardless of outcome (a brief experiment) meant a full-page screenshot
+  // on every successful page too, which is real overhead for no benefit
+  // once a store is actually working. A wrong price/title on an otherwise
+  // successful page still won't leave a diagnostic file; that needs a
+  // targeted look (inspect.ts, or ask for a fresh dump) rather than an
+  // always-on cost paid by every store on every run.
+  if (result.rows.length === 0) {
+    const suffix = pageNum > 1 ? `-p${pageNum}` : "";
+    await dump(page, `${store.id}${suffix}`);
+  }
 
   return result;
 }
@@ -526,7 +529,15 @@ async function fromSelectors(page: Page, profile: StoreProfile): Promise<Extract
             }
             return n.getAttribute("href") ?? "";
           })(),
+          // `:has-text('...')` is Playwright locator syntax, not real CSS —
+          // native querySelector() throws on it (caught below, silently
+          // returning false), which is why "in stock only" never actually
+          // removed anything: every out-of-stock check quietly failed.
+          // Emulated here as a plain substring match against the card's own
+          // text instead, so it isn't required to be real CSS.
           oos: (cfg.outOfStockSelectors ?? []).some((s) => {
+            const textMatch = /^:has-text\((['"])(.+)\1\)$/.exec(s);
+            if (textMatch) return (n.textContent ?? "").includes(textMatch[2] ?? "");
             try {
               return Boolean(n.querySelector(s));
             } catch {

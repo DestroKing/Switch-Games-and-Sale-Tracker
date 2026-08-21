@@ -55,14 +55,19 @@ export const STORES: readonly StoreConfig[] = [
   {
     id: "designinfo", name: "DesignInfo", baseUrl: "https://www.designinfo.in", kind: "SHOPIFY",
     currency: "INR", tier: 2, enabled: true,
-    // No platformHint on purpose: this is a general multi-brand electronics
-    // retailer, not Switch-only, and it has no separate games/accessories
-    // category to scope with (confirmed — the console category has no
-    // filters). Relying on classify() alone to require an explicit "Switch"/
-    // "Nintendo" mention is the safe default here — setting a hint on an
-    // unscoped mixed catalogue is exactly what caused the false positives on
-    // nekavo/gameloot/hgworld before those got scoped.
-    note: "No games/accessories split available — unscoped, relies entirely on classification. `kind` is a guess; correct via `bun run probe`.",
+    // Not a games-only category (it's named for consoles, and probably
+    // mixes in accessories too) but still scoped to it — this is a 570+
+    // category camera/audio/electronics store, so even an imprecise
+    // Nintendo-only category cuts the fetch down enormously and gives
+    // classify() a far safer job: separating games from consoles/
+    // accessories within an already-Nintendo-scoped set, not fishing them
+    // out of the entire unrelated catalogue.
+    collections: ["nintendo-gaming-consoles"],
+    // No platformHint on purpose: even within this category, it's still not
+    // guaranteed everything is Switch (could be other Nintendo hardware) —
+    // requiring an explicit "Switch" mention is the safe default, the same
+    // reasoning that applies to the rest of this unscoped, multi-brand site.
+    note: "Real kind is WooCommerce, not Shopify — confirmed via probe, corrects itself into stores.local.json. Scoped to its one Nintendo-related category; no separate games-only split exists on this site.",
   },
 
   // ---- Tier 1: browser automation, run last. ----
