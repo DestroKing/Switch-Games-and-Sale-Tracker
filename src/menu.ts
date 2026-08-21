@@ -4,6 +4,7 @@ import { collect } from "./cli/collect.ts";
 import { probe, resetOverrides } from "./cli/probe.ts";
 import { refreshRates } from "./fx/rates.ts";
 import { getDb } from "./core/db.ts";
+import { hasBrowserProfile } from "./adapters/browser.ts";
 
 /**
  * One screen instead of six commands.
@@ -97,8 +98,16 @@ function draw(s: State): string {
 }
 
 async function fixStore(): Promise<void> {
-  const stores = activeStores().filter((s) => s.kind === "BROWSER");
+  // Only stores with both a browser profile and search URLs are actually
+  // inspectable — a stale stores.local.json entry (from an older probe bug)
+  // could still claim kind BROWSER for a store inspect.ts can't do anything
+  // with, which is how this menu item used to look like it did nothing.
+  const stores = activeStores().filter((s) => s.kind === "BROWSER" && hasBrowserProfile(s.id) && s.searchUrls?.length);
   console.log("\n  Which store returned nothing?\n");
+  if (stores.length === 0) {
+    console.log("  None of the browser stores are set up to inspect right now.");
+    return;
+  }
   stores.forEach((s, i) => {
     const dumped = existsSync(`diagnostics/${s.id}.html`);
     console.log(`  ${i + 1}  ${s.name}${dumped ? "   (diagnostics saved — this one failed)" : ""}`);

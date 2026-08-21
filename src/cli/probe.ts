@@ -1,16 +1,30 @@
-import { STORES } from "../config/stores.ts";
-import { setOverride, writeOverrides } from "../config/overrides.ts";
+import { activeStores, setOverride, writeOverrides } from "../config/overrides.ts";
+import { adapterFor } from "../adapters/index.ts";
 import { get } from "../core/http.ts";
-import type { AdapterKind, StoreConfig } from "../core/types.ts";
+import type { StoreConfig } from "../core/types.ts";
+
+/**
+ * What detect() can conclude. Only SHOPIFY and WOOCOMMERCE have a real
+ * adapter — everything else describes a page probe saw but can't act on by
+ * itself, so probe must never write one of these into stores.local.json as
+ * if it were an adapter kind.
+ */
+type Finding = "SHOPIFY" | "WOOCOMMERCE" | "UNREACHABLE" | "SHOPIFY_LOCKED" | "UNKNOWN_HTML";
 
 export interface ProbeResult {
   store: StoreConfig;
-  detected: AdapterKind | "UNREACHABLE";
+  detected: Finding;
   changed: boolean;
 }
 
 /**
  * Probe asks one question per store: what does this site actually speak?
+ *
+ * It compares against `activeStores()` — the shipped defaults plus whatever
+ * stores.local.json already corrected — not the raw shipped list. Comparing
+ * against the shipped list meant a store that was corrected on run 1 reported
+ * "will switch" on every run after that, forever, because the comparison
+ * baseline never moved.
  *
  * With `apply`, the answers are written to stores.local.json rather than
  * printed for you to transcribe. Transcribing a sixteen-row table by hand is
@@ -24,7 +38,7 @@ export async function probe(apply = true): Promise<ProbeResult[]> {
   console.log(pad("STORE", 22) + pad("EXPECTED", 14) + pad("FOUND", 15) + "");
   console.log("-".repeat(72));
 
-  for (const store of STORES) {
+  for (const store of activeStores()) {
     if (store.kind === "BROWSER" || store.kind === "MANUAL") {
       console.log(pad(store.id, 22) + pad(store.kind, 14) + "needs a real browser");
       continue;
@@ -33,7 +47,17 @@ export async function probe(apply = true): Promise<ProbeResult[]> {
     const changed = detected !== store.kind;
     results.push({ store, detected, changed });
 
-    const mark = !changed ? "ok" : detected === "UNREACHABLE" ? "will disable" : "will switch";
+    const mark = !changed
+      ? "ok"
+      : detected === "SHOPIFY" || detected === "WOOCOMMERCE"
+        ? "will switch"
+        : !store.enabled
+          ? "already disabled"
+          : detected === "UNREACHABLE"
+            ? "will disable"
+            : detected === "SHOPIFY_LOCKED"
+              ? "will disable — /products.json blocked, needs a browser adapter"
+              : "will disable — no known API, needs a browser adapter";
     console.log(pad(store.id, 22) + pad(store.kind, 14) + pad(detected, 15) + mark);
   }
 
@@ -42,12 +66,21 @@ export async function probe(apply = true): Promise<ProbeResult[]> {
     let disabled = 0;
     for (const r of results) {
       if (!r.changed) continue;
-      if (r.detected === "UNREACHABLE") {
-        setOverride(r.store.id, { enabled: false, note: "unreachable when probed" });
-        disabled++;
-      } else {
+      const needsDisable = r.detected === "UNREACHABLE" || r.detected === "SHOPIFY_LOCKED" || r.detected === "UNKNOWN_HTML";
+      if (needsDisable && !r.store.enabled) continue; // already disabled — nothing to do
+
+      if (r.detected === "SHOPIFY" || r.detected === "WOOCOMMERCE") {
+        // Never write a kind this codebase can't actually fetch with.
+        if (!adapterFor(r.detected)) continue;
         setOverride(r.store.id, { kind: r.detected, note: "corrected by probe" });
         fixed++;
+      } else {
+        const note =
+          r.detected === "UNREACHABLE" ? "unreachable when probed"
+          : r.detected === "SHOPIFY_LOCKED" ? "Shopify storefront, but /products.json is blocked — needs a browser profile in src/adapters/browser.ts"
+          : "no Shopify/WooCommerce API found on the homepage — needs a browser profile in src/adapters/browser.ts";
+        setOverride(r.store.id, { enabled: false, note });
+        disabled++;
       }
     }
     console.log();
@@ -66,7 +99,7 @@ export function resetOverrides(): void {
   writeOverrides({});
 }
 
-async function detect(store: StoreConfig): Promise<AdapterKind | "UNREACHABLE"> {
+async function detect(store: StoreConfig): Promise<Finding> {
   if (await hits(`${store.baseUrl}/products.json?limit=1`, '"products"')) return "SHOPIFY";
   if (
     (await hits(`${store.baseUrl}/wp-json/wc/store/v1/products?per_page=1`, '"prices"')) ||
@@ -74,9 +107,21 @@ async function detect(store: StoreConfig): Promise<AdapterKind | "UNREACHABLE"> 
   ) {
     return "WOOCOMMERCE";
   }
-  if (await hits(store.baseUrl, "application/ld+json")) return "JSON_API";
-  if (await hits(store.baseUrl, "<html")) return "BROWSER";
-  return "UNREACHABLE";
+
+  // Neither API answered. The homepage still tells us something: a Shopify
+  // fingerprint means the storefront is real Shopify with /products.json
+  // switched off by the merchant, which is a different problem than a site
+  // that isn't Shopify or Woo at all — both need a browser adapter, but only
+  // one is worth re-probing after a merchant setting might change.
+  let home: { ok: boolean; body: string } | undefined;
+  try {
+    home = await get(store.baseUrl);
+  } catch {
+    home = undefined;
+  }
+  if (!home?.ok) return "UNREACHABLE";
+  if (/cdn\.shopify\.com|Shopify\.shop/i.test(home.body)) return "SHOPIFY_LOCKED";
+  return "UNKNOWN_HTML";
 }
 
 async function hits(url: string, needle: string): Promise<boolean> {
