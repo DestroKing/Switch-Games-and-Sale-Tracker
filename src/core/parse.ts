@@ -35,7 +35,7 @@ export function firstRupeePrice(text: string): number | undefined {
 
 /* ------------------------------------------------------- classification */
 
-export type ProductKind = "GAME" | "HARDWARE" | "ACCESSORY" | "DIGITAL" | "UNKNOWN";
+export type ProductKind = "GAME" | "HARDWARE" | "ACCESSORY" | "DIGITAL" | "SERVICE" | "UNKNOWN";
 
 export interface Classification {
   readonly platform: Platform;
@@ -70,6 +70,8 @@ const ACCESSORY = [
   /\bsteering\s*wheel\b/i,
   /\bthumb\s*(grip|stick)/i,
   /\b(t[- ]?shirt|hoodie|mug|keychain|poster|figure|plush)\b/i,
+  /\bcontrollers?\b/i,
+  /\bcooling\s*pads?\b/i,
 ];
 
 const DIGITAL = [
@@ -81,6 +83,18 @@ const DIGITAL = [
   /\bvoucher\b/i,
   /\bdlc\b/i,
   /\bseason\s*pass\b/i,
+];
+
+/**
+ * A repair/mod/installation service, not a physical product — a listing like
+ * "Nintendo OLED game loading service" names the console and would otherwise
+ * sail through as a game, the same way HARDWARE/ACCESSORY items would if not
+ * excluded first.
+ */
+const SERVICE = [
+  /\b(repair|installation|loading|jailbreak|unlock(ing)?|mod(ding)?|chip(ping)?|flash(ing)?)\s*service\b/i,
+  /\bgame\s*loading\s*service\b/i,
+  /\b(console\s*)?repair\b/i,
 ];
 
 const SWITCH2 = [/switch\s*2\b/i, /\bns2\b/i, /\bswitch\s*two\b/i, /\bnintendo\s*switch\s*2/i];
@@ -134,6 +148,7 @@ export function classify(context: string, storeHint?: Platform): Classification 
   const text = context.replace(/\s+/g, " ");
 
   // Order matters. Exclusions first, or hardware wins on platform match.
+  if (SERVICE.some((r) => r.test(text))) return { platform: platformOf(text, storeHint), kind: "SERVICE" };
   if (DIGITAL.some((r) => r.test(text))) return { platform: platformOf(text, storeHint), kind: "DIGITAL" };
   if (HARDWARE.some((r) => r.test(text))) return { platform: platformOf(text, storeHint), kind: "HARDWARE" };
   if (ACCESSORY.some((r) => r.test(text))) return { platform: platformOf(text, storeHint), kind: "ACCESSORY" };

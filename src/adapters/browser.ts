@@ -129,48 +129,61 @@ const PROFILES: Record<string, StoreProfile> = {
     pages: 2,
   },
 
-  // ---- Everything below is an unverified first guess, same as the four
-  // above were before their selectors were confirmed against a live page.
-  // Run `bun run src/cli/inspect.ts <id>` and correct these from what's
-  // actually there — layer 1 (JSON-LD) and the ₹-pattern text fallback (layer
-  // 4, in fromSelectors below) mean a wrong guess here still has a chance of
-  // working, it just isn't something to rely on.
+  // ---- gamestheshop, gamenation and mcubegames below were confirmed
+  // against real diagnostics/<id>.html dumps, not guessed — no clicking
+  // needed once the actual page markup is available. e2zstore is still an
+  // unverified guess: its diagnostics dump so far only ever shows a
+  // Cloudflare bot-check page, so there's no real markup to read yet.
 
   gamestheshop: {
-    // Next.js storefront. No id/data-* hooks confirmed yet — generic
-    // "product card is a link to a product page" guesses.
-    cardSelectors: ["a[href*='/product/']", "div[class*='product-card' i]", "div[class*='productCard' i]"],
-    titleSelectors: ["h2", "h3", "[class*='title' i]"],
-    priceSelectors: ["[class*='price' i]"],
-    linkSelectors: ["a[href*='/product/']", "a"],
+    // Pulled from a real diagnostics/gamestheshop.html dump, not guessed —
+    // this site has its own stable "ak-" prefixed class names.
+    cardSelectors: ["div.ak-card"],
+    titleSelectors: ["a.ak-card-title", ".ak-card-title"],
+    priceSelectors: ["span.ak-card-priceVal", ".ak-card-price"],
+    linkSelectors: ["a.ak-card-title", "a[href^='/product/']"],
     outOfStockSelectors: [":has-text('Out of Stock')", ":has-text('Sold Out')"],
     defaultRegion: "IN",
     platformHint: "SWITCH",
-    ready: "a[href*='/product/']",
+    ready: "div.ak-card",
     pages: 3,
   },
 
   gamenation: {
-    cardSelectors: ["a[href*='/products/']", "div[class*='product-card' i]", "div[class*='ProductCard' i]"],
-    titleSelectors: ["h2", "h3", "[class*='title' i]"],
-    priceSelectors: ["[class*='price' i]"],
-    linkSelectors: ["a[href*='/products/']", "a"],
+    // Pulled from a real diagnostics/gamenation.html dump. Next.js storefront
+    // with CSS-module class names (a per-build hash suffix, e.g. "-O644MW-",
+    // so matched by substring rather than the exact class). The original
+    // guess used lowercase "/products/" — the real links are "/Products/"
+    // (capital P), and CSS attribute matching is case-sensitive by default,
+    // which is why this silently matched nothing despite the page rendering
+    // real listings the whole time.
+    cardSelectors: ["a[class*='productCard' i]", "a[href*='/Products/' i]"],
+    titleSelectors: ["h3[class*='productTitle' i]", "h3"],
+    // The "current" price and the struck-through "old" price are separate,
+    // similarly-named spans — same pitfall as Croma, pick the current one.
+    priceSelectors: ["span[class*='currentPrice' i]", "span[class*='price' i]"],
+    linkSelectors: ["a[class*='productCard' i]", "a[href*='/Products/' i]"],
     outOfStockSelectors: [":has-text('Out of Stock')", ":has-text('Sold Out')"],
     defaultRegion: "IN",
     platformHint: "SWITCH",
-    ready: "a[href*='/products/']",
+    ready: "a[class*='productCard' i]",
     pages: 3,
   },
 
   mcubegames: {
-    cardSelectors: ["a[href*='/products/']", "div[class*='product-card' i]", "div[class*='ProductCard' i]"],
-    titleSelectors: ["h2", "h3", "[class*='title' i]"],
-    priceSelectors: ["[class*='price' i]"],
-    linkSelectors: ["a[href*='/products/']", "a"],
+    // Pulled from a real diagnostics/mcubegames.html dump. Tailwind utility
+    // classes only, no semantic per-component names, and the product link
+    // wraps the image and the title in two separate <a> tags rather than one
+    // card — "/product/" (singular) is also the real path, the original
+    // guess used the plural "/products/".
+    cardSelectors: ["div.bg-card", "a[href^='/product/']"],
+    titleSelectors: ["p.line-clamp-2", "p"],
+    priceSelectors: ["span.font-semibold", "span"],
+    linkSelectors: ["a[href^='/product/']"],
     outOfStockSelectors: [":has-text('Out of Stock')", ":has-text('Sold Out')"],
     defaultRegion: "IN",
     platformHint: "SWITCH",
-    ready: "a[href*='/products/']",
+    ready: "div.bg-card, a[href^='/product/']",
     pages: 3,
   },
 
@@ -256,7 +269,7 @@ export const browserAdapter: Adapter = {
         for (let p = 1; p <= profile.pages; p++) {
           const url = template.replace("{p}", String(p));
           try {
-            const { rows, method } = await scrapePage(page, store, profile, url);
+            const { rows, method } = await scrapePage(page, store, profile, url, p);
             methods.add(method);
             for (const row of rows) {
               const l = toListing(store, profile, row);
@@ -295,6 +308,7 @@ async function scrapePage(
   store: StoreConfig,
   profile: StoreProfile,
   url: string,
+  pageNum: number,
 ): Promise<{ rows: Extracted[]; method: string }> {
   await page.goto(url, { waitUntil: "domcontentloaded", timeout: 45_000 });
 
@@ -310,6 +324,21 @@ async function scrapePage(
   await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight * 0.6));
   await page.waitForTimeout(1200);
 
+  const result = await extract(page, store, profile);
+
+  // Always saved, not just on total zero-row failure — a wrong price or
+  // wrong title is invisible from a row count alone, and needs the same
+  // real markup a zero-row failure already got dumped, to fix instead of
+  // guess. Page 1 keeps the plain, unsuffixed filename other tooling and
+  // conversations already reference; later pages get their own file rather
+  // than overwriting it.
+  const suffix = pageNum > 1 ? `-p${pageNum}` : "";
+  await dump(page, `${store.id}${suffix}`);
+
+  return result;
+}
+
+async function extract(page: Page, store: StoreConfig, profile: StoreProfile): Promise<{ rows: Extracted[]; method: string }> {
   // ---- layer 1: JSON-LD
   const jsonLd = await fromJsonLd(page);
   if (jsonLd.length > 0) return { rows: jsonLd, method: "json-ld" };
@@ -322,10 +351,7 @@ async function scrapePage(
 
   // ---- layer 3 + 4: selectors, with in-card text fallback for price
   const rows = await fromSelectors(page, profile);
-  if (rows.length > 0) return { rows, method: "selectors" };
-
-  await dump(page, store.id);
-  return { rows: [], method: "none" };
+  return { rows, method: rows.length > 0 ? "selectors" : "none" };
 }
 
 async function fromJsonLd(page: Page): Promise<Extracted[]> {
@@ -474,7 +500,7 @@ async function dump(page: Page, storeId: string): Promise<void> {
   try {
     mkdirSync("diagnostics", { recursive: true });
     writeFileSync(`diagnostics/${storeId}.html`, await page.content());
-    await page.screenshot({ path: `diagnostics/${storeId}.png`, fullPage: false });
+    await page.screenshot({ path: `diagnostics/${storeId}.png`, fullPage: true });
   } catch {
     // Diagnostics failing must never mask the original problem.
   }
