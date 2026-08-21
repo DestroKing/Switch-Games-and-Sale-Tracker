@@ -18,10 +18,21 @@ export const STORES: readonly StoreConfig[] = [
     tier: 2,
     enabled: true,
     platformHint: "SWITCH",
-    note: "Verified: three pages of Switch/Switch 2 cartridges. Best first target.",
+    collections: ["nintendo-switch-games", "nintendo-switch-pre-owned-games", "nintendo-switch-2"],
+    note: "Verified: three pages of Switch/Switch 2 cartridges. Also carries consoles/accessories/collectibles (Bayblade, Dock Cover, Card Holders) — scoped to its actual games categories rather than relying on classification alone.",
   },
-  { id: "gameloot", name: "GameLoot", baseUrl: "https://gameloot.in", kind: "SHOPIFY", currency: "INR", tier: 2, enabled: true, platformHint: "SWITCH" },
-  { id: "nekavo", name: "NEKAVO", baseUrl: "https://nekavo.com", kind: "WOOCOMMERCE", currency: "INR", tier: 2, enabled: true, platformHint: "SWITCH" },
+  {
+    id: "gameloot", name: "GameLoot", baseUrl: "https://gameloot.in", kind: "SHOPIFY",
+    currency: "INR", tier: 2, enabled: true, platformHint: "SWITCH",
+    collections: ["nintendo-switch"],
+    note: "General electronics/gift-card/subscription retailer — scoped to its Nintendo Switch category (accessories/consoles have their own separate categories that this deliberately excludes).",
+  },
+  {
+    id: "nekavo", name: "NEKAVO", baseUrl: "https://nekavo.com", kind: "WOOCOMMERCE",
+    currency: "INR", tier: 2, enabled: true, platformHint: "SWITCH",
+    collections: ["nintendo-switch-games", "nintendo-switch-2"],
+    note: "Primarily a Funko Pop/anime collectibles store — scoped to its two Switch games categories, excludes nintendo-accessories and nintendo-merchandise.",
+  },
 
   // Unverified as cartridge sellers — cheap to keep, cheap to delete.
   {
@@ -31,7 +42,6 @@ export const STORES: readonly StoreConfig[] = [
     note: "Multi-console store (also sells PS3/PS4/PS5) — scoped to its two Switch categories, found via `bun run probe`'s category listing.",
   },
   { id: "hgworld", name: "HG World", baseUrl: "https://hgworld.in", kind: "SHOPIFY", currency: "INR", tier: 2, enabled: true, platformHint: "SWITCH", note: "Unverified" },
-  { id: "pssales", name: "PS Sales and Service", baseUrl: "https://pssalesandservice.com", kind: "SHOPIFY", currency: "INR", tier: 2, enabled: true, platformHint: "SWITCH", note: "Shopify confirmed, cartridges unconfirmed" },
   {
     id: "zozila", name: "Zozila", baseUrl: "https://zozila.com", kind: "SHOPIFY",
     currency: "INR", tier: 2, enabled: false, platformHint: "SWITCH",

@@ -21,6 +21,13 @@ const STORES = activeStores();
  * CSS, and there's no way to read what you picked there back into this
  * script. Plain clicks (no Alt) still behave normally, so cookie banners and
  * "continue" buttons can still be dismissed.
+ *
+ * Clicks are resolved via `elementsFromPoint`, not `event.target` — a lot of
+ * product cards wrap the whole tile in one invisible/absolute-positioned
+ * overlay link for click-to-navigate, so a plain click always hits that
+ * overlay, never the title/price text visually underneath it. Reading the
+ * whole element stack at the click point recovers the real element even
+ * when a click alone couldn't reach it.
  */
 const id = process.argv[2];
 const store = STORES.find((s) => s.id === id);
@@ -173,11 +180,33 @@ await page.addInitScript(() => {
       if (!e.altKey) return; // plain clicks still dismiss banners, navigate, etc.
       e.preventDefault();
       e.stopPropagation();
-      const el = e.target as Element;
+
+      // A card's title/price often sit UNDER a full-tile overlay <a> used for
+      // click-to-navigate — e.target on a click there is always that overlay,
+      // never the text visually underneath it. elementsFromPoint returns the
+      // whole stack at that point, front-to-back, so the real title/price
+      // element is still in there even when it isn't what a plain click would
+      // have hit.
+      const stack = document
+        .elementsFromPoint(e.clientX, e.clientY)
+        .filter((el) => el.tagName !== "HTML" && el.tagName !== "BODY")
+        .slice(0, 8);
+      const top = stack[0] ?? (e.target as Element);
+
+      const seen = new Set<string>();
+      const candidates: { css: string; matches: number }[] = [];
+      for (const el of stack) {
+        for (const c of candidatesFor(el)) {
+          if (seen.has(c.css)) continue;
+          seen.add(c.css);
+          candidates.push(c);
+        }
+      }
+
       (window as unknown as { __reportPick: (p: unknown) => void }).__reportPick({
-        tag: el.tagName.toLowerCase(),
-        text: (el.textContent ?? "").trim().replace(/\s+/g, " "),
-        candidates: candidatesFor(el),
+        tag: top.tagName.toLowerCase(),
+        text: (top.textContent ?? "").trim().replace(/\s+/g, " "),
+        candidates,
       });
     },
     true,
