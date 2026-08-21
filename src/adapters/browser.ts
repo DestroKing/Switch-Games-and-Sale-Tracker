@@ -293,11 +293,16 @@ export const browserAdapter: Adapter = {
       await page.route("**/*.{png,jpg,jpeg,webp,gif,svg,woff,woff2}", (r) => r.abort());
 
       for (const template of store.searchUrls) {
-        // No per-store page count — the loop below already stops itself the
-        // real way (an empty page, or clickNextPage finding no next control
-        // left to press). This is purely a last-resort guard against a
-        // genuinely broken loop that never produces either signal; it
-        // should never be the thing that actually ends a real run.
+        // Fresh per search term (not shared across templates) — two search
+        // terms legitimately overlapping in their early results shouldn't
+        // look like "this term ran dry" the moment the second one starts.
+        const seenSkus = new Set<string>();
+        let staleStreak = 0;
+
+        // No per-store page count — the loop below stops itself the real
+        // way. MAX_PAGES_SAFETY is purely a last-resort guard against a
+        // genuinely broken loop that never produces either stopping signal;
+        // it should never be the thing that actually ends a real run.
         for (let p = 1; p <= MAX_PAGES_SAFETY; p++) {
           try {
             let rows: Extracted[];
@@ -319,11 +324,36 @@ export const browserAdapter: Adapter = {
             }
 
             methods.add(method);
+            let newOnPage = 0;
             for (const row of rows) {
               const l = toListing(store, profile, row);
-              if (l) listings.push(l);
+              if (!l) continue;
+              listings.push(l);
+              if (!seenSkus.has(l.sku)) {
+                seenSkus.add(l.sku);
+                newOnPage++;
+              }
             }
-            if (rows.length === 0) break; // no more pages
+
+            // Visible progress instead of silence for however many minutes
+            // a large catalogue takes — this is what "stuck" actually looks
+            // like from outside otherwise, working or not.
+            console.log(`  ${store.id}: page ${p} — ${listings.length} listings so far`);
+
+            if (rows.length === 0) break; // a genuinely empty page — unambiguous
+
+            // Some sites never return a clean empty page past the real last
+            // one — they keep showing "related"/suggested items instead, so
+            // rows.length alone never reaches 0 (this is why Amazon/Flipkart
+            // ran for the full deadline instead of stopping). Tracking new
+            // *listings* — after classification and dedup, not raw rows —
+            // catches that: once a page contributes nothing not already
+            // seen, twice in a row, there's nothing left worth paying more
+            // requests to find. Twice, not once, so a single page that
+            // happens to be all duplicates doesn't end a run that still had
+            // real pages ahead of it.
+            staleStreak = newOnPage === 0 ? staleStreak + 1 : 0;
+            if (staleStreak >= 2) break;
           } catch (e) {
             problems.push(`p${p}: ${e instanceof Error ? e.message : String(e)}`);
           }

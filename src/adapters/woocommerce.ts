@@ -67,6 +67,7 @@ export const wooAdapter: Adapter = {
           const listing = toListing(store, p);
           if (listing) listings.push(listing);
         }
+        console.log(`  ${store.id}: page ${page} — ${listings.length} listings so far`);
         if (products.length < PER_PAGE) break;
       }
     }
