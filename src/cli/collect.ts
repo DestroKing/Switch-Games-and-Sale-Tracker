@@ -1,0 +1,163 @@
+import { adapterFor, closeBrowser } from "../adapters/index.ts";
+import { activeStores } from "../config/overrides.ts";
+import { getDb, nowIso } from "../core/db.ts";
+import type { RawListing, StoreConfig } from "../core/types.ts";
+import { refreshRates, toInr } from "../fx/rates.ts";
+
+/**
+ * No single store may hold the run hostage.
+ *
+ * The HTTP client retries three times at a 20s timeout with quadratic backoff,
+ * and the adapters page up to 20 times. A store that accepts connections and
+ * then never answers therefore costs ~20 minutes of silence before the run
+ * moves on. That is indistinguishable from a hang, and it is why the store
+ * name is now printed before the work rather than after it.
+ */
+const STORE_DEADLINE_MS = 180_000;
+
+function withDeadline<T>(work: Promise<T>, ms: number, label: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout>;
+  const bell = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`gave up after ${Math.round(ms / 1000)}s (${label})`)), ms);
+  });
+  return Promise.race([work, bell]).finally(() => clearTimeout(timer)) as Promise<T>;
+}
+
+export async function collect(): Promise<void> {
+  const db = getDb();
+  const STORES = activeStores();
+  syncStoreTable(STORES);
+
+  // Refresh FX before anything else, so every price in this run converts at
+  // one rate rather than drifting mid-run.
+  const currencies = [...new Set(STORES.filter((s) => s.enabled).map((s) => s.currency))];
+  await refreshRates(currencies);
+
+  const runId = Number(
+    db.query<{ id: number }, [string]>(
+      `INSERT INTO run (started_at) VALUES (?) RETURNING id`,
+    ).get(nowIso())?.id,
+  );
+
+  const active = STORES.filter((s) => s.enabled);
+  console.log(`run ${runId}: ${active.length} stores\n`);
+
+  // Easy stores first so a Playwright failure never blocks the useful data.
+  const ordered = [...active].sort((a, b) => rank(a) - rank(b));
+
+  for (const store of ordered) {
+    const started = Date.now();
+    const adapter = adapterFor(store.kind);
+
+    // Printed before the fetch, so a stall names the store responsible.
+    process.stdout.write(`  ${store.id} (${store.kind}) ... `);
+
+    if (!adapter) {
+      record(runId, store.id, "skipped", 0, Date.now() - started, `no adapter for ${store.kind}`);
+      console.log(`skipped - no ${store.kind} adapter`);
+      continue;
+    }
+
+    try {
+      const outcome = await withDeadline(adapter.fetch(store), STORE_DEADLINE_MS, store.id);
+      if (outcome.status === "failed") {
+        record(runId, store.id, "failed", 0, Date.now() - started, outcome.reason);
+        console.log(`FAILED - ${outcome.reason}`);
+        continue;
+      }
+      const saved = persist(runId, store, outcome.listings);
+      record(
+        runId,
+        store.id,
+        outcome.status,
+        saved,
+        Date.now() - started,
+        outcome.status === "partial" ? outcome.reason : null,
+      );
+      console.log(`${outcome.status} - ${saved} listings`);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      record(runId, store.id, "failed", 0, Date.now() - started, msg);
+      console.log(`THREW - ${msg}`);
+    }
+  }
+
+  db.run(`UPDATE run SET finished_at = ? WHERE id = ?`, [nowIso(), runId]);
+  await closeBrowser();
+  console.log(`\nrun ${runId} complete`);
+}
+
+function rank(s: StoreConfig): number {
+  return s.kind === "BROWSER" ? 1 : 0;
+}
+
+function syncStoreTable(STORES: readonly StoreConfig[]): void {
+  const db = getDb();
+  const stmt = db.prepare(
+    `INSERT INTO store (id, name, base_url, kind, currency, tier, enabled)
+     VALUES (?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(id) DO UPDATE SET
+       name = excluded.name, base_url = excluded.base_url,
+       kind = excluded.kind, currency = excluded.currency,
+       tier = excluded.tier, enabled = excluded.enabled`,
+  );
+  for (const s of STORES) {
+    stmt.run(s.id, s.name, s.baseUrl, s.kind, s.currency, s.tier, s.enabled ? 1 : 0);
+  }
+}
+
+function persist(runId: number, store: StoreConfig, listings: readonly RawListing[]): number {
+  const db = getDb();
+  const now = nowIso();
+
+  const upsertListing = db.prepare<{ id: number }, [string, string, string, string, string, string, string | null, string, string]>(
+    `INSERT INTO listing (store_id, sku, url, raw_title, platform, region, image_url, first_seen, last_seen)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(store_id, sku) DO UPDATE SET
+       url = excluded.url, raw_title = excluded.raw_title,
+       platform = excluded.platform, region = excluded.region,
+       last_seen = excluded.last_seen
+     RETURNING id`,
+  );
+
+  const insertPrice = db.prepare(
+    `INSERT INTO price_point
+       (listing_id, run_id, captured_at, native_currency, native_price, inr_price, fx_rate_date, in_stock)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+  );
+
+  const tx = db.transaction((rows: readonly RawListing[]) => {
+    let count = 0;
+    for (const l of rows) {
+      const row = upsertListing.get(
+        store.id, l.sku, l.url, l.title, l.platform, l.region,
+        l.imageUrl ?? null, now, now,
+      );
+      if (!row) continue;
+      const { inr, rateDate } = toInr(l.nativePrice, l.nativeCurrency);
+      insertPrice.run(
+        row.id, runId, now, l.nativeCurrency, l.nativePrice, inr,
+        rateDate ?? null, l.inStock ? 1 : 0,
+      );
+      count++;
+    }
+    return count;
+  });
+
+  return tx(listings);
+}
+
+function record(
+  runId: number,
+  storeId: string,
+  status: string,
+  found: number,
+  ms: number,
+  detail: string | null,
+): void {
+  getDb().run(
+    `INSERT OR REPLACE INTO run_store (run_id, store_id, status, listings_found, duration_ms, detail)
+     VALUES (?, ?, ?, ?, ?, ?)`,
+    [runId, storeId, status, found, ms, detail],
+  );
+}

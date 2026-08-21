@@ -1,0 +1,347 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Switch cartridge prices</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Familjen+Grotesk:wght@500;700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --ink:#12142A; --panel:#1A1D38; --edge:#2A2E52;
+    --text:#E8E9F5; --dim:#8E93C0;
+    --gold:#E9A13B;      /* money */
+    --mint:#5FD3A6;      /* fell, or healthy */
+    --rose:#E2666F;      /* rose, or failed */
+    --slate:#5A5F8C;     /* inert */
+    --display:"Familjen Grotesk",system-ui,sans-serif;
+    --body:"IBM Plex Sans",system-ui,sans-serif;
+    --mono:"IBM Plex Mono",ui-monospace,monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--ink);color:var(--text);font-family:var(--body);
+       font-size:14px;line-height:1.5;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:1180px;margin:0 auto;padding:32px 22px 80px}
+
+  header{display:flex;align-items:baseline;gap:16px;flex-wrap:wrap;margin-bottom:6px}
+  h1{font-family:var(--display);font-weight:700;font-size:26px;letter-spacing:-.02em;margin:0}
+  .stamp{font-family:var(--mono);font-size:12px;color:var(--dim)}
+  .lede{color:var(--dim);margin:0 0 30px;max-width:64ch}
+
+  h2{font-family:var(--display);font-size:13px;font-weight:500;letter-spacing:.14em;
+     text-transform:uppercase;color:var(--dim);margin:38px 0 14px;
+     display:flex;align-items:center;gap:10px}
+  h2::after{content:"";flex:1;height:1px;background:var(--edge)}
+
+  /* Signature: one tile per store. Count is the headline, because a store
+     returning zero rows without erroring is the failure that hides. */
+  .strip{display:grid;grid-template-columns:repeat(auto-fill,minmax(146px,1fr));gap:8px}
+  .tile{background:var(--panel);border:1px solid var(--edge);border-radius:9px;
+        padding:11px 12px;border-left-width:3px}
+  .tile.ok{border-left-color:var(--mint)}
+  .tile.partial{border-left-color:var(--gold)}
+  .tile.failed,.tile.skipped{border-left-color:var(--rose)}
+  .tile .n{font-family:var(--mono);font-size:22px;font-weight:500;letter-spacing:-.02em}
+  .tile .who{font-size:12px;color:var(--text);margin-top:1px}
+  .tile .why{font-size:11px;color:var(--dim);margin-top:5px;
+             overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .tile.failed .n,.tile.skipped .n{color:var(--rose)}
+
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th{text-align:left;font-weight:500;font-size:11px;letter-spacing:.1em;
+     text-transform:uppercase;color:var(--dim);padding:0 10px 9px;
+     border-bottom:1px solid var(--edge)}
+  td{padding:10px;border-bottom:1px solid rgba(42,46,82,.55);vertical-align:top}
+  tr:hover td{background:rgba(26,29,56,.65)}
+  td.num{font-family:var(--mono);text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+  .price{color:var(--gold)}
+  .down{color:var(--mint)}
+  .up{color:var(--rose)}
+  a{color:inherit;text-decoration:none;border-bottom:1px solid var(--slate)}
+  a:hover{border-bottom-color:var(--gold)}
+
+  .tag{display:inline-block;font-family:var(--mono);font-size:10px;letter-spacing:.06em;
+       padding:1px 6px;border-radius:4px;border:1px solid var(--edge);color:var(--dim);
+       margin-left:6px;vertical-align:1px}
+  .tag.fx{border-color:var(--gold);color:var(--gold)}
+  .tag.oos{border-color:var(--rose);color:var(--rose)}
+
+  .note{background:var(--panel);border:1px solid var(--edge);border-left:3px solid var(--gold);
+        border-radius:9px;padding:12px 14px;color:var(--dim);font-size:13px;margin:14px 0}
+  .note b{color:var(--text);font-weight:500}
+
+  input[type=search]{width:100%;max-width:380px;background:var(--panel);color:var(--text);
+    border:1px solid var(--edge);border-radius:7px;padding:9px 12px;font-family:var(--body);
+    font-size:13px;margin-bottom:14px}
+  input[type=search]:focus{outline:2px solid var(--gold);outline-offset:1px}
+  .empty{color:var(--dim);padding:22px 2px}
+
+  /* Filter bar */
+  .filters{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:6px}
+  .seg{display:inline-flex;background:var(--panel);border:1px solid var(--edge);
+       border-radius:7px;overflow:hidden}
+  .seg button{background:none;border:0;color:var(--dim);font-family:var(--body);
+       font-size:12px;padding:8px 13px;cursor:pointer;border-right:1px solid var(--edge)}
+  .seg button:last-child{border-right:0}
+  .seg button[aria-pressed=true]{background:var(--gold);color:#1A1408;font-weight:500}
+  .seg button:focus-visible{outline:2px solid var(--gold);outline-offset:-2px}
+  select{background:var(--panel);color:var(--text);border:1px solid var(--edge);
+    border-radius:7px;padding:8px 10px;font-family:var(--body);font-size:12px}
+  select:focus{outline:2px solid var(--gold);outline-offset:1px}
+  .check{display:inline-flex;align-items:center;gap:7px;color:var(--dim);font-size:12px;
+    background:var(--panel);border:1px solid var(--edge);border-radius:7px;padding:7px 11px;cursor:pointer}
+  .check input{accent-color:var(--gold);margin:0}
+  .count{font-family:var(--mono);font-size:12px;color:var(--dim);margin:12px 0 8px}
+  .clear{background:none;border:0;color:var(--dim);font-size:12px;cursor:pointer;
+    border-bottom:1px solid var(--slate);padding:0}
+  .clear:hover{color:var(--gold);border-bottom-color:var(--gold)}
+
+  th.sortable{cursor:pointer;user-select:none;white-space:nowrap}
+  th.sortable:hover{color:var(--text)}
+  th.sortable .arrow{opacity:.35;margin-left:4px}
+  th.sortable[data-active=true]{color:var(--gold)}
+  th.sortable[data-active=true] .arrow{opacity:1}
+  .more{display:block;width:100%;margin-top:14px;background:var(--panel);color:var(--text);
+    border:1px solid var(--edge);border-radius:7px;padding:11px;font-family:var(--body);
+    font-size:13px;cursor:pointer}
+  .more:hover{border-color:var(--gold)}
+  @media (prefers-reduced-motion:no-preference){
+    .tile,tr{transition:background .12s ease}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <h1>Switch cartridge prices</h1>
+    <span class="stamp" id="stamp"></span>
+  </header>
+  <p class="lede" id="lede">Loading…</p>
+
+  <h2>Collector</h2>
+  <div class="strip" id="strip"></div>
+
+  <h2>Moved since last run</h2>
+  <div id="fxnote"></div>
+  <div id="movers"></div>
+
+  <h2>All listings</h2>
+
+  <input type="search" id="q" placeholder="Search titles — try zelda, mario, pokemon">
+
+  <div class="filters">
+    <div class="seg" id="platform" role="group" aria-label="Console">
+      <button data-v="" aria-pressed="true">Both consoles</button>
+      <button data-v="SWITCH" aria-pressed="false">Switch</button>
+      <button data-v="SWITCH2" aria-pressed="false">Switch 2</button>
+    </div>
+    <select id="store" aria-label="Store"><option value="">All stores</option></select>
+    <select id="region" aria-label="Region"><option value="">All regions</option></select>
+    <label class="check"><input type="checkbox" id="stock"> In stock only</label>
+    <button class="clear" id="reset">Reset</button>
+  </div>
+
+  <div class="count" id="count"></div>
+  <div id="list"></div>
+
+</div>
+<script>
+const inr = n => "₹" + Math.round(n).toLocaleString("en-IN");
+const el  = (h) => { const d=document.createElement("div"); d.innerHTML=h; return d; };
+const esc = s => String(s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+
+async function api(p){ const r = await fetch(p); return r.json(); }
+
+async function boot(){
+  const [sum, hp, mv] = await Promise.all([
+    api("/api/summary"), api("/api/health"), api("/api/movers")
+  ]);
+
+  if(!hp.run){
+    document.getElementById("lede").innerHTML =
+      "No collection has run yet. Close this window and run <b>bun run collect</b>, then start the dashboard again.";
+    return;
+  }
+
+  const when = new Date(hp.run.started_at);
+  document.getElementById("stamp").textContent =
+    "last run " + when.toLocaleString("en-IN", {dateStyle:"medium", timeStyle:"short"});
+  document.getElementById("lede").textContent =
+    sum.listings.toLocaleString("en-IN") + " listings across " + sum.stores +
+    " stores · " + sum.points.toLocaleString("en-IN") + " price observations · " +
+    sum.unmatched.toLocaleString("en-IN") + " not yet matched to a canonical title.";
+
+  // ---- collector strip
+  document.getElementById("strip").innerHTML = hp.stores.map(s => `
+    <div class="tile ${esc(s.status)}">
+      <div class="n">${s.listings_found}</div>
+      <div class="who">${esc(s.name)}</div>
+      <div class="why" title="${esc(s.detail || s.status)}">${esc(s.detail || s.status)}</div>
+    </div>`).join("");
+
+  // ---- movers
+  const fx = mv.filter(m => m.fxSuspect).length;
+  document.getElementById("fxnote").innerHTML = fx
+    ? `<div class="note"><b>${fx} of these moved together.</b> Same currency, same ratio,
+       same day — that is the rupee moving against the dollar, not the shops changing
+       their minds. Flagged rather than counted as price changes.</div>`
+    : "";
+
+  document.getElementById("movers").innerHTML = mv.length ? `
+    <table><thead><tr>
+      <th>Title</th><th>Store</th><th class="num">Was</th><th class="num">Now</th><th class="num">Change</th>
+    </tr></thead><tbody>
+    ${mv.map(m => `<tr>
+      <td><a href="${esc(m.url)}" target="_blank" rel="noopener">${esc(m.raw_title)}</a>
+        ${m.region!=="IN" ? `<span class="tag">${esc(m.region)}</span>`:""}
+        ${m.fxSuspect ? `<span class="tag fx">FX</span>`:""}
+        ${!m.inStock ? `<span class="tag oos">out of stock</span>`:""}</td>
+      <td>${esc(m.store)}</td>
+      <td class="num">${inr(m.prev_price)}</td>
+      <td class="num price">${inr(m.now_price)}</td>
+      <td class="num ${m.pct<0?"down":"up"}">${m.pct>0?"+":""}${m.pct.toFixed(1)}%</td>
+    </tr>`).join("")}
+    </tbody></table>`
+    : `<div class="empty">Nothing to compare yet — price changes appear after a second collection run.</div>`;
+
+  await loadFacets();
+  await search();
+}
+
+// Filter state. Every change re-queries the server, because sorting a page of
+// already-loaded rows would sort a subset and call it "cheapest".
+const state = { q:"", platform:"", region:"", store:"", inStock:false,
+                sort:"price", dir:"asc", offset:0 };
+let rows = [];
+
+const COLS = [
+  { key:"title", label:"Title",  sortable:true },
+  { key:"store", label:"Store",  sortable:true },
+  { key:null,    label:"Native", sortable:false, num:true },
+  { key:"price", label:"INR",    sortable:true,  num:true },
+];
+
+function qs(){
+  const p = new URLSearchParams();
+  if(state.q) p.set("q", state.q);
+  if(state.platform) p.set("platform", state.platform);
+  if(state.region) p.set("region", state.region);
+  if(state.store) p.set("store", state.store);
+  if(state.inStock) p.set("inStock","1");
+  p.set("sort", state.sort); p.set("dir", state.dir);
+  p.set("limit","100"); p.set("offset", String(state.offset));
+  return p.toString();
+}
+
+async function loadFacets(){
+  const f = await api("/api/facets");
+  const store = document.getElementById("store");
+  for(const s of f.stores){
+    store.insertAdjacentHTML("beforeend",
+      `<option value="${esc(s.id)}">${esc(s.name)} (${s.n})</option>`);
+  }
+  const region = document.getElementById("region");
+  for(const r of f.regions){
+    if(r.region === "UNKNOWN" && r.n === 0) continue;
+    region.insertAdjacentHTML("beforeend",
+      `<option value="${esc(r.region)}">${esc(r.region.replace("_"," "))} (${r.n})</option>`);
+  }
+}
+
+async function search(append=false){
+  const data = await api("/api/listings?" + qs());
+  rows = append ? rows.concat(data.rows) : data.rows;
+
+  const showing = rows.length;
+  document.getElementById("count").textContent = data.total
+    ? `Showing ${showing.toLocaleString("en-IN")} of ${data.total.toLocaleString("en-IN")} listings`
+    : "";
+
+  if(!data.total){
+    document.getElementById("list").innerHTML =
+      `<div class="empty">Nothing matches these filters. Try widening the console or region.</div>`;
+    return;
+  }
+
+  const head = COLS.map(c => c.sortable
+    ? `<th class="sortable${c.num?" num":""}" data-sort="${c.key}"
+           data-active="${state.sort===c.key}"
+           style="${c.num?"text-align:right":""}">${c.label}<span class="arrow">${
+             state.sort===c.key ? (state.dir==="asc"?"↑":"↓") : "↕"}</span></th>`
+    : `<th style="${c.num?"text-align:right":""}">${c.label}</th>`).join("");
+
+  const body = rows.map(r => `<tr>
+      <td><a href="${esc(r.url)}" target="_blank" rel="noopener">${esc(r.raw_title)}</a>
+        ${r.region!=="IN" ? `<span class="tag">${esc(r.region.replace("_"," "))}</span>`:""}
+        ${r.platform==="SWITCH2" ? `<span class="tag">SW2</span>`:""}
+        ${!r.in_stock ? `<span class="tag oos">out of stock</span>`:""}</td>
+      <td>${esc(r.store)}</td>
+      <td class="num">${r.native_currency==="INR" ? "—" :
+          esc(r.native_currency)+" "+r.native_price.toFixed(2)}</td>
+      <td class="num price">${inr(r.inr_price)}</td>
+    </tr>`).join("");
+
+  const more = showing < data.total
+    ? `<button class="more" id="more">Load ${Math.min(100, data.total-showing)} more</button>` : "";
+
+  document.getElementById("list").innerHTML =
+    `<table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>${more}`;
+
+  document.querySelectorAll("th.sortable").forEach(th => {
+    th.addEventListener("click", () => {
+      const k = th.dataset.sort;
+      // Re-clicking the active column flips direction; a new column starts
+      // ascending, which for price means cheapest first.
+      if(state.sort === k){ state.dir = state.dir === "asc" ? "desc" : "asc"; }
+      else { state.sort = k; state.dir = "asc"; }
+      state.offset = 0; search();
+    });
+  });
+
+  const btn = document.getElementById("more");
+  if(btn) btn.addEventListener("click", () => { state.offset += 100; search(true); });
+}
+
+function reset(){
+  Object.assign(state, { q:"", platform:"", region:"", store:"", inStock:false,
+                         sort:"price", dir:"asc", offset:0 });
+  document.getElementById("q").value = "";
+  document.getElementById("store").value = "";
+  document.getElementById("region").value = "";
+  document.getElementById("stock").checked = false;
+  document.querySelectorAll("#platform button").forEach(b =>
+    b.setAttribute("aria-pressed", String(b.dataset.v === "")));
+  search();
+}
+
+document.querySelectorAll("#platform button").forEach(b => {
+  b.addEventListener("click", () => {
+    state.platform = b.dataset.v; state.offset = 0;
+    document.querySelectorAll("#platform button").forEach(x =>
+      x.setAttribute("aria-pressed", String(x === b)));
+    search();
+  });
+});
+["store","region"].forEach(id => {
+  document.getElementById(id).addEventListener("change", e => {
+    state[id] = e.target.value; state.offset = 0; search();
+  });
+});
+document.getElementById("stock").addEventListener("change", e => {
+  state.inStock = e.target.checked; state.offset = 0; search();
+});
+document.getElementById("reset").addEventListener("click", reset);
+
+let t; document.getElementById("q").addEventListener("input", e => {
+  clearTimeout(t);
+  t = setTimeout(() => { state.q = e.target.value; state.offset = 0; search(); }, 180);
+});
+
+boot().catch(e => {
+  document.getElementById("lede").textContent = "Could not read the database: " + e.message;
+});
+</script>
+</body>
+</html>
