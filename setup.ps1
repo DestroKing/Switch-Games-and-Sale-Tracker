@@ -1,99 +1,85 @@
-# switch-tracker setup - Windows 10 / 11
+# Switch Tracker - one-shot installer.
 #
-# Run from the project folder:
-#     powershell -ExecutionPolicy Bypass -File .\setup.ps1
+# Safe to run again at any time: every step checks before it acts, so a
+# half-finished install is fixed by simply running it a second time.
 #
-# Safe to re-run. Every step checks before it acts.
+# Needs no administrator rights. Everything installs into your own user
+# folder; nothing is written to Program Files or the registry.
 
 $ErrorActionPreference = "Stop"
 Set-Location $PSScriptRoot
 
-function Step($n, $msg) { Write-Host "`n[$n/5] $msg" -ForegroundColor Cyan }
-function Ok($msg)       { Write-Host "      OK  $msg" -ForegroundColor Green }
-function Warn($msg)     { Write-Host "      !   $msg" -ForegroundColor Yellow }
-function Die($msg)      { Write-Host "`nSTOP: $msg" -ForegroundColor Red; exit 1 }
-
-# PowerShell 5.1 (what Windows 10 ships) can default to TLS 1.0, which makes
-# every download below fail with an unhelpful "could not create SSL/TLS
-# secure channel". Force 1.2.
-[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-
-# ------------------------------------------------------------- 1. Windows
-Step 1 "Checking Windows version"
-$build = [int](Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion").CurrentBuild
-if ($build -lt 17763) {
-    Die "Bun needs Windows 10 version 1809 (build 17763) or later. This machine is build $build.`n      Windows Update will fix it, or use the Docker route in the README."
-}
-Ok "build $build"
-
-# ----------------------------------------------------------------- 2. CPU
-# The standard Bun x64 binary requires AVX2. Without it Bun installs happily
-# and then dies with "Illegal Instruction" on first run, which looks like a
-# broken project rather than a CPU mismatch. Detect it now instead.
-Step 2 "Checking CPU instruction support"
-$avx2 = $false
-try {
-    Add-Type -TypeDefinition @"
-using System.Runtime.Intrinsics.X86;
-public static class CpuCheck { public static bool Avx2() { return Avx2.IsSupported; } }
-"@ -ErrorAction Stop
-    $avx2 = [CpuCheck]::Avx2()
-} catch {
-    # .NET Framework 4.x has no System.Runtime.Intrinsics. Fall back to the
-    # CPU name, which is coarse but catches genuinely old hardware.
-    $cpu = (Get-CimInstance Win32_Processor | Select-Object -First 1).Name
-    $avx2 = $cpu -notmatch "Core.*(2 Duo|i[357]-[23]\d{2})|Pentium|Celeron|Athlon|Phenom"
-    Warn "could not query directly; inferred from: $cpu"
+function Step($n, $text) { Write-Host "`n  [$n/5] $text" -ForegroundColor Cyan }
+function Ok($text)       { Write-Host "        $text" -ForegroundColor Green }
+function Info($text)     { Write-Host "        $text" -ForegroundColor DarkGray }
+function Die($text) {
+    Write-Host "`n  PROBLEM: $text`n" -ForegroundColor Red
+    exit 1
 }
 
-if ($avx2) {
-    Ok "AVX2 available (standard Bun build)"
-} else {
-    Warn "no AVX2 detected - will install Bun's baseline build"
-    $env:BUN_BASELINE = "1"
-}
+Write-Host "`n  Switch Tracker setup" -ForegroundColor White
+Write-Host "  ------------------------------------------------"
+Info "Downloads about 1 GB. A slow connection may take 15 minutes."
 
-# ----------------------------------------------------------------- 3. Bun
-Step 3 "Installing Bun"
-if (Get-Command bun -ErrorAction SilentlyContinue) {
-    Ok "already installed ($(bun --version))"
-} else {
-    try {
-        if ($env:BUN_BASELINE -eq "1") {
-            # The installer accepts a version argument; -Baseline selects the
-            # SSE4.2 build for pre-Haswell CPUs.
-            & ([scriptblock]::Create((Invoke-RestMethod "https://bun.sh/install.ps1"))) -Baseline
-        } else {
-            Invoke-RestMethod "https://bun.sh/install.ps1" | Invoke-Expression
-        }
-    } catch {
-        Die "Bun install failed: $($_.Exception.Message)`n      Try manually: powershell -c ""irm bun.sh/install.ps1 | iex"""
+# --- 1. uv -----------------------------------------------------------------
+# uv is the Python installer/package manager. It also installs Python itself,
+# which is why nothing here asks you to install Python separately.
+Step 1 "Python tooling (uv)"
+$uv = Get-Command uv -ErrorAction SilentlyContinue
+if (-not $uv) {
+    # The per-user location uv installs into, in case it is there but not yet
+    # on PATH for this window (happens right after a previous install).
+    $candidate = "$env:USERPROFILE\.local\bin\uv.exe"
+    if (Test-Path $candidate) {
+        $env:PATH = "$env:USERPROFILE\.local\bin;$env:PATH"
+        $uv = Get-Command uv -ErrorAction SilentlyContinue
     }
-    # The installer sets PATH for future sessions, not this one.
-    $env:Path = "$env:USERPROFILE\.bun\bin;$env:Path"
-    $script:NeedsReload = $true
-    Ok "installed ($(bun --version))"
+}
+if (-not $uv) {
+    Info "not found - installing it"
+    try {
+        Invoke-RestMethod https://astral.sh/uv/install.ps1 | Invoke-Expression
+    } catch {
+        Die "Could not download uv. Check your internet connection, then run this again.`n           ($($_.Exception.Message))"
+    }
+    $env:PATH = "$env:USERPROFILE\.local\bin;$env:PATH"
+    if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
+        Die "uv installed but is not on PATH. Close this window, open a new one, and try again."
+    }
+    Ok "installed"
+} else {
+    Ok "already installed ($(uv --version))"
 }
 
-# Prove the binary actually runs on this CPU before going further.
-try {
-    $null = bun --revision 2>&1
-} catch {
-    Die "Bun installed but won't run on this CPU.`n      Reinstall the baseline build: powershell -c ""irm bun.sh/install.ps1|iex"" -Baseline"
-}
-
-# ------------------------------------------------------- 4. deps + browser
-Step 4 "Dependencies and Chromium (~300 MB, one time)"
-bun install
-Ok "packages installed"
-bunx playwright install chromium
-Ok "Chromium ready"
-# Note: 'playwright install-deps' is Linux-only. Windows needs nothing extra.
-
-# -------------------------------------------------------------- 5. verify
-Step 5 "Checking it runs"
-bun --version | Out-Null
+# --- 2. Python -------------------------------------------------------------
+Step 2 "Python 3.12"
+uv python install 3.12
+if ($LASTEXITCODE -ne 0) { Die "Could not install Python 3.12." }
 Ok "ready"
 
-Write-Host "`nSetup complete. Opening the menu..." -ForegroundColor Green
-Start-Sleep -Seconds 1
+# --- 3. Packages -----------------------------------------------------------
+Step 3 "Application packages"
+uv sync
+if ($LASTEXITCODE -ne 0) { Die "Could not install the application's packages." }
+Ok "installed"
+
+# --- 4. Browser ------------------------------------------------------------
+# Several shops (Amazon, Flipkart and others) have no product feed to read,
+# so the app drives a real browser to see their pages. This is that browser.
+# It runs invisibly - you will not see windows opening.
+Step 4 "Browser engine (about 500 MB - the slow part)"
+uv run playwright install chromium
+if ($LASTEXITCODE -ne 0) { Die "Could not download the browser engine. Check your connection and run this again." }
+Ok "downloaded"
+
+# --- 5. Verify -------------------------------------------------------------
+# Proves the four things that break silently: secure connections, page
+# templates, the web server, and the browser engine. Better to fail here
+# with a clear message than halfway through collecting prices.
+Step 5 "Checking everything works"
+uv run python -m switch_tracker spike
+if ($LASTEXITCODE -ne 0) { Die "The check above failed. Send that output along when asking for help." }
+
+New-Item -ItemType File -Path ".setup-complete" -Force | Out-Null
+Write-Host "`n  Setup complete." -ForegroundColor Green
+Write-Host "  From now on, double-clicking START.bat goes straight to the app.`n"

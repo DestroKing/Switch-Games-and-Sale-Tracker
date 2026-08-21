@@ -1,0 +1,58 @@
+[project]
+name = "switch-tracker"
+version = "0.4.0"
+description = "Local price tracker for Nintendo Switch / Switch 2 physical cartridges at Indian retailers"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn>=0.32",
+    "jinja2>=3.1",
+    "httpx>=0.27",
+    "playwright>=1.47",
+]
+
+[project.scripts]
+switch-tracker = "switch_tracker.__main__:main"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "pytest-asyncio>=0.24",
+    "ruff>=0.7",
+    "mypy>=1.13",
+    "pyinstaller>=6.11",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+# Only the Python package. The TypeScript tree also lives under src/ and is
+# deliberately invisible here — it is the behavioural reference for the port,
+# not something to ship.
+packages = ["src/switch_tracker"]
+
+[tool.ruff]
+line-length = 110
+src = ["src", "tests"]
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF", "ASYNC", "BLE"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+mypy_path = "src"
+packages = ["switch_tracker"]
+# Playwright ships partial stubs; don't fail the gate on its internals.
+[[tool.mypy.overrides]]
+module = ["playwright.*"]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+asyncio_mode = "auto"
+addopts = "-q"

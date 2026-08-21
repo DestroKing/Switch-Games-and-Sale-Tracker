@@ -1,5 +1,5 @@
-import { getJson } from "../core/http.ts";
-import { classify, inferRegion, parsePrice } from "../core/parse.ts";
+import { get, getJson } from "../core/http.ts";
+import { classify, inferCondition, inferRegion, parsePrice } from "../core/parse.ts";
 import type { Adapter, FetchOutcome, RawListing, StoreConfig } from "../core/types.ts";
 
 /**
@@ -57,12 +57,32 @@ export const wooAdapter: Adapter = {
     const categoryQueries = categoryValues.map((v) => (v ? `&category=${encodeURIComponent(v)}` : ""));
 
     const listings: RawListing[] = [];
+    let rawFetched = 0;
+    let expectedTotal = 0;
+
     for (const categoryQuery of categoryQueries) {
       for (let page = 1; page <= MAX_PAGES; page++) {
         const url = `${store.baseUrl}${base}?per_page=${PER_PAGE}&page=${page}${categoryQuery}`;
-        const products = await getJson<WooProduct[]>(url);
-        if (!products || products.length === 0) break;
+        const res = await get(url, { accept: "application/json" });
+        if (!res.ok) break;
 
+        // The Store API reports the real count for this query in a header
+        // — an actual answer for "did we get everything," not a guess from
+        // watching row counts. Read once per category query, from whichever
+        // page happens to still have it (some Woo versions only send it on
+        // page 1).
+        const total = Number(res.headers["x-wp-total"]);
+        if (Number.isFinite(total) && total > 0) expectedTotal += total;
+
+        let products: WooProduct[];
+        try {
+          products = JSON.parse(res.body) as WooProduct[];
+        } catch {
+          break;
+        }
+        if (!Array.isArray(products) || products.length === 0) break;
+
+        rawFetched += products.length;
         for (const p of products) {
           const listing = toListing(store, p);
           if (listing) listings.push(listing);
@@ -72,9 +92,21 @@ export const wooAdapter: Adapter = {
       }
     }
 
-    return listings.length > 0
-      ? { status: "ok", listings }
-      : { status: "failed", reason: "Store API reachable but returned no Switch products" };
+    // expectedTotal counts everything in the category (consoles/accessories
+    // included, if the store's own tagging mixes them in) — rawFetched vs.
+    // expectedTotal is "did we actually reach the end," not "why doesn't
+    // listings.length match" (that gap is the classifier correctly dropping
+    // non-game rows, a different and expected thing).
+    const completeness =
+      expectedTotal > 0 ? ` (fetched ${rawFetched} of ${expectedTotal} in category, per the store's own count)` : "";
+
+    if (listings.length === 0) {
+      return { status: "failed", reason: `Store API reachable but returned no Switch products${completeness}` };
+    }
+    if (expectedTotal > 0 && rawFetched < expectedTotal) {
+      return { status: "partial", listings, reason: `stopped early${completeness}` };
+    }
+    return { status: "ok", listings };
   },
 };
 
@@ -122,6 +154,7 @@ function toListing(store: StoreConfig, p: WooProduct): RawListing | undefined {
     inStock: p.is_in_stock !== false,
     platform,
     region: inferRegion(p.name, "IN"),
+    condition: inferCondition(context),
     ...(p.images?.[0]?.src ? { imageUrl: p.images[0].src } : {}),
   };
 }

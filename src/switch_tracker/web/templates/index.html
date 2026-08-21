@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Switch cartridge prices</title>
+<link rel="stylesheet" href="/static/app.css">
+<script src="/static/htmx.min.js" defer></script>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <h1>Switch cartridge prices</h1>
+    <span class="stamp" id="stamp"></span>
+    <p class="lede" id="lede">Loading…</p>
+  </header>
+
+  {% if onedrive_warning %}
+  <div class="warning">{{ onedrive_warning }}</div>
+  {% endif %}
+
+  {% if not probed %}
+  <div class="note">
+    <b>Start with “Check stores”.</b> The shipped store list is a guess about which
+    shop runs on which platform, and it is wrong for most of them. Checking first
+    corrects it automatically — collecting before that just produces failures that
+    look like bugs.
+  </div>
+  {% endif %}
+
+  <!-- Every capability is a button here. Each one starts a separate worker
+       process; none of them runs inside this page's request. -->
+  <div class="actions">
+    {% if probed %}
+    <button class="primary" data-action="collect">Collect prices</button>
+    <button data-action="probe">Check stores</button>
+    {% else %}
+    <button class="primary" data-action="probe">Check stores</button>
+    <button data-action="collect">Collect prices</button>
+    {% endif %}
+    <button data-action="fx">Update exchange rate</button>
+    {% if fixable %}
+    <select id="fixStore" aria-label="Store to fix">
+      <option value="">Fix a broken store…</option>
+      {% for store in fixable %}<option value="{{ store.id }}">{{ store.name }}</option>{% endfor %}
+    </select>
+    {% endif %}
+    <button data-action="reset-corrections" data-confirm="Wipe all store corrections?">
+      Reset corrections
+    </button>
+  </div>
+  <div id="console" aria-live="polite"></div>
+
+  <h2>Collector</h2>
+  <div class="strip" id="strip"></div>
+
+  <h2>Moved since last run</h2>
+  <div id="fxnote"></div>
+  <div id="movers"></div>
+
+  <h2>All listings</h2>
+  <div class="filters">
+    <input type="search" id="q" placeholder="Search titles — try zelda, mario, pokemon">
+    <div class="seg" id="platform" role="group" aria-label="Console">
+      <button data-v="" aria-pressed="true">Both consoles</button>
+      <button data-v="SWITCH" aria-pressed="false">Switch</button>
+      <button data-v="SWITCH2" aria-pressed="false">Switch 2</button>
+    </div>
+    <div class="seg" id="condition" role="group" aria-label="Condition">
+      <button data-v="" aria-pressed="true">New + Pre-Owned</button>
+      <button data-v="NEW" aria-pressed="false">New</button>
+      <button data-v="PRE_OWNED" aria-pressed="false">Pre-Owned</button>
+    </div>
+    <select id="store" aria-label="Store"><option value="">All stores</option></select>
+    <select id="region" aria-label="Region"><option value="">All regions</option></select>
+    <label class="check"><input type="checkbox" id="stock"> In stock only</label>
+    <button id="reset">Reset</button>
+  </div>
+  <div class="count" id="count"></div>
+  <div id="list"></div>
+
+</div>
+<script>
+const ACTIVE_RUN = {{ active_run | tojson }};
+</script>
+<script src="/static/app.js"></script>
+</body>
+</html>

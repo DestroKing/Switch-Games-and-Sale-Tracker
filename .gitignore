@@ -1,9 +1,34 @@
+# --- runtime state (never committed; lives in %LOCALAPPDATA% at runtime)
 data/
-node_modules/
+diagnostics/
 *.db
 *.db-wal
 *.db-shm
 collect.log
 check-stores.log
-diagnostics/
+.setup-complete
+
+# --- build output
 dist/
+build/
+node_modules/
+
+# --- python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# --- machine-local dev config: package mirror and CA paths that exist on one
+# --- machine only. Publishing it would leak private infrastructure details.
+.devenv
+
+# uv.lock is deliberately NOT committed.
+# It records the absolute URL of whichever package index resolved it. Generated
+# behind a private package mirror, it pins hundreds of URLs that do not resolve
+# anywhere else -- `uv sync` then fails with connection errors that look like a
+# broken project rather than a wrong index.
+# pyproject.toml already bounds every version; let each machine resolve its own.
+uv.lock

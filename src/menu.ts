@@ -166,11 +166,23 @@ async function pause(): Promise<void> {
 }
 
 async function main(): Promise<void> {
+  // Set right after 1/2 actually run, cleared by any other choice. Guards
+  // against the specific trap this was added for: collect finishes, the
+  // user hits Enter once to clear the "Press Enter to go back" pause, then
+  // Enter again out of habit at the very next prompt — which used to
+  // silently re-launch collect, because right after a first-ever run the
+  // suggested default (a blank Enter's target) is still "2" (run again to
+  // see price changes). A blank Enter repeating the action just taken needs
+  // an actual number typed, not another free pass.
+  let lastAction: string | undefined;
+
   for (;;) {
     const state = readState();
     const suggested = draw(state);
 
-    const choice = (prompt(`  Choose [${suggested}]: `) ?? "").trim() || suggested;
+    const raw = (prompt(`  Choose [${suggested}]: `) ?? "").trim();
+    const choice = raw || (suggested === lastAction ? "" : suggested);
+    lastAction = choice === "1" || choice === "2" ? choice : undefined;
 
     switch (choice) {
       case "1":

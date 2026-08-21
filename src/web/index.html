@@ -137,6 +137,11 @@
       <button data-v="SWITCH" aria-pressed="false">Switch</button>
       <button data-v="SWITCH2" aria-pressed="false">Switch 2</button>
     </div>
+    <div class="seg" id="condition" role="group" aria-label="Condition">
+      <button data-v="" aria-pressed="true">New + Pre-Owned</button>
+      <button data-v="NEW" aria-pressed="false">New</button>
+      <button data-v="PRE_OWNED" aria-pressed="false">Pre-Owned</button>
+    </div>
     <select id="store" aria-label="Store"><option value="">All stores</option></select>
     <select id="region" aria-label="Region"><option value="">All regions</option></select>
     <label class="check"><input type="checkbox" id="stock"> In stock only</label>
@@ -212,7 +217,7 @@ async function boot(){
 
 // Filter state. Every change re-queries the server, because sorting a page of
 // already-loaded rows would sort a subset and call it "cheapest".
-const state = { q:"", platform:"", region:"", store:"", inStock:false,
+const state = { q:"", platform:"", region:"", store:"", condition:"", inStock:false,
                 sort:"price", dir:"asc", offset:0 };
 let rows = [];
 
@@ -229,6 +234,7 @@ function qs(){
   if(state.platform) p.set("platform", state.platform);
   if(state.region) p.set("region", state.region);
   if(state.store) p.set("store", state.store);
+  if(state.condition) p.set("condition", state.condition);
   if(state.inStock) p.set("inStock","1");
   p.set("sort", state.sort); p.set("dir", state.dir);
   p.set("limit","100"); p.set("offset", String(state.offset));
@@ -276,6 +282,7 @@ async function search(append=false){
       <td><a href="${esc(r.url)}" target="_blank" rel="noopener">${esc(r.raw_title)}</a>
         ${r.region!=="IN" ? `<span class="tag">${esc(r.region.replace("_"," "))}</span>`:""}
         ${r.platform==="SWITCH2" ? `<span class="tag">SW2</span>`:""}
+        ${r.condition==="PRE_OWNED" ? `<span class="tag">pre-owned</span>`:""}
         ${!r.in_stock ? `<span class="tag oos">out of stock</span>`:""}</td>
       <td>${esc(r.store)}</td>
       <td class="num">${r.native_currency==="INR" ? "—" :
@@ -305,13 +312,15 @@ async function search(append=false){
 }
 
 function reset(){
-  Object.assign(state, { q:"", platform:"", region:"", store:"", inStock:false,
+  Object.assign(state, { q:"", platform:"", region:"", store:"", condition:"", inStock:false,
                          sort:"price", dir:"asc", offset:0 });
   document.getElementById("q").value = "";
   document.getElementById("store").value = "";
   document.getElementById("region").value = "";
   document.getElementById("stock").checked = false;
   document.querySelectorAll("#platform button").forEach(b =>
+    b.setAttribute("aria-pressed", String(b.dataset.v === "")));
+  document.querySelectorAll("#condition button").forEach(b =>
     b.setAttribute("aria-pressed", String(b.dataset.v === "")));
   search();
 }
@@ -320,6 +329,14 @@ document.querySelectorAll("#platform button").forEach(b => {
   b.addEventListener("click", () => {
     state.platform = b.dataset.v; state.offset = 0;
     document.querySelectorAll("#platform button").forEach(x =>
+      x.setAttribute("aria-pressed", String(x === b)));
+    search();
+  });
+});
+document.querySelectorAll("#condition button").forEach(b => {
+  b.addEventListener("click", () => {
+    state.condition = b.dataset.v; state.offset = 0;
+    document.querySelectorAll("#condition button").forEach(x =>
       x.setAttribute("aria-pressed", String(x === b)));
     search();
   });
