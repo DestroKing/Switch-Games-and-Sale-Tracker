@@ -1,11 +1,11 @@
 import { chromium, type Browser, type Page } from "playwright";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { classify, firstRupeePrice, inferRegion, parsePrice } from "../core/parse.ts";
 import type { Adapter, FetchOutcome, Platform, RawListing, Region, StoreConfig } from "../core/types.ts";
 
 /**
  * Extraction is layered, hardest-to-break first, because CSS class names on
- * these three sites are the least durable thing about them — Flipkart in
+ * these sites are the least durable thing about them — Flipkart in
  * particular ships obfuscated classes that change without notice.
  *
  *   1. JSON-LD   — schema.org Product/ItemList in a <script> tag. Survives
@@ -35,6 +35,50 @@ interface StoreProfile {
 
 export function hasBrowserProfile(storeId: string): boolean {
   return storeId in PROFILES;
+}
+
+/**
+ * Selectors found via `inspect.ts` land here, not in this file — same reason
+ * `stores.local.json` exists instead of probe rewriting stores.ts: a tool
+ * should never patch the source file it also imports. `inspect.ts` writes
+ * this directly, so a corrected selector is usable on the very next
+ * `collect` run with no manual editing step in between.
+ */
+const PROFILE_OVERRIDES_PATH = "profiles.local.json";
+const SELECTOR_FIELDS = ["cardSelectors", "titleSelectors", "priceSelectors", "linkSelectors"] as const;
+type SelectorField = (typeof SELECTOR_FIELDS)[number];
+type ProfileOverrides = Record<string, Partial<Record<SelectorField, readonly string[]>>>;
+
+function readProfileOverrides(): ProfileOverrides {
+  if (!existsSync(PROFILE_OVERRIDES_PATH)) return {};
+  try {
+    return JSON.parse(readFileSync(PROFILE_OVERRIDES_PATH, "utf8")) as ProfileOverrides;
+  } catch {
+    return {};
+  }
+}
+
+/** Exported for inspect.ts — prepends a found selector so it's tried first, without discarding the existing guesses. */
+export function addProfileSelector(storeId: string, field: SelectorField, css: string): void {
+  const all = readProfileOverrides();
+  const forStore = all[storeId] ?? {};
+  const existing = forStore[field] ?? [];
+  if (existing.includes(css)) return;
+  all[storeId] = { ...forStore, [field]: [css, ...existing] };
+  writeFileSync(PROFILE_OVERRIDES_PATH, JSON.stringify(all, null, 2) + "\n");
+}
+
+function effectiveProfile(storeId: string): StoreProfile | undefined {
+  const base = PROFILES[storeId];
+  if (!base) return undefined;
+  const override = readProfileOverrides()[storeId];
+  if (!override) return base;
+  const merged: { -readonly [K in keyof StoreProfile]: StoreProfile[K] } = { ...base };
+  for (const field of SELECTOR_FIELDS) {
+    const found = override[field];
+    if (found?.length) merged[field] = [...found, ...base[field]];
+  }
+  return merged;
 }
 
 const PROFILES: Record<string, StoreProfile> = {
@@ -75,18 +119,6 @@ const PROFILES: Record<string, StoreProfile> = {
     pages: 3,
   },
 
-  croma: {
-    cardSelectors: ["li.product-item", "div.product-item", "[data-testid='product-card']"],
-    titleSelectors: ["h3.product-title", ".product-title a", "h3 a"],
-    priceSelectors: ["span.amount", ".new-price", "[data-testid='price']"],
-    linkSelectors: ["a[href*='/p/']", "h3 a", "a"],
-    outOfStockSelectors: [".out-of-stock", "div:has-text('Out of stock')"],
-    defaultRegion: "IN",
-    platformHint: "SWITCH",
-    ready: "li.product-item, div.product-item, [data-testid='product-card']",
-    pages: 2,
-  },
-
   playasia: {
     cardSelectors: ["div.product-item", "li.product", "[class*='product-tile']"],
     titleSelectors: [".product-title", ".title", "h3"],
@@ -95,6 +127,68 @@ const PROFILES: Record<string, StoreProfile> = {
     outOfStockSelectors: [".out-of-stock", ".sold-out"],
     defaultRegion: "UNKNOWN",
     pages: 2,
+  },
+
+  // ---- Everything below is an unverified first guess, same as the four
+  // above were before their selectors were confirmed against a live page.
+  // Run `bun run src/cli/inspect.ts <id>` and correct these from what's
+  // actually there — layer 1 (JSON-LD) and the ₹-pattern text fallback (layer
+  // 4, in fromSelectors below) mean a wrong guess here still has a chance of
+  // working, it just isn't something to rely on.
+
+  gamestheshop: {
+    // Next.js storefront. No id/data-* hooks confirmed yet — generic
+    // "product card is a link to a product page" guesses.
+    cardSelectors: ["a[href*='/product/']", "div[class*='product-card' i]", "div[class*='productCard' i]"],
+    titleSelectors: ["h2", "h3", "[class*='title' i]"],
+    priceSelectors: ["[class*='price' i]"],
+    linkSelectors: ["a[href*='/product/']", "a"],
+    outOfStockSelectors: [":has-text('Out of Stock')", ":has-text('Sold Out')"],
+    defaultRegion: "IN",
+    platformHint: "SWITCH",
+    ready: "a[href*='/product/']",
+    pages: 3,
+  },
+
+  gamenation: {
+    cardSelectors: ["a[href*='/products/']", "div[class*='product-card' i]", "div[class*='ProductCard' i]"],
+    titleSelectors: ["h2", "h3", "[class*='title' i]"],
+    priceSelectors: ["[class*='price' i]"],
+    linkSelectors: ["a[href*='/products/']", "a"],
+    outOfStockSelectors: [":has-text('Out of Stock')", ":has-text('Sold Out')"],
+    defaultRegion: "IN",
+    platformHint: "SWITCH",
+    ready: "a[href*='/products/']",
+    pages: 3,
+  },
+
+  mcubegames: {
+    cardSelectors: ["a[href*='/products/']", "div[class*='product-card' i]", "div[class*='ProductCard' i]"],
+    titleSelectors: ["h2", "h3", "[class*='title' i]"],
+    priceSelectors: ["[class*='price' i]"],
+    linkSelectors: ["a[href*='/products/']", "a"],
+    outOfStockSelectors: [":has-text('Out of Stock')", ":has-text('Sold Out')"],
+    defaultRegion: "IN",
+    platformHint: "SWITCH",
+    ready: "a[href*='/products/']",
+    pages: 3,
+  },
+
+  e2zstore: {
+    // Was guessed WooCommerce before probing found it blocks non-browser
+    // requests outright (403) — the storefront theme is presumably still
+    // WooCommerce's default markup, so start from the same "current price
+    // wins over struck-through old price" pattern fixed for Croma/hgworld-
+    // style themes: `ins` wraps the sale price, `del` the crossed-out one.
+    cardSelectors: ["li.product", "div.product", "[data-product-id]"],
+    titleSelectors: ["h2.woocommerce-loop-product__title", ".product-title", "h2 a", "h3 a"],
+    priceSelectors: ["span.price ins .amount", "span.price .amount", ".price"],
+    linkSelectors: ["a.woocommerce-LoopProduct-link", "a"],
+    outOfStockSelectors: [".out-of-stock", ":has-text('Out of stock')"],
+    defaultRegion: "IN",
+    platformHint: "SWITCH",
+    ready: "li.product, div.product",
+    pages: 3,
   },
 };
 
@@ -131,7 +225,7 @@ export const browserAdapter: Adapter = {
   kind: "BROWSER",
 
   async fetch(store: StoreConfig): Promise<FetchOutcome> {
-    const profile = PROFILES[store.id];
+    const profile = effectiveProfile(store.id);
     if (!profile) return { status: "failed", reason: `no profile for ${store.id}` };
     if (!store.searchUrls?.length) return { status: "failed", reason: "no searchUrls configured" };
 
