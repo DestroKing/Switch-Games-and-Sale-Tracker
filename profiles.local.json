@@ -1,0 +1,29 @@
+{
+  "gamestheshop": {
+    "cardSelectors": [
+      "div"
+    ]
+  },
+  "amazon_in": {
+    "cardSelectors": [
+      "div.a-section.aok-relative.s-image-fixed-height"
+    ],
+    "titleSelectors": [
+      "img.s-image"
+    ]
+  },
+  "e2zstore": {
+    "cardSelectors": [
+      "div"
+    ],
+    "titleSelectors": [
+      "a"
+    ],
+    "priceSelectors": [
+      "bdi"
+    ],
+    "linkSelectors": [
+      "a"
+    ]
+  }
+}

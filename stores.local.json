@@ -1,0 +1,22 @@
+{
+  "gameloot": {
+    "kind": "WOOCOMMERCE",
+    "note": "corrected by probe"
+  },
+  "emartgames": {
+    "kind": "WOOCOMMERCE",
+    "note": "corrected by probe"
+  },
+  "hgworld": {
+    "kind": "WOOCOMMERCE",
+    "note": "corrected by probe"
+  },
+  "zozila": {
+    "kind": "WOOCOMMERCE",
+    "note": "corrected by probe"
+  },
+  "designinfo": {
+    "kind": "WOOCOMMERCE",
+    "note": "corrected by probe"
+  }
+}
