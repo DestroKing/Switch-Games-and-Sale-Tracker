@@ -41,11 +41,28 @@ export const STORES: readonly StoreConfig[] = [
     collections: ["nintendo-switch-games-cds-online-india", "nintendo-switch-2-games"],
     note: "Multi-console store (also sells PS3/PS4/PS5) — scoped to its two Switch categories, found via `bun run probe`'s category listing.",
   },
-  { id: "hgworld", name: "HG World", baseUrl: "https://hgworld.in", kind: "SHOPIFY", currency: "INR", tier: 2, enabled: true, platformHint: "SWITCH", note: "Unverified" },
+  {
+    id: "hgworld", name: "HG World", baseUrl: "https://hgworld.in", kind: "SHOPIFY",
+    currency: "INR", tier: 2, enabled: true, platformHint: "SWITCH",
+    collections: ["nintendo-games"],
+    note: "Confirmed games category (https://hgworld.in/product-category/gaming-tittle/nintendo-games/) — probe's category listing missed it at first because the store has 100+ categories and the fetch wasn't paginated.",
+  },
   {
     id: "zozila", name: "Zozila", baseUrl: "https://zozila.com", kind: "SHOPIFY",
     currency: "INR", tier: 2, enabled: false, platformHint: "SWITCH",
     note: "Disabled: `bun run probe`'s category listing shows it's a digital gift-card/voucher marketplace (Amazon, Apple iTunes, Air India, Apollo Pharmacy...), not a cartridge retailer — none of its ~100 categories matched Switch/Nintendo.",
+  },
+  {
+    id: "designinfo", name: "DesignInfo", baseUrl: "https://www.designinfo.in", kind: "SHOPIFY",
+    currency: "INR", tier: 2, enabled: true,
+    // No platformHint on purpose: this is a general multi-brand electronics
+    // retailer, not Switch-only, and it has no separate games/accessories
+    // category to scope with (confirmed — the console category has no
+    // filters). Relying on classify() alone to require an explicit "Switch"/
+    // "Nintendo" mention is the safe default here — setting a hint on an
+    // unscoped mixed catalogue is exactly what caused the false positives on
+    // nekavo/gameloot/hgworld before those got scoped.
+    note: "No games/accessories split available — unscoped, relies entirely on classification. `kind` is a guess; correct via `bun run probe`.",
   },
 
   // ---- Tier 1: browser automation, run last. ----

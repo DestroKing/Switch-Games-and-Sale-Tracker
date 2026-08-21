@@ -31,6 +31,15 @@ interface StoreProfile {
   /** Wait for this before scraping; usually the results container. */
   readonly ready?: string;
   readonly pages: number;
+  /**
+   * Some storefronts (mcubegames, gamenation — both Next.js apps) never
+   * change the URL for pagination at all; page 2+ only exists behind a
+   * client-side button click that re-fetches and re-renders in place. When
+   * set, paging clicks the first matching selector instead of navigating to
+   * `searchUrls` with `{p}` substituted. Tried in order, same convention as
+   * every other selector list here.
+   */
+  readonly nextPageSelectors?: readonly string[];
 }
 
 export function hasBrowserProfile(storeId: string): boolean {
@@ -167,7 +176,12 @@ const PROFILES: Record<string, StoreProfile> = {
     defaultRegion: "IN",
     platformHint: "SWITCH",
     ready: "a[class*='productCard' i]",
-    pages: 3,
+    // Confirmed via diagnostics: the &page={p} URL param does nothing at
+    // all — pages 1/2/3 came back byte-for-byte the same 20 products.
+    // Pagination is a client-side button with no URL change; the real
+    // "Next page" control is aria-labelled, unlike mcubegames below.
+    nextPageSelectors: ["button[aria-label='Next page']"],
+    pages: 10,
   },
 
   mcubegames: {
@@ -184,7 +198,17 @@ const PROFILES: Record<string, StoreProfile> = {
     defaultRegion: "IN",
     platformHint: "SWITCH",
     ready: "div.bg-card, a[href^='/product/']",
-    pages: 3,
+    // Confirmed via diagnostics: pages 1/2/3 were identical — the same
+    // under-count (14 vs. a real catalogue of 42 pages) would happen to any
+    // store built this way. The "Next" control has no text or aria-label,
+    // just a chevron icon, so it's targeted by that icon's class instead —
+    // .last() because the same icon could plausibly appear elsewhere (a
+    // carousel, a dropdown) and pagination sits at the bottom of the page.
+    nextPageSelectors: ["button:has(svg.lucide-chevron-right)"],
+    // 10 pages, not all 42 — each click-and-wait costs several seconds, and
+    // the per-store collect deadline is 180s. Raise this later if 10 proves
+    // safely within budget.
+    pages: 10,
   },
 
   e2zstore: {
@@ -267,9 +291,25 @@ export const browserAdapter: Adapter = {
 
       for (const template of store.searchUrls) {
         for (let p = 1; p <= profile.pages; p++) {
-          const url = template.replace("{p}", String(p));
           try {
-            const { rows, method } = await scrapePage(page, store, profile, url, p);
+            let rows: Extracted[];
+            let method: string;
+
+            if (p > 1 && profile.nextPageSelectors?.length) {
+              // No URL to go to — this store's pagination only exists
+              // behind a client-side button click with no navigation at
+              // all, confirmed by page 1/2/3 coming back byte-identical
+              // when driven by a URL parameter instead.
+              const clicked = await clickNextPage(page, profile.nextPageSelectors);
+              if (!clicked) break; // reached the last page
+              await page.waitForTimeout(1500);
+              ({ rows, method } = await extract(page, store, profile));
+              await dump(page, `${store.id}-p${p}`);
+            } else {
+              const url = template.replace("{p}", String(p));
+              ({ rows, method } = await scrapePage(page, store, profile, url, p));
+            }
+
             methods.add(method);
             for (const row of rows) {
               const l = toListing(store, profile, row);
@@ -302,6 +342,26 @@ export const browserAdapter: Adapter = {
       : { status: "ok", listings: unique };
   },
 };
+
+/** Tries each candidate, biased toward the last match — pagination controls
+ * sit at the end of a results grid, and the same icon-only button could
+ * plausibly exist elsewhere on the page (a carousel, a dropdown). Returns
+ * false on a disabled button (the real "no more pages" signal for this
+ * kind of control) or when nothing matches at all. */
+async function clickNextPage(page: Page, selectors: readonly string[]): Promise<boolean> {
+  for (const sel of selectors) {
+    const locator = page.locator(sel).last();
+    if ((await locator.count().catch(() => 0)) === 0) continue;
+    if (await locator.isDisabled().catch(() => false)) return false;
+    try {
+      await locator.click({ timeout: 5000 });
+      return true;
+    } catch {
+      continue;
+    }
+  }
+  return false;
+}
 
 async function scrapePage(
   page: Page,

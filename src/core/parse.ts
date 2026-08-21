@@ -18,10 +18,19 @@ export function parsePrice(raw: string | number | null | undefined): number | un
 
   const lastComma = cleaned.lastIndexOf(",");
   const lastDot = cleaned.lastIndexOf(".");
+
+  // A comma with no decimal point anywhere in the string is always a
+  // thousands separator on these sites — "₹3,599" is three thousand five
+  // hundred ninety-nine, never 3.599. Treating it as a decimal point (the
+  // previous rule: "whichever separator is last wins") silently produced a
+  // price ~1000x too small for any whole-rupee price written without a
+  // trailing ".00", which is the normal way to write one.
   const normalised =
-    lastComma > lastDot
-      ? cleaned.replace(/\./g, "").replace(",", ".")
-      : cleaned.replace(/,/g, "");
+    lastDot === -1
+      ? cleaned.replace(/,/g, "")
+      : lastComma > lastDot
+        ? cleaned.replace(/\./g, "").replace(",", ".")
+        : cleaned.replace(/,/g, "");
 
   const n = Number.parseFloat(normalised);
   return Number.isFinite(n) ? n : undefined;

@@ -1,8 +1,18 @@
 import { adapterFor, closeBrowser } from "../adapters/index.ts";
 import { activeStores } from "../config/overrides.ts";
+import { mapWithConcurrency } from "../core/concurrency.ts";
 import { getDb, nowIso } from "../core/db.ts";
 import type { RawListing, StoreConfig } from "../core/types.ts";
 import { refreshRates, toInr } from "../fx/rates.ts";
+
+/**
+ * Stores are on different hosts and have nothing to do with each other, so
+ * there's no reason one store's 180s deadline should delay every store
+ * after it in line — this is how many can be in flight at once. Kept modest
+ * because BROWSER-kind stores each open a real Chromium context; too high a
+ * number here trades collect time for a machine that's unusable meanwhile.
+ */
+const STORE_CONCURRENCY = 4;
 
 /**
  * No single store may hold the run hostage.
@@ -42,28 +52,34 @@ export async function collect(): Promise<void> {
   const active = STORES.filter((s) => s.enabled);
   console.log(`run ${runId}: ${active.length} stores\n`);
 
-  // Easy stores first so a Playwright failure never blocks the useful data.
+  // Easy stores first so a Playwright failure never blocks the useful data —
+  // still meaningful under concurrency, since it decides fill order for the
+  // limited number of concurrent slots.
   const ordered = [...active].sort((a, b) => rank(a) - rank(b));
 
-  for (const store of ordered) {
+  await mapWithConcurrency(ordered, STORE_CONCURRENCY, async (store) => {
     const started = Date.now();
     const adapter = adapterFor(store.kind);
 
-    // Printed before the fetch, so a stall names the store responsible.
-    process.stdout.write(`  ${store.id} (${store.kind}) ... `);
+    // A complete line, not a prefix written now and a suffix later — with
+    // several stores in flight at once, two stores each writing half a line
+    // would interleave into garbage. Still names the store before the fetch
+    // starts, so a stall is identifiable by which store never printed a
+    // second line.
+    console.log(`  ${store.id} (${store.kind}) starting...`);
 
     if (!adapter) {
       record(runId, store.id, "skipped", 0, Date.now() - started, `no adapter for ${store.kind}`);
-      console.log(`skipped - no ${store.kind} adapter`);
-      continue;
+      console.log(`  ${store.id}: skipped - no ${store.kind} adapter`);
+      return;
     }
 
     try {
       const outcome = await withDeadline(adapter.fetch(store), STORE_DEADLINE_MS, store.id);
       if (outcome.status === "failed") {
         record(runId, store.id, "failed", 0, Date.now() - started, outcome.reason);
-        console.log(`FAILED - ${outcome.reason}`);
-        continue;
+        console.log(`  ${store.id}: FAILED - ${outcome.reason}`);
+        return;
       }
       const saved = persist(runId, store, outcome.listings);
       record(
@@ -74,13 +90,13 @@ export async function collect(): Promise<void> {
         Date.now() - started,
         outcome.status === "partial" ? outcome.reason : null,
       );
-      console.log(`${outcome.status} - ${saved} listings`);
+      console.log(`  ${store.id}: ${outcome.status} - ${saved} listings`);
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       record(runId, store.id, "failed", 0, Date.now() - started, msg);
-      console.log(`THREW - ${msg}`);
+      console.log(`  ${store.id}: THREW - ${msg}`);
     }
-  }
+  });
 
   db.run(`UPDATE run SET finished_at = ? WHERE id = ?`, [nowIso(), runId]);
   await closeBrowser();
