@@ -8,11 +8,15 @@ import { refreshRates, toInr } from "../fx/rates.ts";
 /**
  * Stores are on different hosts and have nothing to do with each other, so
  * there's no reason one store's 180s deadline should delay every store
- * after it in line — this is how many can be in flight at once. Kept modest
- * because BROWSER-kind stores each open a real Chromium context; too high a
- * number here trades collect time for a machine that's unusable meanwhile.
+ * after it in line. But HTTP stores and BROWSER stores cost wildly
+ * different amounts of CPU/memory per store — a flat concurrency limit
+ * shared between them let several real Chromium contexts compete for the
+ * same machine at once, which is a plausible way a store that used to
+ * finish comfortably inside 180s now doesn't. Two separate pools, each
+ * sized for what it actually costs.
  */
-const STORE_CONCURRENCY = 4;
+const HTTP_CONCURRENCY = 8;
+const BROWSER_CONCURRENCY = 2;
 
 /**
  * No single store may hold the run hostage.
@@ -52,12 +56,7 @@ export async function collect(): Promise<void> {
   const active = STORES.filter((s) => s.enabled);
   console.log(`run ${runId}: ${active.length} stores\n`);
 
-  // Easy stores first so a Playwright failure never blocks the useful data —
-  // still meaningful under concurrency, since it decides fill order for the
-  // limited number of concurrent slots.
-  const ordered = [...active].sort((a, b) => rank(a) - rank(b));
-
-  await mapWithConcurrency(ordered, STORE_CONCURRENCY, async (store) => {
+  async function processStore(store: StoreConfig): Promise<void> {
     const started = Date.now();
     const adapter = adapterFor(store.kind);
 
@@ -96,7 +95,17 @@ export async function collect(): Promise<void> {
       record(runId, store.id, "failed", 0, Date.now() - started, msg);
       console.log(`  ${store.id}: THREW - ${msg}`);
     }
-  });
+  }
+
+  const httpStores = active.filter((s) => rank(s) === 0);
+  const browserStores = active.filter((s) => rank(s) === 1);
+
+  // Both pools run at once — HTTP stores were never waiting on browser
+  // stores to begin with, no reason to start them staggered.
+  await Promise.all([
+    mapWithConcurrency(httpStores, HTTP_CONCURRENCY, processStore),
+    mapWithConcurrency(browserStores, BROWSER_CONCURRENCY, processStore),
+  ]);
 
   db.run(`UPDATE run SET finished_at = ? WHERE id = ?`, [nowIso(), runId]);
   await closeBrowser();
