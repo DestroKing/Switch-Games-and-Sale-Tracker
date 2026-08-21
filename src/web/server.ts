@@ -174,12 +174,16 @@ function listings(opt: ListingQuery) {
   }
 
   const clause = where.length ? `WHERE ${where.join(" AND ")}` : "";
-  const base = `
+  // The CTE has to precede the SELECT that uses it — kept separate from
+  // `from` so both queries below can share the FROM/JOIN/WHERE half without
+  // repeating a WITH ahead of a SELECT it isn't attached to.
+  const cte = `
     WITH latest AS (
       SELECT listing_id, inr_price, native_price, native_currency, in_stock, captured_at,
              ROW_NUMBER() OVER (PARTITION BY listing_id ORDER BY captured_at DESC) AS rn
       FROM price_point
-    )
+    )`;
+  const from = `
     FROM listing l
     JOIN store s ON s.id = l.store_id
     JOIN latest ON latest.listing_id = l.id AND latest.rn = 1
@@ -187,14 +191,14 @@ function listings(opt: ListingQuery) {
 
   const db = getDb();
   const total =
-    db.query<{ n: number }, typeof params>(`SELECT COUNT(*) AS n ${base}`).get(...params)?.n ?? 0;
+    db.query<{ n: number }, typeof params>(`${cte} SELECT COUNT(*) AS n ${from}`).get(...params)?.n ?? 0;
 
   const rows = db
     .query(
-      `SELECT l.id, l.raw_title, l.url, l.region, l.platform, s.name AS store,
+      `${cte} SELECT l.id, l.raw_title, l.url, l.region, l.platform, s.name AS store,
               latest.inr_price, latest.native_price, latest.native_currency,
               latest.in_stock, latest.captured_at
-       ${base}
+       ${from}
        ORDER BY ${SORT_COLUMNS[opt.sort]} ${opt.dir.toUpperCase()}, l.id ASC
        LIMIT ? OFFSET ?`,
     )

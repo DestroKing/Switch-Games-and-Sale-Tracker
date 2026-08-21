@@ -33,6 +33,10 @@ interface StoreProfile {
   readonly pages: number;
 }
 
+export function hasBrowserProfile(storeId: string): boolean {
+  return storeId in PROFILES;
+}
+
 const PROFILES: Record<string, StoreProfile> = {
   amazon_in: {
     // data-component-type is Amazon's own hook and is markedly more stable
