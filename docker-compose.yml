@@ -1,0 +1,35 @@
+# Usage:
+#   docker compose build          # once, ~5 minutes
+#   docker compose run --rm probe
+#   docker compose run --rm collect
+#   docker compose run --rm fx
+#
+# The database lands in ./data on the host, so it survives rebuilds and you can
+# open it with any SQLite tool.
+
+services:
+  collect:
+    build: .
+    image: switch-tracker
+    volumes:
+      - ./data:/app/data
+      # Bind the config so you can correct store kinds without rebuilding.
+      - ./src/config:/app/src/config:ro
+    command: ["collect"]
+    # Chromium wants more than Docker's default shared-memory allowance and
+    # will crash mid-page without this.
+    shm_size: "1gb"
+
+  probe:
+    build: .
+    image: switch-tracker
+    volumes:
+      - ./src/config:/app/src/config:ro
+    command: ["probe"]
+
+  fx:
+    build: .
+    image: switch-tracker
+    volumes:
+      - ./data:/app/data
+    command: ["fx"]
