@@ -1,13 +1,3 @@
-"""Per-store extraction profiles for sites with no public product API.
-
-Every selector field is a TUPLE of candidates, tried in order.  Sites revert,
-A/B-test and roll back, so a candidate that stops working sits alongside its
-replacement rather than being deleted.
-
-Profiles marked "confirmed" were read out of a real diagnostics dump of the
-live page, not guessed.
-"""
-
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
@@ -66,12 +56,14 @@ PROFILES: dict[str, StoreProfile] = {
         dismiss=("button._2KpZ6l._2doB4z", "span._30XB9F", "button:has-text('X')"),
     ),
     "playasia": StoreProfile(
-        card=("div.product-item", "li.product", "[class*='product-tile']"),
-        title=(".product-title", ".title", "h3"),
-        price=(".price", ".product-price"),
-        link=("a",),
-        out_of_stock=(".out-of-stock", ".sold-out"),
-        default_region=Region.UNKNOWN,
+        card=(".product-item", ".search-item", ".item", "[class*='product']"),
+        title=(".item-name a", ".product-name a", "a.title", "h3 a", ".title"),
+        price=(".price-value", ".item-price .amount", ".product-price", ".price"),
+        link=(".item-name a", ".product-name a", "a.title", "h3 a", "a[href*='/en/']"),
+        out_of_stock=(".out-of-stock", ".sold-out", ":has-text('Sold out')", ":has-text('Out of stock')"),
+        default_region=Region.ASIA_EN,
+        platform_hint=Platform.SWITCH,
+        ready=".product-item, .search-item, .item",
     ),
     "gamestheshop": StoreProfile(
         # Confirmed from a real dump: this site has stable "ak-" class names.
@@ -122,18 +114,30 @@ PROFILES: dict[str, StoreProfile] = {
         next_page=("button:has(svg.lucide-chevron-right)",),
     ),
     "e2zstore": StoreProfile(
-        # Still a guess: every diagnostics dump so far shows only a Cloudflare
-        # bot-check page, so there is no real markup to read yet. Starts from
-        # WooCommerce's default theme markup, including the "current price
-        # wins over struck-through old price" pattern -- `ins` wraps the sale
-        # price, `del` the crossed-out one.
-        card=("li.product", "div.product", "[data-product-id]"),
-        title=("h2.woocommerce-loop-product__title", ".product-title", "h2 a", "h3 a"),
-        price=("span.price ins .amount", "span.price .amount", ".price"),
-        link=("a.woocommerce-LoopProduct-link", "a"),
-        out_of_stock=(".out-of-stock", ":has-text('Out of stock')"),
-        platform_hint=Platform.SWITCH,
-        ready="li.product, div.product",
+    card=(
+        "div.product-small.product",
+        "div.product",
+    ),
+    title=(
+        ".woocommerce-loop-product__title a",
+        ".woocommerce-loop-product__title",
+    ),
+    price=(
+        "span.price ins .amount",
+        "span.price .amount",
+    ),
+    link=(
+        "a.woocommerce-LoopProduct-link",
+        "a.woocommerce-loop-product__link",
+    ),
+    out_of_stock=(
+        ":has-text('Out of stock')",
+        ".outofstock",
+    ),
+    platform_hint=Platform.SWITCH,
+    ready="div.product-small.product",
+    # ADD THIS LINE:
+    next_page=("a.next.page-number", "a.next", "ul.page-numbers a.next"),
     ),
 }
 

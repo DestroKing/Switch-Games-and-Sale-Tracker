@@ -19,7 +19,14 @@ import argparse
 import asyncio
 import contextlib
 import multiprocessing
-import sys
+import sys, os
+
+if sys.stdout is None or sys.stderr is None:
+    log_dir = os.path.join(os.environ.get("LOCALAPPDATA", "."), "switch-tracker")
+    os.makedirs(log_dir, exist_ok=True)
+    log_file = open(os.path.join(log_dir, "windowed.log"), "a", buffering=1, encoding="utf-8")
+    sys.stdout = sys.stdout or log_file
+    sys.stderr = sys.stderr or log_file
 
 WORKERS = ("collect", "probe", "fx", "inspect")
 
