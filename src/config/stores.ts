@@ -92,6 +92,10 @@
     currency: "INR",
     tier: 1,
     enabled: true,
-    searchUrls: ["https://www.play-asia.com/en/search/nintendo+switch+games?page={p}"],
-    note: "Enabled. Configured with INR reference currency display via session properties and combined Switch/Switch-2 catalog search target.",
+    platformHint: "SWITCH",
+    searchUrls: [
+      "https://www.play-asia.com/en/search/nintendo+switch+games",
+      "https://www.play-asia.com/en/search/nintendo+switch+2+games",
+    ],
+    note: "Pagination is click-based via DOM interaction rather than URL params. INR reference currency injected via session cookies.",
   },
