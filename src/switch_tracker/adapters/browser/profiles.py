@@ -64,6 +64,7 @@ PROFILES: dict[str, StoreProfile] = {
         default_region=Region.ASIA_EN,
         platform_hint=Platform.SWITCH,
         ready=".product-item, .search-item, .item",
+        next_page=("a.next", "button.next", "li.pagination-next a", ".pagination .next", ":has-text('>')"),
     ),
     "gamestheshop": StoreProfile(
         # Confirmed from a real dump: this site has stable "ak-" class names.

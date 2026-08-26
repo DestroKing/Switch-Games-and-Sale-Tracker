@@ -226,10 +226,13 @@ STORES: tuple[StoreConfig, ...] = (
         tier=1,
         enabled=True,
         platform_hint=Platform.SWITCH,
-        search_urls=("https://www.play-asia.com/en/search/nintendo+switch+games?page={p}",),
+        search_urls=(
+            "https://www.play-asia.com/en/search/nintendo+switch+games",
+            "https://www.play-asia.com/en/search/nintendo+switch+2+games",
+        ),
         note=(
-            "Enabled. Configured with INR reference currency display via session "
-            "properties and combined Switch/Switch-2 catalog search target."
+            "Pagination is click-based via DOM interaction rather than URL params. "
+            "INR reference currency injected via session cookies."
         ),
     ),
 )
