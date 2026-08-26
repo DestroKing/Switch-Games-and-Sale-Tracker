@@ -3,27 +3,31 @@
 
 Build:   uv run pyinstaller switch_tracker.spec --noconfirm
 Output:  dist/switch-tracker/
-
-onedir, not onefile, deliberately:
-  * onefile re-extracts ~500 MB to a temp dir on EVERY launch (slow), and
-    dropping a node.exe into temp is what antivirus heuristics dislike most.
-  * The deliverable is a folder regardless, since Chromium ships alongside.
 """
 
 import os
+import sys
 import shutil
 from pathlib import Path
 
+# Add src directory to sys.path so hooks can inspect local modules
+sys.path.insert(0, str(Path.cwd() / "src"))
+
 from PyInstaller.utils.hooks import collect_all, collect_data_files
 
-# --- Playwright: the Node driver + its JS. collect_all is what sweeps in
-# --- driver/node, which PyInstaller cannot infer from imports alone.
+# --- Playwright: Node driver + JS
 pw_datas, pw_binaries, pw_hidden = collect_all("playwright")
 
-# --- certifi: an outbound HTTPS call fails in a frozen build without this.
+# --- certifi: certificates
 cert_datas = collect_data_files("certifi")
 
-# --- Our own bundled read-only resources (templates, CSS, vendored htmx).
+# --- playwright-stealth: includes critical JavaScript injection assets (.js)
+stealth_datas = collect_data_files("playwright_stealth")
+
+# --- Explicitly collect ALL modules, binaries, and data inside switch_tracker.config
+config_datas, config_binaries, config_hidden = collect_all("switch_tracker.config")
+
+# --- App read-only resources
 app_datas = [
     ("src/switch_tracker/web/templates", "switch_tracker/web/templates"),
     ("src/switch_tracker/web/static", "switch_tracker/web/static"),
@@ -31,11 +35,6 @@ app_datas = [
 
 
 def _browser_datas():
-    """Bundle Chromium so the exe needs no download and no installed browser.
-
-    ffmpeg is excluded: it exists for Playwright's video recording, which this
-    application never uses, and it is dead weight in the shipped folder.
-    """
     cache = os.environ.get("PLAYWRIGHT_BROWSERS_PATH")
     root = Path(cache) if cache else Path.home() / (
         "AppData/Local/ms-playwright" if os.name == "nt" else ".cache/ms-playwright"
@@ -57,9 +56,16 @@ def _browser_datas():
 a = Analysis(
     ["src/switch_tracker/__main__.py"],
     pathex=["src"],
-    binaries=pw_binaries,
-    datas=pw_datas + cert_datas + app_datas + _browser_datas(),
-    hiddenimports=pw_hidden + ["uvicorn.logging", "uvicorn.protocols", "uvicorn.lifespan"],
+    binaries=pw_binaries + config_binaries,
+    datas=pw_datas + cert_datas + stealth_datas + app_datas + _browser_datas() + config_datas,
+    hiddenimports=pw_hidden + config_hidden + [
+        "switch_tracker.config",
+        "switch_tracker.config.stores",
+        "playwright_stealth",
+        "uvicorn.logging",
+        "uvicorn.protocols",
+        "uvicorn.lifespan",
+    ],
     hookspath=[],
     runtime_hooks=["packaging/runtime_hook_playwright.py"],
     excludes=["tkinter", "matplotlib", "numpy", "PIL"],
@@ -75,8 +81,8 @@ exe = EXE(
     name="switch-tracker",
     debug=False,
     strip=False,
-    upx=False,           # UPX-packed binaries trip antivirus far harder
-    console=True,        # keep a console for now; flip to False once stable
+    upx=False,
+    console=False,  # Hidden console window
 )
 coll = COLLECT(
     exe,

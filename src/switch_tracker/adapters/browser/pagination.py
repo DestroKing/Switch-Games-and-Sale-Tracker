@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from playwright.async_api import Page
 
 
 class ProductivityTracker:
@@ -64,3 +65,16 @@ def read_claimed_total(page_text: str) -> int | None:
             if value > 0:
                 return value
     return None
+
+
+async def wait_for_cloudflare(page: Page, timeout_ms: int = 20000) -> None:
+    """Waits for Cloudflare Turnstile challenge page to resolve if encountered."""
+    try:
+        title = await page.title()
+        if "Just a moment..." in title:
+            await page.wait_for_function(
+                "() => !document.title.includes('Just a moment...')",
+                timeout=timeout_ms,
+            )
+    except Exception:
+        pass

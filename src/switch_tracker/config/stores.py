@@ -212,25 +212,24 @@ STORES: tuple[StoreConfig, ...] = (
         tier=1,
         enabled=True,
         platform_hint=Platform.SWITCH,
-        search_urls=("https://e2zstore.com/category/nintendo-games/?paged={p}",),
+        search_urls=("https://e2zstore.com/category/nintendo-games/page/{p}/",),
         note=(
-            "Every direct HTTP request failed while the site loads fine in a real browser -- "
-            "bot protection blocking non-browser traffic, so it needs Playwright."
+            "Uses /category/ structure matching working test script."
         ),
     ),
-    # ---- Parked ----
     StoreConfig(
         id="playasia",
         name="Play-Asia",
         base_url="https://www.play-asia.com",
         kind=AdapterKind.BROWSER,
-        currency="USD",
+        currency="INR",
         tier=1,
-        enabled=False,
-        search_urls=("https://www.play-asia.com/search/nintendo+switch?page={p}",),
+        enabled=True,
+        platform_hint=Platform.SWITCH,
+        search_urls=("https://www.play-asia.com/en/search/nintendo+switch+games?page={p}",),
         note=(
-            "Parked by request. Currency is USD -- the rupee figure shown on-site is a display "
-            "conversion, not a price. Re-enable by flipping enabled."
+            "Enabled. Configured with INR reference currency display via session "
+            "properties and combined Switch/Switch-2 catalog search target."
         ),
     ),
 )

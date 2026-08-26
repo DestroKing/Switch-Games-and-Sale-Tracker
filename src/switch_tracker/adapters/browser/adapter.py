@@ -16,7 +16,11 @@ from playwright.async_api import Page
 from switch_tracker.adapters.base import ProgressSink
 from switch_tracker.adapters.browser.diagnostics import dump
 from switch_tracker.adapters.browser.extract import Extracted, extract
-from switch_tracker.adapters.browser.pagination import ProductivityTracker, read_claimed_total
+from switch_tracker.adapters.browser.pagination import (
+    ProductivityTracker,
+    read_claimed_total,
+    wait_for_cloudflare,
+)
 from switch_tracker.adapters.browser.profiles import StoreProfile, effective_profile
 from switch_tracker.adapters.browser.provider import BrowserProvider
 from switch_tracker.core.models import (
@@ -164,6 +168,7 @@ class BrowserAdapter:
             # pages 1/2/3 coming back byte-identical under a URL parameter.
             if not await _click_next(page, profile.next_page):
                 raise _NoMorePages
+            await wait_for_cloudflare(page)
             await page.wait_for_timeout(self._render_ms)
             return await extract(page, store.id, profile)
 
@@ -172,6 +177,7 @@ class BrowserAdapter:
             wait_until="domcontentloaded",
             timeout=45_000,
         )
+        await wait_for_cloudflare(page)
 
         for selector in profile.dismiss:
             # A cookie banner that is not there is the normal case, not a fault.

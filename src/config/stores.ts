@@ -1,76 +1,4 @@
-import type { StoreConfig } from "../core/types.ts";
-
-/**
- * `kind` for the API-based (SHOPIFY/WOOCOMMERCE) stores below is a
- * hypothesis — run `bun run probe` and correct this file, or let it write
- * stores.local.json, from what it reports. BROWSER-kind stores need a
- * `PROFILES` entry in src/adapters/browser.ts and don't go through probe at
- * all (see probe.ts's early skip for BROWSER/MANUAL kind).
- */
-export const STORES: readonly StoreConfig[] = [
-  // ---- Tier 2: dedicated retailers. The real catalogue lives here. ----
-  {
-    id: "nistore",
-    name: "NI Gaming Store",
-    baseUrl: "https://nistore.in",
-    kind: "WOOCOMMERCE",
-    currency: "INR",
-    tier: 2,
-    enabled: true,
-    platformHint: "SWITCH",
-    collections: ["nintendo-switch-games", "nintendo-switch-pre-owned-games", "nintendo-switch-2"],
-    note: "Verified: three pages of Switch/Switch 2 cartridges. Also carries consoles/accessories/collectibles (Bayblade, Dock Cover, Card Holders) — scoped to its actual games categories rather than relying on classification alone.",
-  },
-  {
-    id: "gameloot", name: "GameLoot", baseUrl: "https://gameloot.in", kind: "SHOPIFY",
-    currency: "INR", tier: 2, enabled: true, platformHint: "SWITCH",
-    collections: ["nintendo-switch"],
-    note: "General electronics/gift-card/subscription retailer — scoped to its Nintendo Switch category (accessories/consoles have their own separate categories that this deliberately excludes).",
-  },
-  {
-    id: "nekavo", name: "NEKAVO", baseUrl: "https://nekavo.com", kind: "WOOCOMMERCE",
-    currency: "INR", tier: 2, enabled: true, platformHint: "SWITCH",
-    collections: ["nintendo-switch-games", "nintendo-switch-2"],
-    note: "Primarily a Funko Pop/anime collectibles store — scoped to its two Switch games categories, excludes nintendo-accessories and nintendo-merchandise.",
-  },
-
-  // Unverified as cartridge sellers — cheap to keep, cheap to delete.
-  {
-    id: "emartgames", name: "Emart Games", baseUrl: "https://emartgames.in", kind: "SHOPIFY",
-    currency: "INR", tier: 2, enabled: true, platformHint: "SWITCH",
-    collections: ["nintendo-switch-games-cds-online-india", "nintendo-switch-2-games"],
-    note: "Multi-console store (also sells PS3/PS4/PS5) — scoped to its two Switch categories, found via `bun run probe`'s category listing.",
-  },
-  {
-    id: "hgworld", name: "HG World", baseUrl: "https://hgworld.in", kind: "SHOPIFY",
-    currency: "INR", tier: 2, enabled: true, platformHint: "SWITCH",
-    collections: ["nintendo-games"],
-    note: "Confirmed games category (https://hgworld.in/product-category/gaming-tittle/nintendo-games/) — probe's category listing missed it at first because the store has 100+ categories and the fetch wasn't paginated.",
-  },
-  {
-    id: "zozila", name: "Zozila", baseUrl: "https://zozila.com", kind: "SHOPIFY",
-    currency: "INR", tier: 2, enabled: false, platformHint: "SWITCH",
-    note: "Disabled: `bun run probe`'s category listing shows it's a digital gift-card/voucher marketplace (Amazon, Apple iTunes, Air India, Apollo Pharmacy...), not a cartridge retailer — none of its ~100 categories matched Switch/Nintendo.",
-  },
-  {
-    id: "designinfo", name: "DesignInfo", baseUrl: "https://www.designinfo.in", kind: "SHOPIFY",
-    currency: "INR", tier: 2, enabled: true,
-    // Not a games-only category (it's named for consoles, and probably
-    // mixes in accessories too) but still scoped to it — this is a 570+
-    // category camera/audio/electronics store, so even an imprecise
-    // Nintendo-only category cuts the fetch down enormously and gives
-    // classify() a far safer job: separating games from consoles/
-    // accessories within an already-Nintendo-scoped set, not fishing them
-    // out of the entire unrelated catalogue.
-    collections: ["nintendo-gaming-consoles"],
-    // No platformHint on purpose: even within this category, it's still not
-    // guaranteed everything is Switch (could be other Nintendo hardware) —
-    // requiring an explicit "Switch" mention is the safe default, the same
-    // reasoning that applies to the rest of this unscoped, multi-brand site.
-    note: "Real kind is WooCommerce, not Shopify — confirmed via probe, corrects itself into stores.local.json. Scoped to its one Nintendo-related category; no separate games-only split exists on this site.",
-  },
-
-  // ---- Tier 1: browser automation, run last. ----
+// ---- Tier 1: browser automation, run last. ----
   {
     id: "amazon_in",
     name: "Amazon.in",
@@ -156,16 +84,14 @@ export const STORES: readonly StoreConfig[] = [
     searchUrls: ["https://e2zstore.com/category/nintendo-games/?paged={p}"],
     note: "Every direct HTTP request (Store API and plain homepage fetch) failed here even though the site loads fine in a real browser — almost certainly bot protection blocking non-browser traffic, so it needs Playwright rather than the WooCommerce adapter. baseUrl switched from www to non-www to match the URL that's confirmed to load.",
   },
-  // ---- Parked ----
   {
     id: "playasia",
     name: "Play-Asia",
     baseUrl: "https://www.play-asia.com",
     kind: "BROWSER",
-    currency: "USD",
+    currency: "INR",
     tier: 1,
-    enabled: false,
-    searchUrls: ["https://www.play-asia.com/search/nintendo+switch?page={p}"],
-    note: "Parked by request. Currency is USD — the INR shown on-site is a display conversion, not a price. Re-enable by flipping this flag.",
+    enabled: true,
+    searchUrls: ["https://www.play-asia.com/en/search/nintendo+switch+games?page={p}"],
+    note: "Enabled. Configured with INR reference currency display via session properties and combined Switch/Switch-2 catalog search target.",
   },
-];

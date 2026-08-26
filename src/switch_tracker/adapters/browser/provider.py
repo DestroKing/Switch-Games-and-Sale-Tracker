@@ -1,6 +1,6 @@
 """Acquiring a browser.
 
-The DIP seam that keeps packaging out of adapter logic.  Frozen, Chromium
+The DIP seam that keeps packaging out of adapter logic. Frozen, Chromium
 ships inside the bundle and a PyInstaller runtime hook has already pointed
 PLAYWRIGHT_BROWSERS_PATH at it; unfrozen, Playwright finds its own cache.
 Neither case is the adapter's business.
@@ -10,15 +10,26 @@ from __future__ import annotations
 
 from playwright.async_api import Browser, BrowserContext, Playwright, async_playwright
 
+try:
+    from playwright_stealth import Stealth
+
+    async def _apply_stealth(page):
+        await Stealth().apply_stealth_async(page)
+except ImportError:
+    import playwright_stealth
+
+    async def _apply_stealth(page):
+        if hasattr(playwright_stealth, "stealth_async"):
+            await playwright_stealth.stealth_async(page)
+        elif hasattr(playwright_stealth, "stealth"):
+            await playwright_stealth.stealth(page)
+
 _USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
 )
 
-# Trim the automation tell these sites check for.
 _STEALTH = "Object.defineProperty(navigator, 'webdriver', { get: () => undefined });"
-
-_BLOCKED_ASSETS = "**/*.{png,jpg,jpeg,webp,gif,svg,woff,woff2}"
 
 
 class BrowserProvider:
@@ -33,21 +44,17 @@ class BrowserProvider:
         if self._browser is None:
             self._playwright = await async_playwright().start()
             self._browser = await self._playwright.chromium.launch(
+                channel="chrome",
                 headless=self._headless,
                 args=[
                     "--disable-blink-features=AutomationControlled",
-                    "--disable-features=IsolateOrigins,site-per-process",
+                    "--window-size=1920,1080",
+                    "--start-maximized",
                 ],
             )
         return self._browser
 
     async def new_context(self) -> BrowserContext:
-        """A context configured to look like a real Indian shopper's browser.
-
-        The locale and timezone are NOT cosmetic: Amazon and Play-Asia serve
-        locale-dependent pages and prices, so dropping them silently changes
-        the numbers being recorded into price history.
-        """
         browser = await self.browser()
         context = await browser.new_context(
             user_agent=_USER_AGENT,
@@ -57,8 +64,9 @@ class BrowserProvider:
             extra_http_headers={"accept-language": "en-IN,en;q=0.9"},
         )
         await context.add_init_script(_STEALTH)
-        # Images and fonts are most of the bytes and none of the data.
-        await context.route(_BLOCKED_ASSETS, lambda route: route.abort())
+        
+        # Apply stealth to new pages as they are opened in the context
+        context.on("page", lambda page: page.on("domcontentloaded", lambda: _apply_stealth(page)))
         return context
 
     async def close(self) -> None:
