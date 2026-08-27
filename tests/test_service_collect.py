@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import sqlite3
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -26,7 +27,7 @@ from switch_tracker.core.models import (
     Region,
     StoreConfig,
 )
-from switch_tracker.services.collect import CollectService
+from switch_tracker.services.collect import CollectService, select_stores
 
 
 def listing(sku: str, price: float = 4499.0, store: str = "s1") -> RawListing:
@@ -243,3 +244,86 @@ class TestProgressEvents:
             "SELECT status, count FROM run_event WHERE kind='store_finished'"
         ).fetchone()
         assert (row["status"], row["count"]) == ("ok", 1)
+
+
+class TestSelectStores:
+    """What "which stores are in scope" means, in one place.
+
+    It has to be one place: the worker consults it to decide whether to launch
+    Playwright at all, and the service consults it to build the work list. Two
+    copies of the rule is how those two disagree.
+    """
+
+    @staticmethod
+    def _all() -> list[StoreConfig]:
+        return [
+            store("on1"),
+            replace(store("off1"), enabled=False),
+            store("on2"),
+        ]
+
+    def test_no_selection_means_every_enabled_store(self) -> None:
+        """The default, and byte-identical to the behaviour before `only` existed."""
+        assert [s.id for s in select_stores(self._all(), ())] == ["on1", "on2"]
+
+    def test_a_selection_ignores_the_enabled_flag(self) -> None:
+        """Naming a store IS the intent.
+
+        Requiring a config edit first would defeat the point: the store you most
+        want to test in isolation is often one that probe has just disabled.
+        """
+        assert [s.id for s in select_stores(self._all(), ("off1",))] == ["off1"]
+
+    def test_a_selection_can_name_several(self) -> None:
+        assert [s.id for s in select_stores(self._all(), ("off1", "on2"))] == ["off1", "on2"]
+
+    def test_unknown_ids_resolve_to_nothing_rather_than_raising(self) -> None:
+        assert select_stores(self._all(), ("ghost",)) == []
+
+    def test_input_order_is_preserved_not_selection_order(self) -> None:
+        """bounded_gather starts tasks in list order and the pool is bounded.
+
+        Play-Asia ships first in the browser group so it claims a slot
+        immediately; honouring the caller's tick order instead would silently
+        undo that.
+        """
+        selected = select_stores(self._all(), ("on2", "on1"))
+        assert [s.id for s in selected] == ["on1", "on2"]
+
+
+class TestBrowserProviderGate:
+    """Whether the worker launches Chromium must follow the SELECTION.
+
+    Keyed off `enabled` instead, selecting a disabled browser store leaves the
+    provider unbuilt, the registry omits the BROWSER adapter, and the store
+    records "no adapter ... / skipped" -- the feature silently doing nothing for
+    the exact case that "explicit beats enabled" exists to serve.
+    """
+
+    @staticmethod
+    def _needs_browser(stores: list[StoreConfig], only: tuple[str, ...]) -> bool:
+        """The REAL production gate, not a re-implementation of it.
+
+        A test that mirrors the rule it is checking passes whether or not
+        production was ever fixed.
+        """
+        from switch_tracker.services.collect_worker import needs_browser
+
+        return needs_browser(stores, only)
+
+    def test_a_disabled_browser_store_selected_by_id_still_needs_a_browser(self) -> None:
+        stores = [
+            store("shop1"),
+            replace(store("parked", AdapterKind.BROWSER), enabled=False),
+        ]
+        assert self._needs_browser(stores, ("parked",)) is True
+
+    def test_no_browser_is_launched_when_the_selection_is_http_only(self) -> None:
+        """The saving this gate exists for must survive the change."""
+        stores = [store("shop1"), store("browsy", AdapterKind.BROWSER)]
+        assert self._needs_browser(stores, ("shop1",)) is False
+
+    def test_the_default_path_is_unchanged(self) -> None:
+        stores = [store("shop1"), replace(store("parked", AdapterKind.BROWSER), enabled=False)]
+        assert self._needs_browser(stores, ()) is False
+

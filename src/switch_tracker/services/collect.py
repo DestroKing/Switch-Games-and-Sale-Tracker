@@ -19,6 +19,35 @@ from switch_tracker.events.writer import EventWriter
 from switch_tracker.fx.rates import FxService
 
 
+def select_stores(
+    stores: Sequence[StoreConfig], only: tuple[str, ...]
+) -> list[StoreConfig]:
+    """Which stores are in scope for a run.
+
+    ONE definition, deliberately module-level rather than a method. The worker
+    needs this answer BEFORE a CollectService exists, to decide whether to
+    launch Chromium at all -- and if the gate and the work list computed scope
+    separately they would eventually disagree. That disagreement has a specific,
+    silent shape: the gate says "no browser store" while the work list contains
+    one, so the store records "no adapter" and collects nothing.
+
+    ``only`` empty  -> every ENABLED store; exactly the behaviour that existed
+                       before selection was a concept.
+    ``only`` given  -> exactly those ids, and ``enabled`` is NOT consulted.
+                       Naming a store is the intent; the store you most want to
+                       run in isolation is often one probe has just disabled.
+
+    Input order is preserved in both branches. bounded_gather starts tasks in
+    list order against a bounded pool, and Play-Asia ships first in the browser
+    group so it claims a slot immediately -- honouring the caller's argument
+    order instead would quietly undo that.
+    """
+    if not only:
+        return [s for s in stores if s.enabled]
+    wanted = set(only)
+    return [s for s in stores if s.id in wanted]
+
+
 class CollectService:
     #: HTTP stores are bounded tightly regardless of catalogue size: the
     #: client's own per-request timeout and retry budget caps every page it
@@ -56,8 +85,25 @@ class CollectService:
         self.http_concurrency = http_concurrency
         self.browser_concurrency = browser_concurrency
 
-    async def run(self, stores: Sequence[StoreConfig], run_id: int | None = None) -> int:
-        active = [s for s in stores if s.enabled]
+    async def run(
+        self,
+        stores: Sequence[StoreConfig],
+        run_id: int | None = None,
+        *,
+        only: tuple[str, ...] = (),
+    ) -> int:
+        """Collect ``stores``, narrowed by ``only``.
+
+        ``only`` is keyword-only: every existing caller passes ``stores``
+        positionally, and a third positional would read as ``run_id`` at a
+        glance.
+
+        ``stores`` stays the FULL list even when a selection is given --
+        _sync_store_table projects every store's enabled flag into the store
+        table, so pre-filtering here would stop disabled stores being synced.
+        Scope is an input to this method, not a filter applied before it.
+        """
+        active = select_stores(stores, only)
         self._sync_store_table(stores)
 
         if run_id is None:
@@ -66,6 +112,16 @@ class CollectService:
 
         events = EventWriter(self._conn, run_id)
         events.run_started(len(active))
+
+        if only:
+            # Without this the console shows a one-store run and no reason for
+            # it, which reads like twelve stores silently vanished.
+            found = [s.id for s in active]
+            missing = [store_id for store_id in only if store_id not in set(found)]
+            detail = f"Collecting only: {', '.join(found) or 'nothing'}"
+            if missing:
+                detail += f" (unknown, skipped: {', '.join(missing)})"
+            events.warning(detail)
 
         # Refresh rates BEFORE anything else, so every price in this run
         # converts at one rate rather than drifting mid-run.

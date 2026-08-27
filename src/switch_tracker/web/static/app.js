@@ -31,9 +31,26 @@ function log(text, cls = "") {
 }
 
 function setButtonsDisabled(disabled) {
-  document.querySelectorAll("[data-action]").forEach((b) => { b.disabled = disabled; });
-  const picker = $("fixStore");
-  if (picker) picker.disabled = disabled;
+  // By CLASS, not by looking each control up by id. The previous form named
+  // #fixStore explicitly, so every control added afterwards stayed live during
+  // a run and handed the user an unexplained 409. A class covers the next one
+  // on arrival.
+  document.querySelectorAll("[data-action], .js-run-control").forEach((el) => {
+    el.disabled = disabled;
+  });
+  if (!disabled) syncCollectSelected();
+}
+
+/** Keep the subset button honest: an empty selection posted to /actions/collect
+ *  means "collect everything", which is not what an unticked list looks like. */
+function syncCollectSelected() {
+  const button = $("collectSelected");
+  if (!button) return;
+  const chosen = [...document.querySelectorAll(".js-store:checked")];
+  button.disabled = chosen.length === 0;
+  button.textContent = chosen.length
+    ? `Collect selected (${chosen.length})`
+    : "Collect selected";
 }
 
 /** Subscribe to a run that is already happening in another process.
@@ -104,6 +121,28 @@ document.querySelectorAll("[data-action]").forEach((button) => {
     }
   });
 });
+
+document.querySelectorAll(".js-store").forEach((box) => {
+  box.addEventListener("change", syncCollectSelected);
+});
+
+const collectSelected = $("collectSelected");
+if (collectSelected) {
+  collectSelected.addEventListener("click", async () => {
+    const ids = [...document.querySelectorAll(".js-store:checked")].map((b) => b.value);
+    if (!ids.length) return;
+    try {
+      const result = await api(
+        `/actions/collect?only=${encodeURIComponent(ids.join(","))}`,
+        { method: "POST" },
+      );
+      log(`Collecting ${ids.length} store(s): ${ids.join(", ")}`);
+      if (result && result.run_id) follow(result.run_id);
+    } catch (err) {
+      log(String(err.message), "failed");
+    }
+  });
+}
 
 const fixPicker = $("fixStore");
 if (fixPicker) {

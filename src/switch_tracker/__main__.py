@@ -84,15 +84,22 @@ def _parse(argv: list[str]) -> argparse.Namespace:
     )
     parser.add_argument("store_id", nargs="?", help="for 'inspect': which store to open")
     parser.add_argument("--run-id", type=int, default=None, help="internal: the run to report into")
+    parser.add_argument(
+        "--only",
+        default="",
+        help="for 'collect': comma-separated store ids to collect instead of every enabled "
+        "store. Naming a store overrides its enabled flag.",
+    )
     parser.add_argument("--no-collect", action="store_true", help="serve without collecting first")
     return parser.parse_args(argv)
 
 
-def _run_worker(command: str, run_id: int, store_id: str | None) -> int:
+def _run_worker(command: str, run_id: int, store_id: str | None, only: str = "") -> int:
     if command == "collect":
+        from switch_tracker import selection
         from switch_tracker.services import collect_worker
 
-        return asyncio.run(collect_worker.run(run_id))
+        return asyncio.run(collect_worker.run(run_id, selection.parse_ids(only)))
     if command == "probe":
         from switch_tracker.services import probe_worker
 
@@ -124,7 +131,7 @@ def _dispatch(args: argparse.Namespace) -> int:
     if args.run_id is None:
         print(f"'{args.command}' is started by the dashboard, not run directly.", file=sys.stderr)
         return 2
-    return _run_worker(args.command, args.run_id, args.store_id)
+    return _run_worker(args.command, args.run_id, args.store_id, args.only)
 
 
 def main(argv: list[str] | None = None) -> int:

@@ -41,7 +41,7 @@
     {% endif %}
     <button data-action="fx">Update exchange rate</button>
     {% if fixable %}
-    <select id="fixStore" aria-label="Store to fix">
+    <select id="fixStore" class="js-run-control" aria-label="Store to fix">
       <option value="">Fix a broken store…</option>
       {% for store in fixable %}<option value="{{ store.id }}">{{ store.name }}</option>{% endfor %}
     </select>
@@ -50,6 +50,24 @@
       Reset corrections
     </button>
   </div>
+
+  <!-- Collect a subset. A checkbox list rather than a dropdown: a <select>
+       fires on change and carries one value, and picking several stores needs
+       a deliberate "now go" step. Disabled stores are listed on purpose --
+       naming a store overrides its enabled flag. -->
+  <details class="subset">
+    <summary>Collect specific stores…</summary>
+    <div class="subset-grid">
+      {% for store in collectable %}
+      <label class="check">
+        <input type="checkbox" class="js-run-control js-store" value="{{ store.id }}">
+        {{ store.name }}{% if not store.enabled %} <span class="muted">(disabled)</span>{% endif %}
+      </label>
+      {% endfor %}
+    </div>
+    <button id="collectSelected" class="js-run-control" disabled>Collect selected</button>
+  </details>
+
   <div id="console" aria-live="polite"></div>
 
   <h2>Collector</h2>

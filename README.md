@@ -40,6 +40,7 @@ Opens at `http://127.0.0.1:4173`, reachable only from this machine.
 | **Update exchange rate** | Refreshes the USD→INR rate from the ECB |
 | **Fix a broken store** | Opens a store in a real browser window so you can click on the parts it failed to read |
 | **Reset corrections** | Undoes everything "Check stores" wrote |
+| **Collect specific stores…** | Tick any number of stores and collect only those — useful for testing one shop without waiting for all fourteen. Disabled stores can be picked too; naming a store overrides its disabled state |
 
 Each button starts a separate background process and returns immediately. Live
 progress streams into the console panel underneath.
