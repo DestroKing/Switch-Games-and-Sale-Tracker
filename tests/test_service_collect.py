@@ -196,12 +196,34 @@ class TestDeadlines:
     async def test_the_production_deadlines_are_per_kind(self) -> None:
         """An HTTP store is bounded by its own request budget regardless of size.
 
-        A browser store now pages for as long as the site's own signal keeps
-        working, so its budget has to cover a genuinely large catalogue.
+        A browser store pages for as long as the site's own signal keeps
+        working, so its budget has to cover a genuinely large catalogue --
+        Play-Asia's is 139 click-paged pages, about twenty minutes.
+
+        Asserted as a RELATIONSHIP, not as two literals. The browser deadline
+        has moved twice already; a test pinning the exact number only ever says
+        "someone changed a number", while the property that actually matters is
+        that a browser store gets materially longer than an HTTP one.
         """
         svc = CollectService(None, adapters={}, fx=None)  # type: ignore[arg-type]
         assert svc.http_deadline_s == 180.0
-        assert svc.browser_deadline_s == 600.0
+        assert svc.browser_deadline_s > svc.http_deadline_s * 4
+
+    async def test_the_browser_deadline_clears_every_profile_budget(self) -> None:
+        """The service must never be the thing that stops a browser store.
+
+        Each adapter stops itself first and returns Partial, which is persisted.
+        If the service's deadline fired first it would cancel the coroutine and
+        discard every page already scraped.
+        """
+        from switch_tracker.adapters.browser.adapter import DEFAULT_TIME_BUDGET_S
+        from switch_tracker.adapters.browser.profiles import PROFILES
+
+        svc = CollectService(None, adapters={}, fx=None)  # type: ignore[arg-type]
+        budgets = [DEFAULT_TIME_BUDGET_S] + [
+            p.time_budget_s for p in PROFILES.values() if p.time_budget_s is not None
+        ]
+        assert max(budgets) < svc.browser_deadline_s
 
 
 class TestPools:

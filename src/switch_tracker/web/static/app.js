@@ -219,7 +219,9 @@ async function boot() {
 
 /* -------------------------------------------------------------- listings */
 
-const state = { q: "", platform: "", region: "", store: "", condition: "",
+// store and region are SETS. platform and condition stay single-valued -- their
+// controls are three-way segments whose first option already means "all".
+const state = { q: "", platform: "", condition: "", region: [], store: [],
                 inStock: false, sort: "price", dir: "asc", offset: 0 };
 let rows = [];
 
@@ -233,7 +235,11 @@ const COLS = [
 function queryString() {
   const p = new URLSearchParams();
   if (state.q) p.set("q", state.q);
-  for (const k of ["platform", "region", "store", "condition"]) if (state[k]) p.set(k, state[k]);
+  for (const k of ["platform", "condition"]) if (state[k]) p.set(k, state[k]);
+  // Comma-separated, matching /actions/collect?only=a,b -- one encoding for
+  // "a set of ids" across the whole app. A single value produces ?store=x,
+  // so old bookmarks keep working.
+  for (const k of ["store", "region"]) if (state[k].length) p.set(k, state[k].join(","));
   if (state.inStock) p.set("in_stock", "true");
   p.set("sort", state.sort);
   p.set("dir", state.dir);
@@ -242,14 +248,51 @@ function queryString() {
   return p.toString();
 }
 
+/** Build one checkbox per value that actually exists in the data. */
+function fillBoxes(containerId, key, items) {
+  const box = $(containerId);
+  box.innerHTML = "";
+  for (const item of items) {
+    const label = document.createElement("label");
+    label.className = "check";
+    label.innerHTML =
+      `<input type="checkbox" data-filter="${key}" value="${esc(item.value)}">` +
+      ` ${esc(item.label)} <span class="muted">(${item.n})</span>`;
+    box.appendChild(label);
+  }
+}
+
+function syncChosen(key) {
+  const chosen = state[key];
+  const badge = document.querySelector(`.chosen[data-for="${key}"]`);
+  if (badge) badge.textContent = chosen.length ? `(${chosen.length} selected)` : "";
+}
+
 async function loadFacets() {
   const f = await api("/api/facets");
-  const storeSelect = $("store");
-  storeSelect.length = 1;
-  for (const s of f.stores) storeSelect.add(new Option(`${s.name} (${s.n})`, s.id));
-  const regionSelect = $("region");
-  regionSelect.length = 1;
-  for (const r of f.regions) regionSelect.add(new Option(`${r.region} (${r.n})`, r.region));
+  fillBoxes("storeBoxes", "store",
+            f.stores.map((s) => ({ value: s.id, label: s.name, n: s.n })));
+  fillBoxes("regionBoxes", "region",
+            f.regions.map((r) => ({ value: r.region, label: r.region, n: r.n })));
+
+  // Delegated: the boxes are rebuilt whenever facets reload, so a listener
+  // bound to each one would be lost. The container outlives them.
+  for (const [containerId, key] of [["storeBoxes", "store"], ["regionBoxes", "region"]]) {
+    $(containerId).addEventListener("change", () => {
+      state[key] = [...$(containerId).querySelectorAll("input:checked")].map((b) => b.value);
+      syncChosen(key);
+      rerun();
+    });
+  }
+  syncChosen("store");
+  syncChosen("region");
+}
+
+function clearFilter(key) {
+  const containerId = key === "store" ? "storeBoxes" : "regionBoxes";
+  $(containerId).querySelectorAll("input:checked").forEach((b) => { b.checked = false; });
+  state[key] = [];
+  syncChosen(key);
 }
 
 async function search(append = false) {
@@ -321,13 +364,16 @@ for (const group of ["platform", "condition"]) {
     rerun();
   });
 }
-$("store").addEventListener("change", (e) => { state.store = e.target.value; rerun(); });
-$("region").addEventListener("change", (e) => { state.region = e.target.value; rerun(); });
+document.querySelectorAll("[data-clear]").forEach((button) => {
+  button.addEventListener("click", () => { clearFilter(button.dataset.clear); rerun(); });
+});
 $("stock").addEventListener("change", (e) => { state.inStock = e.target.checked; rerun(); });
 $("reset").addEventListener("click", () => {
-  Object.assign(state, { q: "", platform: "", region: "", store: "", condition: "",
+  Object.assign(state, { q: "", platform: "", condition: "", region: [], store: [],
                          inStock: false, sort: "price", dir: "asc", offset: 0 });
-  $("q").value = ""; $("store").value = ""; $("region").value = ""; $("stock").checked = false;
+  $("q").value = ""; $("stock").checked = false;
+  clearFilter("store");
+  clearFilter("region");
   for (const g of ["platform", "condition"]) {
     $(g).querySelectorAll("button").forEach((b, i) => b.setAttribute("aria-pressed", String(i === 0)));
   }

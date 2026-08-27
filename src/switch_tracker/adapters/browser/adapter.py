@@ -117,7 +117,11 @@ class BrowserAdapter:
         raw_seen = 0
         out_of_time = False
 
-        deadline = asyncio.get_running_loop().time() + self._time_budget_s
+        # Per-profile where set: one large catalogue should not force every
+        # store's budget up, and a store with nothing deep to walk should not
+        # inherit a twenty-minute allowance it can never use.
+        budget = self._time_budget_s if profile.time_budget_s is None else profile.time_budget_s
+        deadline = asyncio.get_running_loop().time() + budget
         # Per search URL, like the hand-verified sweep's own cap. Bounds a
         # normal deep walk; the time budget above catches the abnormal one
         # where individual pages are slow rather than numerous.
@@ -235,7 +239,7 @@ class BrowserAdapter:
 
         if not unique:
             reason = (
-                f"ran out of time after {int(self._time_budget_s)}s before collecting anything"
+                f"ran out of time after {int(budget)}s before collecting anything"
                 if out_of_time
                 else "; ".join(problems) or "page loaded but nothing extracted"
             )
@@ -249,7 +253,7 @@ class BrowserAdapter:
             # Partial, never Failed: these rows are real and must be persisted.
             return Partial(
                 tuple(unique),
-                f"stopped at the {int(self._time_budget_s)}s time budget with "
+                f"stopped at the {int(budget)}s time budget with "
                 f"{len(unique)} listings kept{completeness} ({via})",
             )
         if problems:

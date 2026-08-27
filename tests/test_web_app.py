@@ -348,3 +348,74 @@ class TestSubsetCollection:
         second = client.post("/actions/collect", params={"only": "e2zstore"})
         assert second.status_code == 409
 
+
+class TestAssetCacheBusting:
+    """A cached app.js against fresh markup is close to undiagnosable.
+
+    index.html is rendered per request, so a template change is live at once.
+    app.js is a static file, so a browser holding yesterday's copy runs the OLD
+    script against the NEW page. The observed symptom was checkboxes that
+    ticked and a button that never enabled -- no error, nothing in the console,
+    and the server-side code entirely correct.
+    """
+
+    def test_the_page_versions_its_script_and_stylesheet(self, client: TestClient) -> None:
+        from switch_tracker import resources
+
+        body = client.get("/").text
+        version = resources.asset_version()
+        assert f"/static/app.js?v={version}" in body
+        assert f"/static/app.css?v={version}" in body
+
+    def test_the_version_is_not_a_constant(self) -> None:
+        """A hard-coded token would defeat the whole mechanism."""
+        from switch_tracker import resources
+
+        assert resources.asset_version() not in ("", "0", "1")
+
+
+class TestListingFilterEncoding:
+    """?store=a,b reaches the query as a two-tuple.
+
+    Same comma encoding as /actions/collect?only=a,b, so the app has one way to
+    spell "a set of ids" rather than two conventions for the same idea.
+    """
+
+    @staticmethod
+    def _captured(client: TestClient, monkeypatch, **params):  # type: ignore[no-untyped-def]
+        from switch_tracker.web import queries
+        from switch_tracker.web.routers import data
+
+        seen = {}
+
+        def spy(conn, query):  # type: ignore[no-untyped-def]
+            seen["query"] = query
+            return {"total": 0, "rows": [], "offset": 0, "limit": 100}
+
+        monkeypatch.setattr(data.queries, "listings", spy)
+        assert client.get("/api/listings", params=params).status_code == 200
+        assert isinstance(seen["query"], queries.ListingQuery)
+        return seen["query"]
+
+    def test_a_comma_separated_store_becomes_a_tuple(self, client, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+        q = self._captured(client, monkeypatch, store="amazon_in,playasia")
+        assert q.stores == ("amazon_in", "playasia")
+
+    def test_a_single_store_still_works(self, client, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+        """Bookmarked single-value URLs must not break."""
+        q = self._captured(client, monkeypatch, store="amazon_in")
+        assert q.stores == ("amazon_in",)
+
+    def test_regions_work_the_same_way(self, client, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+        q = self._captured(client, monkeypatch, region="IN,JP")
+        assert q.regions == ("IN", "JP")
+
+    def test_absent_and_empty_both_mean_no_filter(self, client, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+        assert self._captured(client, monkeypatch).stores == ()
+        assert self._captured(client, monkeypatch, store="", region=" , ").regions == ()
+
+    def test_platform_and_condition_stay_single_valued(self, client, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+        """Their controls are three-way segments where option one means "all"."""
+        q = self._captured(client, monkeypatch, platform="SWITCH2", condition="NEW")
+        assert (q.platform, q.condition) == ("SWITCH2", "NEW")
+

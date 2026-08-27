@@ -79,6 +79,14 @@ class StoreProfile:
     #: Product URLs on some stores always carry a numeric id. Where that holds,
     #: its absence is a reliable "this is not a product" signal.
     require_digit_in_url: bool = False
+    #: Overrides BrowserAdapter.DEFAULT_TIME_BUDGET_S for this store. None keeps
+    #: the default. Raise it only for a catalogue genuinely worth a long walk --
+    #: a browser store holds one of four concurrency slots for its whole run.
+    #:
+    #: MUST stay below CollectService.DEFAULT_BROWSER_DEADLINE_S. Above it, the
+    #: service's hard timeout fires first, cancels the coroutine, and every page
+    #: already scraped is discarded. A test asserts this for every profile.
+    time_budget_s: float | None = None
     #: Hard cap on pages walked PER SEARCH URL. None means only the adapter's
     #: global safety bound applies.
     #:
@@ -149,17 +157,26 @@ PROFILES: dict[str, StoreProfile] = {
         # carry a numeric id, so its absence is a reliable negative.
         reject_url_parts=("/search/", "/category/"),
         require_digit_in_url=True,
-        # The live page reports 139 pages of ~44 products -- roughly 6,000 titles.
+        # FULL CATALOGUE. The live page reports 139 pages of ~44 products, so
+        # ~6,100 rows and ~5,200 distinct cartridges. 150 leaves headroom for
+        # the catalogue growing between runs.
         #
-        # 60 pages is ~2,600 products at about 7s a page, so ~420s against the
-        # adapter's 540s budget. Raised from 40 when the redundant second search
-        # URL was dropped: max_pages is PER SEARCH URL, so halving the URLs
-        # halved the total work rather than deepening it. This spends the
-        # reclaimed budget on pages that return something new.
+        # Sorting cannot help choose a better subset -- Play-Asia's sort control
+        # writes a URL FRAGMENT (#fc=o:3), which is never sent to the server, so
+        # there is no orderable URL to ship. And because paging is click-only
+        # with no page parameter, reaching page 100 costs 99 page loads first:
+        # depth is strictly sequential. Partial coverage would therefore always
+        # be the SAME arbitrary half, every run.
         #
-        # Overrunning is safe rather than costly: the time budget returns
-        # Partial with everything collected instead of discarding the run.
-        max_pages=60,
+        # Measured cost: 24s for page 1 (networkidle) plus ~8.5s each after,
+        # so 139 pages is roughly 20 minutes. That is a deliberate trade, not an
+        # oversight -- see time_budget_s below, and prefer running this store on
+        # its own from "Collect specific stores" rather than on every collection.
+        max_pages=150,
+        # 24 + 138 x 8.5 = ~1200s, plus margin. Below the service's 1500s
+        # deadline so the adapter stops itself first and returns Partial with
+        # everything collected.
+        time_budget_s=1320.0,
         # Ordered narrowest-first, and that ordering is load-bearing:
         # from_selectors takes the FIRST card selector that yields rows, so a
         # bare ".item" ahead of these would win on any page where a nav or

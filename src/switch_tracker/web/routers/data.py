@@ -7,6 +7,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query
 
+from switch_tracker import selection
 from switch_tracker.web import queries
 from switch_tracker.web.deps import get_conn
 
@@ -53,6 +54,10 @@ def listings(
     conn: Conn,
     q: str = "",
     platform: str = "",
+    #: Comma-separated, e.g. ?store=amazon_in,playasia -- the same encoding
+    #: /actions/collect?only=a,b uses, so the app has ONE way to spell "a set of
+    #: ids". Kept singular in the URL so existing single-value links and
+    #: bookmarks (?store=amazon_in) keep working untouched.
     region: str = "",
     store: str = "",
     condition: str = "",
@@ -67,8 +72,8 @@ def listings(
         queries.ListingQuery(
             q=q,
             platform=platform,
-            region=region,
-            store=store,
+            regions=selection.parse_ids(region),
+            stores=selection.parse_ids(store),
             condition=condition,
             in_stock_only=in_stock,
             sort=sort,
