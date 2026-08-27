@@ -4,8 +4,13 @@ Two decisions carried from the TypeScript original are load-bearing and must
 not be quietly softened:
 
 1. A listing carries its NATIVE currency and price.  INR is derived, never
-   captured.  Play-Asia's rupee figure is a display conversion; storing it as
-   if it were a price makes every currency wobble look like a sale.
+   captured.  A store that merely DISPLAYS a converted rupee figure while
+   charging in something else must be configured with the currency it actually
+   charges -- recording the display conversion as though it were the price
+   makes every currency wobble look like a sale.  (Play-Asia was the original
+   example and is no longer one: the browser adapter pins an INR reference
+   currency via session cookies, so rupees are what it quotes us.  The rule is
+   unchanged; only its example moved.)
 2. ``game_id`` is nullable.  An unmatched listing still gets collected.
    Matching is a separate, re-runnable pass over data already on disk.
 """
@@ -84,8 +89,11 @@ class StoreConfig:
     name: str
     base_url: str
     kind: AdapterKind
-    #: ISO 4217 of the prices this store quotes NATIVELY. Not what it displays
-    #: after a conversion widget -- Play-Asia shows rupees but sells in USD.
+    #: ISO 4217 of the prices this store quotes NATIVELY -- what the store
+    #: actually charges us, not whatever a conversion widget happens to render.
+    #: Play-Asia is INR for exactly this reason and not as an exception to it:
+    #: its adapter pins an INR reference currency in session cookies, so the
+    #: rupee figure IS the quote rather than a display conversion of one.
     currency: str
     tier: int
     enabled: bool

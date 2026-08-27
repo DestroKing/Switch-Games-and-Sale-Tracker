@@ -27,6 +27,15 @@ def spawned() -> list[list[str]]:
 
 
 @pytest.fixture
+def conn(tmp_path: Path) -> Iterator[sqlite3.Connection]:
+    """A schema-backed database with no app around it."""
+    connection = db.connect(tmp_path / "plain.db")
+    db.ensure_schema(connection)
+    yield connection
+    connection.close()
+
+
+@pytest.fixture
 def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, spawned) -> Iterator[TestClient]:
     monkeypatch.setenv("TRACKER_DATA_DIR", str(tmp_path))
     paths.data_dir.cache_clear()
@@ -193,3 +202,92 @@ class TestFirstRunGuidance:
         body = client.get("/").text
         assert '<button class="primary" data-action="collect">' in body
         assert "Start with" not in body
+
+
+class TestLaunchCollectDecision:
+    """Opening the dashboard bootstraps an empty database -- once.
+
+    It used to collect on EVERY launch, so simply opening the app to read
+    yesterday's prices spent several minutes scraping fourteen shops nobody
+    had asked it to scrape.
+    """
+
+    @staticmethod
+    def _decide(**kw: object):  # type: ignore[no-untyped-def]
+        from switch_tracker.web.app import launch_collect_decision
+
+        base = {"configured": True, "override": None, "probed": True, "already_collected": False}
+        return launch_collect_decision(**{**base, **kw})  # type: ignore[arg-type]
+
+    def test_collects_on_a_probed_but_empty_database(self) -> None:
+        assert self._decide().collect is True
+
+    def test_does_not_collect_once_history_exists(self) -> None:
+        decision = self._decide(already_collected=True)
+        assert decision.collect is False
+        assert "Collect prices" in (decision.message or "")
+
+    def test_does_not_collect_before_the_stores_have_been_checked(self) -> None:
+        decision = self._decide(probed=False)
+        assert decision.collect is False
+        assert "Check stores" in (decision.message or "")
+
+    def test_the_probe_gate_is_reported_even_when_history_exists(self) -> None:
+        """An unprobed store list is the more actionable of the two messages."""
+        decision = self._decide(probed=False, already_collected=True)
+        assert decision.collect is False
+        assert "Check stores" in (decision.message or "")
+
+    def test_the_setting_suppresses_even_the_bootstrap_run(self) -> None:
+        decision = self._decide(configured=False)
+        assert decision.collect is False
+        assert decision.message is None
+
+    def test_an_explicit_override_beats_the_setting_in_both_directions(self) -> None:
+        assert self._decide(configured=False, override=True).collect is True
+        assert self._decide(configured=True, override=False).collect is False
+
+    def test_an_explicit_request_still_respects_the_once_only_rule(self) -> None:
+        """--no-collect exists; there is no flag meaning "scrape again".
+
+        Overriding the SETTING must not also override the state-derived gate,
+        or the flag quietly becomes a way to re-scrape on every launch.
+        """
+        assert self._decide(override=True, already_collected=True).collect is False
+
+
+class TestHasEverCollected:
+    def test_false_on_a_fresh_database(self, conn: sqlite3.Connection) -> None:
+        from switch_tracker.web import queries
+
+        assert queries.has_ever_collected(conn) is False
+
+    def test_a_probe_run_alone_does_not_count_as_collecting(self, conn: sqlite3.Connection) -> None:
+        """probe, fx and inspect all create a `run` row but never a run_store row.
+
+        Asking the `run` table instead would tell a user who has only pressed
+        "Check stores" that they had already collected, and silently skip the
+        bootstrap run they actually needed.
+        """
+        from switch_tracker.core.db import now_iso
+        from switch_tracker.web import queries
+
+        conn.execute("INSERT INTO run (started_at, finished_at) VALUES (?, ?)", (now_iso(), now_iso()))
+        assert queries.has_ever_collected(conn) is False
+
+    def test_true_once_a_collection_has_recorded_a_store(self, conn: sqlite3.Connection) -> None:
+        from switch_tracker.core.db import now_iso
+        from switch_tracker.web import queries
+
+        cursor = conn.execute("INSERT INTO run (started_at) VALUES (?)", (now_iso(),))
+        conn.execute(
+            "INSERT INTO store (id, name, base_url, kind, currency, tier, enabled) "
+            "VALUES ('s1', 'S', 'https://s.test', 'SHOPIFY', 'INR', 2, 1)"
+        )
+        conn.execute(
+            "INSERT INTO run_store (run_id, store_id, status, listings_found, duration_ms) "
+            "VALUES (?, 's1', 'ok', 3, 10)",
+            (cursor.lastrowid,),
+        )
+        assert queries.has_ever_collected(conn) is True
+

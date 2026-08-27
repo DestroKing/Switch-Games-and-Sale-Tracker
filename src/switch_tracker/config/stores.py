@@ -126,6 +126,25 @@ STORES: tuple[StoreConfig, ...] = (
     ),
     # ---- Tier 1: browser automation. No public product API. ----
     StoreConfig(
+        id="playasia",
+        name="Play-Asia",
+        base_url="https://www.play-asia.com",
+        kind=AdapterKind.BROWSER,
+        currency="INR",
+        tier=1,
+        enabled=True,
+        platform_hint=Platform.SWITCH,
+        search_urls=(
+            "https://www.play-asia.com/en/search/nintendo+switch+games",
+            "https://www.play-asia.com/en/search/nintendo+switch+2+games",
+        ),
+        note=(
+            "First in the browser group so it claims a concurrency slot immediately. "
+            "Search URLs carry no {p}, so paging is a numeric page-number click; INR "
+            "reference currency and country are pinned via session cookies in its profile."
+        ),
+    ),
+    StoreConfig(
         id="amazon_in",
         name="Amazon.in",
         base_url="https://www.amazon.in",
@@ -215,24 +234,6 @@ STORES: tuple[StoreConfig, ...] = (
         search_urls=("https://e2zstore.com/category/nintendo-games/page/{p}/",),
         note=(
             "Uses /category/ structure matching working test script."
-        ),
-    ),
-    StoreConfig(
-        id="playasia",
-        name="Play-Asia",
-        base_url="https://www.play-asia.com",
-        kind=AdapterKind.BROWSER,
-        currency="INR",
-        tier=1,
-        enabled=True,
-        platform_hint=Platform.SWITCH,
-        search_urls=(
-            "https://www.play-asia.com/en/search/nintendo+switch+games",
-            "https://www.play-asia.com/en/search/nintendo+switch+2+games",
-        ),
-        note=(
-            "Pagination is click-based via DOM interaction rather than URL params. "
-            "INR reference currency injected via session cookies."
         ),
     ),
 )

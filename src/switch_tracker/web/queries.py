@@ -71,6 +71,21 @@ def summary(conn: sqlite3.Connection) -> dict[str, int]:
     return dict(row)
 
 
+def has_ever_collected(conn: sqlite3.Connection) -> bool:
+    """Has a COLLECTION ever run against this database?
+
+    ``run_store`` is the right table to ask, and ``run`` is not: probe, fx and
+    inspect all create a ``run`` row, so a user who has only ever pressed
+    "Check stores" would look like they had already collected. Only
+    CollectService writes ``run_store``.
+
+    Derived from real state rather than from a "have I done this yet" flag in
+    settings, so a deleted or moved database correctly bootstraps itself again
+    instead of staying permanently convinced it has already collected.
+    """
+    return conn.execute("SELECT 1 FROM run_store LIMIT 1").fetchone() is not None
+
+
 def health(conn: sqlite3.Connection) -> dict[str, Any]:
     """Per-store status for the latest run.
 

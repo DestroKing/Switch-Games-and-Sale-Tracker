@@ -11,7 +11,7 @@ OOP language with different keywords.
 
 A **personal, local** price tracker for one person's own buying decisions —
 not a product, not multi-tenant, no accounts. It watches Indian retailers
-(plus Play-Asia as an import comparison, currently parked) for **physical
+(plus Play-Asia as an import comparison, now live) for **physical
 Nintendo Switch / Switch 2 cartridges** and builds price history over time,
 with the eventual goal of catching real sales as they happen instead of
 missing them.
@@ -318,8 +318,14 @@ browser.
 
 - Native currency + native price is the captured fact; INR is *derived* at
   read time from an ECB rate, never captured as if it were the price. A
-  store that only ever shows a converted rupee figure (Play-Asia, USD) would
-  otherwise make a currency wobble look like a catalogue-wide sale.
+  store that only ever shows a converted rupee figure while charging in
+  another currency would otherwise make a currency wobble look like a
+  catalogue-wide sale. *(Play-Asia was the worked example here. It is now
+  configured `INR`, because the browser adapter pins an INR reference
+  currency via session cookies, so rupees are what it quotes us. The rule is
+  unchanged — it simply has no live example in the shipped store list today,
+  which means the derived-INR path is currently untested against a real
+  non-rupee store.)*
 - Region is first-class, not a tag — Play-Asia's Asia-English/Asia-Chinese/
   Japan/Western SKUs of the same title are different, non-interchangeable
   products (different disc region/language), not aliases to collapse.

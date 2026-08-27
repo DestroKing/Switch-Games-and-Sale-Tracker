@@ -18,9 +18,10 @@ _FILE = "settings.json"
 @dataclass(frozen=True, slots=True)
 class Settings:
     port: int = 4173
-    #: Collect once when the app opens. No daemon, no scheduler -- but price
-    #: history only accumulates when a run happens, and opening the dashboard
-    #: is the moment the user has already decided to care.
+    #: Allow the app to BOOTSTRAP an empty database by collecting once on
+    #: launch. Not "collect every launch": once any collection has run, opening
+    #: the dashboard never starts another -- see web.app.launch_collect_decision.
+    #: Setting this False suppresses even the bootstrap run.
     collect_on_launch: bool = True
     #: Show the browser while scraping. Debugging aid only.
     headful: bool = False

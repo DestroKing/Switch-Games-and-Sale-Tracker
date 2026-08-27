@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from dataclasses import dataclass
 
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
@@ -17,9 +18,51 @@ from fastapi.staticfiles import StaticFiles
 from switch_tracker import resources, settings
 from switch_tracker.config import overrides
 from switch_tracker.core import db
-from switch_tracker.web import deps
+from switch_tracker.web import deps, queries
 from switch_tracker.web.errors import json_error_handler
 from switch_tracker.web.routers import actions, data, events, pages
+
+
+@dataclass(frozen=True, slots=True)
+class LaunchDecision:
+    collect: bool
+    message: str | None = None
+
+
+def launch_collect_decision(
+    *, configured: bool, override: bool | None, probed: bool, already_collected: bool
+) -> LaunchDecision:
+    """Should opening the dashboard start a collection?
+
+    Only to BOOTSTRAP an empty database -- never on every launch.
+
+    Automatically scraping fourteen shops each time the app opens is a cost the
+    user did not ask for, and it is the behaviour least likely to match what
+    they wanted: they may be opening the dashboard to read yesterday's prices,
+    not to spend several minutes gathering today's. Once history exists,
+    collecting is an explicit act -- the "Collect prices" button.
+
+    Pure on purpose. The interesting part of ``serve`` is this decision, and a
+    function taking four booleans can be tested exhaustively without binding a
+    port or launching a worker.
+    """
+    if not (configured if override is None else override):
+        return LaunchDecision(False)
+
+    # Never before the stores have been checked once. Collecting against
+    # unverified store kinds produces a screen of failures that look like
+    # broken code and are really an uncorrected store list.
+    if not probed:
+        return LaunchDecision(False, "First run: press 'Check stores' before collecting.")
+
+    if already_collected:
+        return LaunchDecision(
+            False,
+            "Price history already exists, so nothing is being collected automatically. "
+            "Press 'Collect prices' when you want a fresh run.",
+        )
+
+    return LaunchDecision(True)
 
 
 @asynccontextmanager
@@ -52,24 +95,18 @@ def serve(collect_on_launch: bool | None = None) -> int:
     config = settings.load()
     app = create_app()
 
-    should_collect = config.collect_on_launch if collect_on_launch is None else collect_on_launch
+    decision = launch_collect_decision(
+        configured=config.collect_on_launch,
+        override=collect_on_launch,
+        probed=overrides.has_been_probed(),
+        already_collected=queries.has_ever_collected(deps.get_conn()),
+    )
+    if decision.message:
+        print(f"  {decision.message}")
 
-    # ... but never before the stores have been checked once.
-    #
-    # Collecting against unverified store kinds produces a screen of failures
-    # that look like broken code and are really just a store list nobody has
-    # corrected yet. The old terminal menu existed largely to steer people
-    # away from exactly this, and a dashboard that does it automatically on
-    # first launch would be worse, not better.
-    if should_collect and not overrides.has_been_probed():
-        should_collect = False
-        print("  First run: press 'Check stores' before collecting.")
-
-    if should_collect:
-        # No daemon and no scheduler -- but price history only accumulates
-        # when a run happens, and opening the app is the moment the user has
-        # already decided to care. Failure here is non-fatal: stale data on
-        # screen beats no screen, with the reason visible in the health strip.
+    if decision.collect:
+        # Bootstrapping an empty database, once. Failure here is non-fatal:
+        # an empty screen with a readable reason beats no screen at all.
         try:
             deps.get_launcher().start("collect")
         except Exception as exc:  # noqa: BLE001

@@ -41,16 +41,27 @@ class TestShippedList:
         store = next(s for s in STORES if s.id == "designinfo")
         assert store.platform_hint is None
 
-    @pytest.mark.parametrize("store_id", ["zozila", "playasia"])
+    @pytest.mark.parametrize("store_id", ["zozila"])
     def test_known_non_cartridge_stores_ship_disabled(self, store_id: str) -> None:
         assert next(s for s in STORES if s.id == store_id).enabled is False
 
-    def test_play_asia_quotes_usd_not_rupees(self) -> None:
-        """Its on-site rupee figure is a display conversion, not a price.
+    def test_play_asia_is_configured_in_the_currency_it_actually_quotes(self) -> None:
+        """INR, because the adapter pins an INR reference currency in cookies.
 
-        Capturing it would make a currency slide look like a catalogue sale.
+        This shipped as USD on the grounds that Play-Asia's rupee figure was a
+        display conversion of a dollar price. It is now driven with INR session
+        cookies, so rupees are what the store quotes us and INR is the captured
+        fact rather than a derived one.
+
+        The invariant being guarded is unchanged and was never Play-Asia
+        specific: ``currency`` must name what a store CHARGES, because a display
+        conversion recorded as a price turns every FX move into a fake sale.
         """
-        assert next(s for s in STORES if s.id == "playasia").currency == "USD"
+        assert next(s for s in STORES if s.id == "playasia").currency == "INR"
+
+    def test_play_asia_ships_enabled(self) -> None:
+        """It is a working browser store now, not a parked one."""
+        assert next(s for s in STORES if s.id == "playasia").enabled is True
 
     def test_every_browser_store_has_urls_to_walk(self) -> None:
         for store in STORES:

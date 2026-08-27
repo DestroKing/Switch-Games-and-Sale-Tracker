@@ -291,6 +291,45 @@ All twelve, since "nothing may be lost" is the requirement. Items 1–6 change t
 
 Plus, found while reading the code: **an API error renders as broken page content rather than an error state.** `server.ts:290` returns `{error}` with HTTP **200**, and `index.html:boot()` dereferences `sum.listings` unguarded — so any backend fault surfaces to the user as a JavaScript type error. Return a real status code and render a deliberate error state.
 
+### 4.7a Per-store page mechanics — added 2026-08-27
+
+Drift between stores is handled **declaratively on `StoreProfile`**, never by branching on a
+store id inside `BrowserAdapter`. Fields default to the previously-hardcoded values, so a
+store that sets none of them behaves exactly as before.
+
+| Field | Default | Set by |
+|---|---|---|
+| `wait_until` | `domcontentloaded` | playasia (`networkidle`) |
+| `scroll_passes` / `scroll_settle_ms` | `1` / `0` | playasia (`2` / `600`) |
+| `reject_url_parts` / `require_digit_in_url` | `()` / `False` | playasia |
+| `cookies` / `cookie_domain` | `()` / `""` | playasia |
+
+- Rejected: a per-store `if` in the adapter (special case for no cost saving) · a `PageLoader`
+  strategy protocol (YAGNI at two variants) · a `BrowserAdapter` subclass (fragile base class).
+- **Boundary of this mechanism.** It covers variation that is *parameterisable*. A store
+  needing a genuinely new extraction MECHANISM cannot be expressed as data — `extract.py`'s
+  Flipkart `__INITIAL_STATE__` walk is the existing example and is a real special case.
+  **Promotion trigger:** when a *second* store needs mechanism-level divergence, the
+  `PageLoader`/extractor strategy seam stops being YAGNI and should be revisited.
+
+### 4.7b Partial results survive a long walk — added 2026-08-27
+
+`CollectService` wraps each store in `asyncio.wait_for`. When it fires the coroutine is
+**cancelled**, the adapter's local listings die with the frame, and the store records
+`failed` with zero rows — every page already scraped, discarded. Nothing outside can
+recover them.
+
+- `BrowserAdapter` therefore carries its own `DEFAULT_TIME_BUDGET_S = 540`, below the
+  service's 600 s, and returns `Partial` through the normal path when it expires.
+  `CollectService` persists `Partial` like any other result.
+- The ordering is the mechanism, so it is asserted by a test, not by this paragraph.
+- Checked **after** a page, never before one: launching a browser context is itself slow,
+  and a check at the top of the loop can find the budget already spent and fail having
+  scraped nothing.
+- `StoreProfile.max_pages` caps pages per search URL as the cheap first guard (Play-Asia: 15).
+- The service's deadline remains as a backstop for an adapter that is genuinely wedged
+  rather than merely slow. That case still loses its rows — unavoidable across a cancel.
+
 ### 4.8 Stack judgement
 
 **Verdict: seven of eight choices are right for a frozen desktop app. One is wrong, and it is not Playwright.**
@@ -372,7 +411,7 @@ switch_tracker/
 4. Existing history is preserved by reusing the same SQLite file and schema — see §6.4. Volume is unknown and does not need to be known, because the cost of keeping it is zero.
 5. The learning motivation is real and outranks pure engineering cost — otherwise Option 4 wins outright.
 6. Matcher and alert engine are **out of scope for the rewrite**, seams preserved. ✅ Confirmed — see §6.3.
-7. Play-Asia stays parked; Zozila stays disabled.
+7. ~~Play-Asia stays parked~~ — **superseded**: Play-Asia now ships enabled as a BROWSER store quoting `INR` (an INR reference currency is pinned via session cookies). Zozila stays disabled.
 
 ---
 

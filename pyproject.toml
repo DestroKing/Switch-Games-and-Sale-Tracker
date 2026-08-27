@@ -9,6 +9,7 @@ dependencies = [
     "jinja2>=3.1",
     "httpx>=0.27",
     "playwright>=1.47",
+    "playwright-stealth>=2.0.3",
 ]
 
 [project.scripts]
@@ -46,9 +47,11 @@ python_version = "3.12"
 strict = true
 mypy_path = "src"
 packages = ["switch_tracker"]
-# Playwright ships partial stubs; don't fail the gate on its internals.
+# Playwright ships partial stubs and playwright-stealth ships none at all;
+# don't fail the gate on either one's internals. Our own call sites into them
+# stay typed -- this only stops mypy demanding stubs we do not control.
 [[tool.mypy.overrides]]
-module = ["playwright.*"]
+module = ["playwright.*", "playwright_stealth.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]
