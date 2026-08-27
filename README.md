@@ -137,7 +137,7 @@ consoles — even on stores that file them all under one category.
 
 ```bash
 uv sync                              # dependencies
-uv run pytest                        # 347 tests
+uv run pytest                        # 414 tests
 uv run ruff check src tests scripts  # lint
 uv run mypy                          # types (strict)
 uv run python -m switch_tracker spike   # packaging self-check
@@ -156,9 +156,11 @@ uv run python scripts/scrape_check.py e2zstore --headful
 
 Design documents are in `docs/`:
 
-- **`code-walkthrough.md`** — start here. The tech stack and why each piece was chosen
-  over its alternatives, then a feature-by-feature tour of the code. Assumes no prior
-  knowledge of any of the technologies.
+- **`walkthrough.md`** — start here. Orientation (what runs, where every file lives,
+  where your data goes), the tech stack and why each piece was chosen over its
+  alternatives, a step-by-step trace of one collection run, then a feature-by-feature
+  tour of the code. Ends with a glossary, a first-change exercise and a
+  troubleshooting table. Assumes no prior knowledge of any of the technologies.
 - `python-rewrite-plan.md` — the original spec
 - `python-rewrite-hld.md` — architecture, and the options that lost
 - `python-rewrite-lld.md` — the build plan

@@ -1,11 +1,299 @@
 # switch-tracker — a complete walkthrough
 
-Written for someone who has never used any of these technologies. Every term is
-explained the first time it appears. Read top to bottom, or jump to a feature.
+**Who this is for:** someone who has never used Python, FastAPI, SQLite, Playwright or
+any of the rest of it. Every term is explained the first time it appears, and
+**Appendix A is a glossary** you can jump to from anywhere.
 
-**What the program does, in one sentence:** it visits fourteen Indian online shops,
-finds every physical Nintendo Switch game they sell, records the price, and does that
-again later so you can see what changed.
+**What the program does, in one sentence:** it visits fourteen online shops — thirteen
+Indian retailers plus Play-Asia for import comparison — finds every physical Nintendo
+Switch game they sell, records the price, and does that again later so you can see what
+changed.
+
+## How to read this
+
+| If you are… | Read |
+|---|---|
+| **new to all of this** | Part 0, then Part 1, then straight through. Roughly two hours. |
+| **a programmer, new to this codebase** | §0.3 and §0.5, then Part 2 *including the trace at its end*, then dip into Part 3. Half an hour. |
+| **here to change one thing** | §0.2, then **Appendix B**, then the one §3.x section about the thing you're changing. |
+| **stuck, right now** | **Appendix C**. |
+
+Part 1 does not depend on Part 3, every section names the files it is about, and every
+cross-reference looks like §3.4 — so skipping around is safe.
+
+## Contents
+
+- **[Part 0 — Orientation: what you're looking at](#part-0--orientation-what-youre-looking-at)**
+  - [0.1 What it is, physically](#01-what-it-is-physically)
+  - [0.2 Run it once](#02-run-it-once)
+  - [0.3 Where the code lives](#03-where-the-code-lives)
+  - [0.4 Where your data lives](#04-where-your-data-lives)
+  - [0.5 The whole system on one page](#05-the-whole-system-on-one-page)
+  - [0.6 Seven words you need before Part 1](#06-seven-words-you-need-before-part-1)
+- **[Part 1 — The tech stack](#part-1--the-tech-stack)**
+  - [1.1 Python 3.12 — the language](#11-python-312--the-language)
+  - [1.2 uv — the package manager](#12-uv--the-package-manager)
+  - [1.3 FastAPI — the web framework](#13-fastapi--the-web-framework)
+  - [1.4 uvicorn — the web server](#14-uvicorn--the-web-server)
+  - [1.5 Jinja2 — the templating engine](#15-jinja2--the-templating-engine)
+  - [1.6 SQLite — the database](#16-sqlite--the-database)
+  - [1.7 httpx — the HTTP client](#17-httpx--the-http-client)
+  - [1.8 Playwright — browser automation](#18-playwright--browser-automation)
+  - [1.9 htmx + plain JavaScript — the front end](#19-htmx--plain-javascript--the-front-end)
+  - [1.10 Server-Sent Events — live progress](#110-server-sent-events--live-progress)
+  - [1.11 PyInstaller — packaging](#111-pyinstaller--packaging)
+  - [1.12 pytest — the test framework](#112-pytest--the-test-framework)
+  - [1.13 ruff — linting and formatting](#113-ruff--linting-and-formatting)
+  - [1.14 mypy (strict) — static type checking](#114-mypy-strict--static-type-checking)
+  - [1.15 Frankfurter / ECB — exchange rates](#115-frankfurter--ecb--exchange-rates)
+  - [Stack summary](#stack-summary)
+- **[Part 2 — The one architectural idea](#part-2--the-one-architectural-idea)**
+  - [The problem](#the-problem)
+  - [The answer: the program launches itself](#the-answer-the-program-launches-itself)
+  - [Why this shape won](#why-this-shape-won)
+  - [Three things this buys you, free](#three-things-this-buys-you-free)
+  - [And it's enforced by a test](#and-its-enforced-by-a-test)
+  - [The trace — one press of *Collect prices*, end to end](#the-trace--one-press-of-collect-prices-end-to-end)
+- **[Part 3 — Feature by feature](#part-3--feature-by-feature)**
+  - [3.1 The store list, and the corrections layer](#31-the-store-list-and-the-corrections-layer)
+  - [3.2 Three ways to read a shop](#32-three-ways-to-read-a-shop)
+  - [3.3 Deciding what's a game — the sieve](#33-deciding-whats-a-game--the-sieve)
+  - [3.4 Reading a price — where the real bugs live](#34-reading-a-price--where-the-real-bugs-live)
+  - [3.5 SKUs — forty lines that decide whether the project works](#35-skus--forty-lines-that-decide-whether-the-project-works)
+  - [3.6 Scraping a page — the four-layer ladder](#36-scraping-a-page--the-four-layer-ladder)
+  - [3.7 Knowing when to stop turning pages](#37-knowing-when-to-stop-turning-pages)
+  - [3.8 Turning the page when there's no URL to go to](#38-turning-the-page-when-theres-no-url-to-go-to)
+  - [3.9 Per-shop quirks, without per-shop code](#39-per-shop-quirks-without-per-shop-code)
+  - [3.10 Exchange rates — and the null that matters](#310-exchange-rates--and-the-null-that-matters)
+  - [3.11 Saving the data — and the query that had to be rewritten](#311-saving-the-data--and-the-query-that-had-to-be-rewritten)
+  - [3.12 Making sure two runs can't collide](#312-making-sure-two-runs-cant-collide)
+  - [3.13 Watching progress live](#313-watching-progress-live)
+  - [3.14 Collecting from just some shops](#314-collecting-from-just-some-shops)
+  - [3.15 Collecting once, not every launch](#315-collecting-once-not-every-launch)
+  - [3.16 The self-repair tools](#316-the-self-repair-tools)
+  - [3.17 Shipping it as an .exe](#317-shipping-it-as-an-exe)
+- **[Part 4 — The five ideas that recur](#part-4--the-five-ideas-that-recur)**
+- **[Part 5 — What is deliberately not built](#part-5--what-is-deliberately-not-built)**
+  - [Where to start reading](#where-to-start-reading)
+- **[Appendix A — Glossary](#appendix-a--glossary)**
+- **[Appendix B — Working on the code](#appendix-b--working-on-the-code)**
+  - [B.1 The gate — what must pass before anything is done](#b1-the-gate--what-must-pass-before-anything-is-done)
+  - [B.2 Testing against a real shop](#b2-testing-against-a-real-shop)
+  - [B.3 Where the tests for X live](#b3-where-the-tests-for-x-live)
+  - [B.4 Your first change — a guided exercise](#b4-your-first-change--a-guided-exercise)
+  - [B.5 Things that will surprise you](#b5-things-that-will-surprise-you)
+- **[Appendix C — When it doesn't work](#appendix-c--when-it-doesnt-work)**
+
+
+---
+
+# Part 0 — Orientation: what you're looking at
+
+Nothing in Part 1 will land until you have seen the thing run once. This part takes
+about fifteen minutes, and after it you will know what the program is, where every
+file lives, and where your data goes.
+
+## 0.1 What it is, physically
+
+It is **one Python program** of roughly 60 source files that you start with one
+command. It has no server to deploy, no account to create, no cloud anything. When it
+runs you get:
+
+- a **web page** at `http://127.0.0.1:4173` (the *dashboard*), reachable only from your
+  own machine, and
+- a **single database file** on your disk that grows a little every time you press
+  **Collect prices**.
+
+That's the whole product. Everything else in this document is about how those two
+things are built.
+
+## 0.2 Run it once
+
+**Windows.** Double-click `START.bat`. The first run downloads Python, the packages and
+a browser engine — 10–20 minutes, about 1 GB — and every run after that goes straight to
+the dashboard. (Read the README's *Getting started* first: there are two Windows
+gotchas, OneDrive and the "Unblock" checkbox.)
+
+**macOS / Linux**, three commands:
+
+```bash
+uv sync                              # install Python packages into .venv/
+uv run playwright install chromium   # download the browser engine (~400 MB, once)
+uv run python -m switch_tracker      # start the dashboard
+```
+
+Then open `http://127.0.0.1:4173` and press **Collect prices**. Progress appears live in
+the console panel; the first run takes a few minutes because it visits fourteen real
+websites politely, one request at a time per site.
+
+Three things worth noticing while it runs, because each one is a design decision
+explained later:
+
+| What you see | Where it's explained |
+|---|---|
+| The page stays responsive, and closing the tab does not stop the run | Part 2 |
+| A store tile can say "0 listings" **with a reason**, instead of just failing | §3.2 |
+| **Moved since last run** stays empty until you have collected twice | §3.11 |
+
+If something goes wrong, jump to **Appendix C — when it doesn't work**.
+
+## 0.3 Where the code lives
+
+`uv run python -m switch_tracker` runs `src/switch_tracker/__main__.py`. Start there; it
+is 150 lines and it decides everything else. The rest of the tree:
+
+```
+src/switch_tracker/
+├── __main__.py         THE FRONT DOOR. Reads argv, picks one of five roles (Part 2).
+├── paths.py            The only code allowed to decide where a writable file goes (§3.17).
+├── settings.py         Port, headful, collect-on-launch. Deliberately tiny.
+├── selection.py        Encode/decode "collect only these stores" (§3.14).
+├── resources.py        Reads BUNDLED read-only files, works frozen or not (§3.17).
+├── spike.py            Self-check for the four things that break only after packaging.
+│
+├── config/             WHICH SHOPS EXIST
+│   ├── stores.py         The fourteen shops, hand-written (§3.1).
+│   └── overrides.py      Merges in the corrections probe wrote (§3.1).
+│
+├── core/               THINGS EVERYTHING ELSE USES
+│   ├── models.py         The vocabulary: StoreConfig, RawListing, Ok/Partial/Failed (§3.2).
+│   ├── db.py             SQLite connection, schema, WAL settings (§1.6, §3.11).
+│   ├── http.py           The polite HTTP client: one request at a time per host (§1.7).
+│   ├── parse.py          Is it a game? What platform? What price? (§3.3, §3.4).
+│   ├── skus.py           The stable product id — 40 load-bearing lines (§3.5).
+│   └── concurrency.py    bounded_gather: run N things at once, no more.
+│
+├── adapters/           HOW TO READ A SHOP  (never imported by the dashboard — Part 2)
+│   ├── base.py           The shape every adapter must have.
+│   ├── registry.py       kind -> adapter.
+│   ├── shopify.py        Shops with a /products.json feed.
+│   ├── woocommerce.py    Shops with the WooCommerce Store API.
+│   └── browser/          Shops with no feed at all: drive real Chrome (§3.6–3.9).
+│       ├── adapter.py      The page loop, and the click that must prove it worked (§3.8).
+│       ├── extract.py      The four-layer ladder for reading a page (§3.6).
+│       ├── pagination.py   When to stop turning pages (§3.7).
+│       ├── profiles.py     Per-shop recipes, as DATA not code (§3.9).
+│       ├── provider.py     Owns the Chromium instance.
+│       ├── overrides.py    Recipes the click-to-pick tool saved (§3.16).
+│       └── diagnostics.py  Screenshots/HTML when a shop goes quiet.
+│
+├── services/           THE FIVE JOBS  (each runs in its own process)
+│   ├── collect.py        A collection run: pools, deadlines, saving (§3.11).
+│   ├── collect_worker.py Process entry point for `collect`.
+│   ├── probe.py          "What does this shop actually run on?" (§3.16).
+│   ├── probe_worker.py   Process entry point for `probe`.
+│   ├── fx_refresh.py     Process entry point for `fx`.
+│   └── inspect.py        The click-to-pick repair tool, in a visible window (§3.16).
+│
+├── fx/rates.py         USD->INR, and the null it refuses to fake (§3.10).
+├── events/             LIVE PROGRESS: writer appends rows, reader tails them (§3.13).
+│
+└── web/                THE DASHBOARD  (this half never scrapes)
+    ├── app.py            Builds the FastAPI app, starts uvicorn.
+    ├── deps.py           Hands a database connection to each route (§1.3).
+    ├── queries.py        Every SELECT the page needs (§3.11).
+    ├── runs.py           Starts workers; guarantees only one at a time (§3.12).
+    ├── errors.py         One shape for every error response.
+    ├── routers/          The URLs: pages, data, actions, events.
+    ├── templates/        The HTML, with Jinja placeholders (§1.5).
+    └── static/           app.js, app.css, and a vendored copy of htmx (§1.9).
+```
+
+And outside `src/switch_tracker/`:
+
+| Path | What it is |
+|---|---|
+| `tests/` | 414 tests. `conftest.py` holds the shared setup ("fixtures", §1.12). |
+| `scripts/scrape_check.py` | Run **one** store against the **live** site and print what came back. |
+| `packaging/`, `switch_tracker.spec` | Turning it into a Windows `.exe` (§3.17). |
+| `START.bat`, `setup.ps1`, `run.ps1` | What a Windows user double-clicks. |
+| `docs/` | This file, plus the plan/HLD/LLD written before the code. |
+| `src/adapters/`, `src/core/`, `src/web/*.ts`, `src/*.ts` | **The old TypeScript version.** Kept as a behavioural reference for the port; not shipped, not run. Ignore it. |
+
+> **If you read only three files:** `__main__.py` (what the program *is*),
+> `core/models.py` (the vocabulary), `services/collect.py` (the actual job).
+
+## 0.4 Where your data lives
+
+**Not in the project folder.** Every writable path comes from one function,
+`paths.data_dir()`, and §3.17 explains why that matters:
+
+| Platform | Location |
+|---|---|
+| Windows | `%LOCALAPPDATA%\switch-tracker\` |
+| macOS / Linux | `~/.local/share/switch-tracker/` (or `$XDG_DATA_HOME/switch-tracker/`) |
+| Anywhere, forced | set `TRACKER_DATA_DIR=/some/path` |
+
+What you'll find in there:
+
+| File | What it holds | Safe to delete? |
+|---|---|---|
+| `tracker.db` | **All your price history.** | Only if you mean it — this is the data. |
+| `tracker.db-wal`, `tracker.db-shm` | SQLite's side files (§1.6). Part of the database. | Delete *with* `tracker.db`, never alone. |
+| `stores.local.json` | Corrections **Check stores** wrote (§3.1). | Yes — rebuilt by pressing **Check stores**. |
+| `profiles.local.json` | Selectors the click-to-pick tool saved (§3.16). | Yes — but you'll have to re-pick them. |
+| `settings.json` | Port, headful, collect-on-launch. | Yes — defaults return. |
+| `run.lock` | The pid of a running worker (§3.12). | Yes, when nothing is running. |
+| `diagnostics/` | Screenshots and HTML from stores that returned nothing. | Yes, always. |
+
+For experiments, point the whole app somewhere disposable:
+
+```bash
+TRACKER_DATA_DIR=/tmp/tracker-scratch uv run python -m switch_tracker
+```
+
+*(Two `.local.json` files also sit in the repo root. Those belong to the old TypeScript
+version and are not read by the Python app.)*
+
+## 0.5 The whole system on one page
+
+```
+   YOU                                              FOURTEEN SHOPS
+    │                                            (nistore, amazon_in,
+    │ browser at 127.0.0.1:4173                    flipkart, playasia, …)
+    ▼                                                      ▲
+┌────────────────────────┐                                 │ HTTP, or a real
+│  DASHBOARD process     │   starts a second copy          │ Chrome window
+│  `switch-tracker`      │   of ITSELF, then forgets it    │
+│                        │ ──────────────────────────▶ ┌───┴────────────────┐
+│  • serves the page     │                             │  WORKER process    │
+│  • runs SELECTs        │                             │  `… collect`       │
+│  • NEVER scrapes       │                             │  • adapters        │
+└───────────┬────────────┘                             │  • Playwright      │
+            │ reads                                    └───────┬────────────┘
+            │                                                  │ writes
+            ▼                                                  ▼
+        ┌──────────────────────────────────────────────────────────┐
+        │  tracker.db   (SQLite, WAL mode: read + write at once)    │
+        │                                                           │
+        │  store ──< listing ──< price_point      ← the history     │
+        │  run ──< run_store                      ← what happened   │
+        │      ──< run_event                      ← live progress   │
+        └──────────────────────────────────────────────────────────┘
+```
+
+Read that diagram twice. **The two processes never speak to each other** — they share a
+database file, and that single choice is what Part 2 is about.
+
+## 0.6 Seven words you need before Part 1
+
+Full list in **Appendix A — glossary**. These seven appear immediately:
+
+- **scrape** — read data out of a web page that was built for human eyes, because the
+  shop offers no proper data feed.
+- **adapter** — the code that knows *one way* of reading a shop. Three exist: Shopify
+  feed, WooCommerce API, real browser (§3.2).
+- **listing** — one product at one shop. "Zelda at nistore" and "Zelda at gameloot" are
+  two listings, and nothing yet connects them (Part 5).
+- **price point** — one price for one listing at one moment. Listings get *updated*;
+  price points only ever get *appended*. That append-only table is the whole point of
+  the program.
+- **run** — one press of a button. Every run gets a row in `run`, and everything that
+  happens during it is tagged with that run's id.
+- **process** — a running program, with its own memory, that the operating system can
+  kill without touching anything else. This app deliberately uses two at a time.
+- **async** — code that says "wake me when the website answers" instead of sitting idle
+  waiting. Written `async def` and `await` (§1.7).
 
 ---
 
@@ -46,6 +334,14 @@ code behaves the same on another machine. `uv` is a modern, very fast one.
 **Why.** Two files do the work: `pyproject.toml` lists what the project needs
 (`fastapi>=0.115`), and `uv.lock` records the *exact* versions actually installed. Anyone
 running `uv sync` gets a byte-identical environment.
+
+**One local wrinkle, so you don't go hunting.** In *this* repository `uv.lock` is
+deliberately **not** committed — the reason is spelled out in `.gitignore`. It was
+generated behind a private package mirror, so it pins hundreds of index URLs that
+resolve nowhere else, and `uv sync` then fails with connection errors that look like a
+broken project. `pyproject.toml` bounds every version instead, and each machine resolves
+its own. The guarantee above is what a *committed* lockfile buys you; here the trade was
+made consciously.
 
 **Rejected.** `pip` — the traditional tool. It installs packages but does **not** by
 itself record exact versions, so two machines can end up with different code. Poetry does
@@ -448,6 +744,142 @@ in-process would prove nothing.
 This test is load-bearing in a way that shows up later: when the subset-collection feature
 needed a helper shared by the dashboard *and* the worker, this rule is what forced it into
 its own dependency-free module (§3.14).
+
+---
+
+## The trace — one press of *Collect prices*, end to end
+
+Everything above is shape. This is the actual sequence, with the file that does each
+step. Follow it with the files open; it is the fastest way to get the codebase into
+your head.
+
+```
+ browser         DASHBOARD process              db            WORKER process
+    │                                                              (does not exist yet)
+    │ POST /actions/collect
+    ├──────────────▶ actions.collect
+    │                     │ validate ids
+    │                     ├──▶ runs.RunLauncher.start
+    │                     │        ├── reap_stale()
+    │                     │        ├── INSERT INTO run ──────▶ (run 7)
+    │                     │        ├── spawn ──────────────────────────▶ new process
+    │                     │        └── write run.lock (pid)             │
+    │ ◀── {"run_id": 7} ──┘                                            │
+    │                                                                  │
+    │ GET /api/runs/7/events  (stays open)                             │
+    ├──────────────▶ events.events                                     │
+    │                     │  every 250 ms: SELECT … run_event          │
+    │ ◀── id: 1 …         │ ◀──────────────── run_event ◀── INSERT ────┤ progress
+    │ ◀── id: 2 …         │                                            │
+    │                                                       price_point ◀┘ results
+```
+
+**1. The click.** `web/static/app.js` posts to `/actions/collect`. If you used
+**Collect specific stores…**, the ticked ids go on as `?only=nistore,playasia`.
+
+**2. The route.** `web/routers/actions.py:collect` (`actions.py:38`). It parses the ids
+with `selection.parse_ids`, and if any id isn't a real store it answers **404 before a
+run row exists** — a typo must not occupy the one active-run slot.
+
+**3. Claiming the slot.** `web/runs.py:RunLauncher.start` (`runs.py:162`) does four
+things in order:
+
+```python
+self.reap_stale()                       # a dead worker must not wedge the app
+if self.active() is not None: raise RunAlreadyActive(kind)   # 409 to the browser
+cursor = self._conn.execute("INSERT INTO run (started_at) VALUES (?)", ...)
+pid = self._spawn(worker_command(kind, run_id, *extra))
+```
+
+`worker_command` (`runs.py:109`) is where "the program launches itself" becomes literal:
+
+```python
+[sys.executable, "-m", "switch_tracker", "collect", "--run-id", "7"]   # development
+[sys.executable,                         "collect", "--run-id", "7"]   # frozen .exe
+```
+
+Frozen, `sys.executable` **is the .exe** — so it is the same binary, run again, with a
+different argument.
+
+**4. The dashboard is already done.** It writes the worker's pid to `run.lock`, returns
+`{"run_id": 7}`, and goes back to serving pages. Total time: milliseconds. Nothing about
+the next ten minutes belongs to it.
+
+**5. The worker wakes up** in `__main__.py`: `main` → `_parse` → `_dispatch` →
+`_run_worker` → `services/collect_worker.py:run(7, only)`. Note *where* the imports are:
+
+```python
+if command == "collect":
+    from switch_tracker.services import collect_worker      # INSIDE the branch
+```
+
+Import-inside-a-function looks like a style violation and is load-bearing. At module
+level, merely *starting the dashboard* would load Playwright — the thing Part 2 exists
+to prevent, and `tests/test_import_boundary.py` fails the build if it ever happens.
+
+**6. Setting up (`collect_worker.py:38`).** Open the database, ensure the schema, load
+settings, and build the store list — `overrides.active_stores()`, which is
+`config/stores.py` merged with the corrections in `stores.local.json` (§3.1). Then the
+one conditional cost in the program:
+
+```python
+if needs_browser(stores, only):
+    from switch_tracker.adapters.browser.provider import BrowserProvider
+    provider = BrowserProvider(headless=not config.headful)
+```
+
+An HTTP-only selection never pays to launch Chromium — and `needs_browser` asks the
+**selection**, not the enabled flags, for the reason §3.14 spells out.
+
+**7. The run (`services/collect.py:CollectService.run`, `collect.py:88`).**
+
+```python
+active = select_stores(stores, only)     # scope
+self._sync_store_table(stores)           # ...but sync the FULL list (§3.14)
+events.run_started(len(active))
+await self._fx.refresh(currencies)       # one rate for the whole run (§3.10)
+await asyncio.gather(
+    bounded_gather(http_stores,    self.http_concurrency,    process),   # 8 at once
+    bounded_gather(browser_stores, self.browser_concurrency, process),   # 4 at once
+)
+```
+
+Two pools, because eight simultaneous Chrome contexts and eight simultaneous HTTP
+requests cost wildly different amounts of memory. Two deadlines for the same reason:
+**180 s** per HTTP store, **600 s** per browser store.
+
+**8. One store (`_process_store`, `collect.py:154`).** This is where failure is
+*contained*. `adapter.fetch()` is wrapped in `asyncio.wait_for` and in a deliberately
+broad `except Exception`, and every exit — timeout, crash, `Failed`, `Partial`, `Ok` —
+ends the same way: a row in `run_store` and a `store_finished` event.
+
+> A store that explodes is a *store* failure, never a *run* failure. Thirteen shops
+> still get collected. That containment is why the dashboard can honestly show
+> "13 ok, 1 failed: TimeoutError" instead of nothing at all.
+
+**9. Saving (`_persist`, `collect.py:221`).** Per listing, inside one transaction:
+
+```sql
+INSERT INTO listing (...) ON CONFLICT(store_id, sku) DO UPDATE SET ... RETURNING id
+INSERT INTO price_point (listing_id, run_id, captured_at, native_price, inr_price, ...)
+```
+
+**Upsert the listing, always append the price point.** The listing is *what exists now*;
+the price point is *what was true at 14:32 today*, and history is never edited. The
+rupee figure comes from `fx.to_inr()`, which returns `None` rather than guessing (§3.10).
+
+**10. Finishing.** `UPDATE run SET finished_at = ?` and a `run_finished` event. The
+worker then simply exits. It never releases `run.lock` — the dashboard's `reap_stale()`
+does that on its next launch or startup, because a worker that *crashed* couldn't have
+cleaned up either and both cases must behave identically (§3.12).
+
+**11. Meanwhile, all through steps 7–10:** every `events.*` call above inserted a row
+into `run_event` with an increasing `seq`. Your browser has been holding
+`GET /api/runs/7/events` open since step 4; `web/routers/events.py` polls that table and
+pushes each row down as an SSE message whose `id` is the `seq`. Close the tab and
+reopen: the browser sends the last id it saw, and the stream resumes there (§3.13).
+
+**Now re-read the diagram in §0.5.** Every arrow in it should be a specific file.
 
 ---
 
@@ -1086,3 +1518,230 @@ measurements showed it wouldn't have fixed the speed problem anyway.
 | The trickiest code | `adapters/browser/extract.py` |
 | How failures reach you | `core/models.py`, then `adapters/base.py` |
 | The tests that hold it together | `test_import_boundary.py`, `test_queries.py` |
+| What actually happens when you press a button | Part 2's trace, with the files open |
+| A word you don't recognise | Appendix A |
+| How to run, test and change it | Appendix B |
+
+---
+
+# Appendix A — Glossary
+
+Every term this document uses that isn't ordinary English. Alphabetical, so you can
+land here from anywhere.
+
+| Term | What it means here |
+|---|---|
+| **adapter** | Code that knows one way to read a shop. Three exist: Shopify feed, WooCommerce API, real browser (§3.2). |
+| **argv** | The words after the program's name on the command line. `collect --run-id 7` is argv, and it is how this app tells a new copy of itself what to be (Part 2). |
+| **async / await** | Code that hands control back while waiting on the network instead of sitting idle. `await` = "pause here, resume when the answer arrives" (§1.7). |
+| **bounded_gather** | This project's helper for "run these N jobs, but never more than K at once" (`core/concurrency.py`). |
+| **CSS selector** | A string that picks elements out of a page, e.g. `div.product-card h3`. The least durable way to read a shop (§3.6). |
+| **decorator** | The `@something` line above a function. It attaches behaviour without changing the function — `@router.get("/summary")` means "call this for that URL" (§1.3). |
+| **dependency injection** | Declaring what a function needs (`conn: Conn`) and letting the framework supply it. What lets tests swap in a throwaway database (§1.3). |
+| **fixture** | Named test setup that a test asks for by naming a parameter. `def test_x(self, conn)` gets a fresh database (§1.12). |
+| **frozen** | Running as the packaged `.exe` rather than from source. `sys.frozen` is how the code tells (§3.17). |
+| **FX** | Foreign exchange — here, the USD→INR rate used to compare Play-Asia with Indian shops (§3.10). |
+| **headful / headless** | Headless = the browser runs invisibly (normal). Headful = you can see the window (debugging, and required by the click-to-pick tool). |
+| **htmx** | A small JavaScript library that lets an HTML element make a request by itself, no custom JavaScript needed (§1.9). |
+| **hydration state** | The raw data a JavaScript page was built from, left embedded in the page (e.g. Flipkart's `__INITIAL_STATE__`). Often more stable than the visible HTML (§3.6). |
+| **index (database)** | A structure that lets SQLite find rows without reading every one. §3.11 is a lesson in *using* one versus *seeking* with one. |
+| **JSON-LD** | Structured product data shops embed for Google. Layer 1 of the extraction ladder, because it exists for search engines and survives redesigns (§3.6). |
+| **lint** | Automated review for things that aren't errors: unused imports, suspicious patterns. Here: `ruff` (§1.13). |
+| **listing** | One product at one shop. `UNIQUE(store_id, sku)` (§3.5). |
+| **lock file** | `run.lock`, holding a running worker's process id. Guard layer 3 against two runs at once (§3.12). |
+| **mypy / type checking** | Reads your type annotations and finds mismatches *before* you run the code. Configured `strict` here (§1.14). |
+| **ORM** | A library that hides SQL behind objects (e.g. SQLAlchemy). Deliberately not used — the SQL *is* the logic here (§1.6). |
+| **overrides / corrections** | Machine-written config that layers on top of the hand-written config, in a *separate file*, because a tool must never rewrite the source it also imports (§3.1). |
+| **pagination** | Walking a shop's catalogue page by page. Knowing when to stop is a real problem (§3.7, §3.8). |
+| **Partial** | An outcome meaning "I got rows, but I believe some are missing". The whole point of §3.2. |
+| **pid** | Process id — the number the operating system gives a running program. Checkable, which is why the lock file stores one (§3.12). |
+| **Playwright** | Microsoft's browser-automation library. Starts a real Chrome, runs the page's JavaScript, and can pass values back to Python (§1.8). |
+| **PRAGMA** | A SQLite setting. Two matter here: `journal_mode = WAL` and `busy_timeout` (§1.6). |
+| **price point** | One price for one listing at one moment. Append-only; this is the history. |
+| **probe** | The job that asks each shop "what software do you actually run on?" and writes corrections (§3.16). |
+| **process** | A running program with its own memory, killable on its own. This app deliberately uses one for the dashboard and one per job (Part 2). |
+| **query plan** | SQLite's explanation of *how* it will answer a query. `EXPLAIN QUERY PLAN` is what exposed the §3.11 problem. |
+| **route / router** | A URL and the function that answers it. Grouped in `web/routers/` (§1.3). |
+| **run** | One press of a button, one row in the `run` table, one id stamped on everything that happens. |
+| **scraping** | Reading data out of a page built for human eyes, because there's no data feed. |
+| **selector scoring** | Checking a human's click against the real page before saving it — "matched 88% of sampled cards" (§3.16). |
+| **SKU** | The stable per-shop product id. If it isn't stable, every price series has exactly one point and nothing reports an error (§3.5). |
+| **SSE (Server-Sent Events)** | One long-lived HTTP response the server keeps pushing text into. One-way, auto-reconnecting, no library (§1.10, §3.13). |
+| **subprocess** | A process started by another process. The dashboard starts every job as a subprocess of itself (Part 2). |
+| **template** | HTML with placeholders, filled in by Python. Here: Jinja2 (§1.5). |
+| **transaction** | A group of database writes that either all land or none do. `_persist` wraps a whole store's rows in one. |
+| **upsert** | Insert, or update if the row already exists. `INSERT … ON CONFLICT … DO UPDATE` (§3.11). |
+| **WAL** | Write-Ahead Logging: SQLite mode where readers and writers work simultaneously. Required here, because the dashboard reads while a worker writes (§1.6). |
+| **worker** | A subprocess doing one job — `collect`, `probe`, `fx`, `inspect` (Part 2). |
+
+---
+
+# Appendix B — Working on the code
+
+## B.1 The gate — what must pass before anything is done
+
+Nothing is "done" until all four are green. Run them from the project root.
+
+```bash
+uv run pytest                           # 414 tests, a few seconds
+uv run ruff check src tests scripts     # lint
+uv run ruff format src tests scripts    # formatting (rewrites files)
+uv run mypy                             # types, strict mode
+uv run python -m switch_tracker spike   # the packaging self-check (§3.17)
+```
+
+`pytest` never touches the network and never touches your real database — every test
+gets a throwaway one from a fixture (§1.12). It is safe to run constantly.
+
+## B.2 Testing against a real shop
+
+Unit tests prove the logic. They cannot prove a shop still looks the way it did last
+month — only the live site can:
+
+```bash
+uv run python scripts/scrape_check.py playasia --pages 3
+uv run python scripts/scrape_check.py e2zstore --headful    # watch it happen
+```
+
+This drives the **shipped** adapter and the **shipped** profile on purpose. A checker
+carrying its own private copy of a store profile can pass while the collector fails on
+the same page.
+
+Prefer a disposable database while experimenting:
+
+```bash
+TRACKER_DATA_DIR=/tmp/tracker-scratch uv run python scripts/scrape_check.py nistore
+```
+
+## B.3 Where the tests for X live
+
+| You changed… | Run… |
+|---|---|
+| `core/parse.py` | `tests/test_parse.py` |
+| `core/skus.py` | `tests/test_skus.py` |
+| `core/db.py`, the schema | `tests/test_db.py` |
+| `core/http.py` | `tests/test_http.py` (starts a real local web server) |
+| `core/concurrency.py` | `tests/test_concurrency.py` |
+| `config/stores.py` | `tests/test_stores.py` |
+| `adapters/shopify.py` | `tests/test_adapter_shopify.py` |
+| `adapters/woocommerce.py` | `tests/test_adapter_woocommerce.py` |
+| anything under `adapters/browser/` | `test_adapter_browser.py`, `test_browser_extract.py`, `test_browser_logic.py` |
+| `services/collect.py`, `selection.py` | `tests/test_service_collect.py` |
+| `services/probe.py` | `tests/test_service_probe.py` |
+| `web/queries.py` | `tests/test_queries.py` (holds the frozen oracle from §3.11) |
+| `web/runs.py` | `tests/test_runs.py` |
+| `web/app.py`, `web/routers/` | `tests/test_web_app.py` |
+| `events/` | `tests/test_events.py` |
+| `fx/rates.py` | `tests/test_fx.py` |
+| `__main__.py` | `tests/test_entrypoint.py` |
+| **any import in `web/`** | `tests/test_import_boundary.py` — the architecture test (Part 2) |
+
+Run one file, or one test, while working:
+
+```bash
+uv run pytest tests/test_parse.py
+uv run pytest tests/test_parse.py -k price -vv
+```
+
+## B.4 Your first change — a guided exercise
+
+The house style here is **test first**: write the failing test, watch it fail for the
+right reason, then decide where the fix belongs (§1.12). Try it on the 40 lines with the
+worst track record in the project — the price parser (§3.4).
+
+**Warm-up (read only).** Pick a browser store and watch which extraction layer wins:
+
+```bash
+uv run python scripts/scrape_check.py gamenation --pages 1
+```
+
+Compare its output against the ladder in §3.6. You should be able to say *which* of the
+four layers produced those rows, and why the ones above it didn't.
+
+**Step 1 — find the failure yourself.** `parse_price` handles the six formats in §3.4.
+Poke at it directly:
+
+```bash
+uv run python -c "
+from switch_tracker.core.parse import parse_price
+for s in ['Rs. 4499', '3,599', '4.499,00', 'MRP \u20b94,499 \u20b93,999', '\u20b94,499 \u2013 \u20b95,299']:
+    print(repr(s), '->', parse_price(s))
+"
+```
+
+The first three are the formats §3.4 was hardened for, and they are right. The last two
+are a **discount label** ("was ₹4,499, now ₹3,999") and a **price range** — both
+extremely common on Indian storefronts — and today they come back as `44993999.0` and
+`44995299.0`. Two numbers glued together.
+
+Sit with that for a second, because it is §3.4's lesson happening live: nothing raised,
+nothing returned `None`, and the answer is off by four orders of magnitude.
+
+**Step 2 — write the test before touching anything.** `tests/test_parse.py` groups cases
+in classes (`class TestParsePrice`) and uses `pytest.mark.parametrize` for tables of
+inputs. Add your two cases in that style, assert what you think is *correct*, and run:
+
+```bash
+uv run pytest tests/test_parse.py -k price -vv
+```
+
+**Step 3 — decide where the fix belongs.** This is the actual exercise, and there is no
+single right answer. Three real candidates:
+
+| Where | What it would mean |
+|---|---|
+| `parse_price` itself | "Two figures in one string → take the *lower*" (the sale price). Fixes every caller at once, and bakes a retail assumption into a pure parser. |
+| The caller, `adapters/browser/extract.py:224` | A fallback already lives there: `parse_price(row.get("priceText")) or first_rupee_price(...)`. `first_rupee_price` deliberately takes the **first** rupee figure out of a text blob — maybe the selector path should lean on it harder. |
+| `price_looks_wrong` (`parse.py:230`) | It already flags anything outside ₹299–₹12,000, so a glued number *is* noticed — but only as "worth a look", never rejected. Is flagging enough? |
+
+Before you choose, answer the question that decides it: **can any shipped store profile
+actually produce such a string?** `adapters/browser/profiles.py` holds the `price`
+selectors (§3.9), and one pointing at a card container rather than the sale-price element
+would deliver exactly this. Check, then write what you found in the test's docstring —
+whether the answer is "reachable today" or "not with current profiles, but one selector
+change away", that sentence is worth more than the fix.
+
+**Why this exercise and not "add a feature":** every rule in `parse_price` exists because
+it was wrong once, in a way that produced a believable number and no error. Once you have
+felt that, the comment density everywhere else in this codebase stops looking like
+over-explaining.
+
+**If you want a bigger one.** Add a fifteenth shop to `config/stores.py`: guess its
+`kind`, leave `platform_hint` alone unless the shop sells *only* Switch games (§3.3),
+then press **Check stores** and let `probe` correct your guess (§3.16). Watch what it
+writes to `stores.local.json` — and note that your guess in `stores.py` was never edited.
+
+## B.5 Things that will surprise you
+
+- **Imports inside functions are deliberate.** `__main__.py` and `collect_worker.py` do
+  this to keep Playwright out of the dashboard's import graph (Part 2). A test enforces
+  it. Don't tidy them to the top of the file.
+- **`except Exception` with a `# noqa: BLE001` comment is deliberate too.** The lint rule
+  is switched *on* precisely so each of the dozen exceptions has to be justified in a
+  comment next to it (§1.13).
+- **`uv.lock` is not committed** in this repository, on purpose — see the reason in
+  `.gitignore`. `pyproject.toml` bounds every version; each machine resolves its own.
+- **The `src/` tree contains a whole second implementation** in TypeScript. It is the
+  behavioural reference for the port. Nothing in it runs.
+
+---
+
+# Appendix C — When it doesn't work
+
+| Symptom | What's actually happening | Fix |
+|---|---|---|
+| Dashboard opens, everything empty | The app auto-collects **once**, only to bootstrap an empty database (§3.15). After that it never starts a run by itself. | Press **Collect prices**. |
+| **Moved since last run** is always empty | It needs two runs to compare. | Collect again later. |
+| One store tile says 0 listings | Expected failure mode, and the reason is on the tile. Screenshots and HTML land in `<data dir>/diagnostics/`. | `scripts/scrape_check.py <store>`, then **Fix a broken store** (§3.16). |
+| `A run is already going` (409) | One run at a time, enforced in the database, not the UI (§3.12). | Wait for it, or restart the app — a dead worker's run is reaped on startup. |
+| `'collect' is started by the dashboard, not run directly` | You ran a worker by hand without `--run-id`. Workers report into an existing run. | Use the dashboard, or `scripts/scrape_check.py` for one store. |
+| `Address already in use` on startup | Something else has port 4173 — often an earlier copy still running. | `PORT=4174 uv run python -m switch_tracker`, or close the other copy. |
+| `Executable doesn't exist … playwright install` | The browser engine was never downloaded. It is a ~400 MB download, not a Python package (§1.8). | `uv run playwright install chromium` |
+| `ModuleNotFoundError` | Packages not installed, or you ran `python` instead of `uv run python`. | `uv sync`, then prefix commands with `uv run`. |
+| A warning about OneDrive | Real hazard, not pedantry: the sync client locks the database mid-write and can corrupt it. | Move the folder, or set `TRACKER_DATA_DIR` to a local path. |
+| You deleted `tracker.db` and it still behaves oddly | The database is **three** files (§1.6). | Delete `tracker.db-wal` and `tracker.db-shm` too. |
+| Something is stuck and you want a clean slate | Nothing in the project folder holds state (§0.4). | Delete the data directory, or just use a fresh `TRACKER_DATA_DIR`. |
+
+Still stuck? `uv run python -m switch_tracker spike` checks the four things that break
+only after packaging — certificates, bundled templates, the web server, and the
+Playwright driver — and prints where it stopped.
