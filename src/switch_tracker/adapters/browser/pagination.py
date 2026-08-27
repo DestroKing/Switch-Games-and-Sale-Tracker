@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+
 from playwright.async_api import Page
 
 
@@ -76,5 +77,7 @@ async def wait_for_cloudflare(page: Page, timeout_ms: int = 20000) -> None:
                 "() => !document.title.includes('Just a moment...')",
                 timeout=timeout_ms,
             )
-    except Exception:
-        pass
+    except Exception:  # noqa: BLE001 - a challenge probe must never fail the page
+        # Failing to read the title is not evidence of a challenge. The caller
+        # carries on either way and extraction reports the real outcome.
+        return

@@ -15,8 +15,9 @@ import pytest
 
 from switch_tracker import paths
 from switch_tracker.adapters.browser import overrides as profile_overrides
+from switch_tracker.adapters.browser.adapter import rejects_url
 from switch_tracker.adapters.browser.pagination import ProductivityTracker, read_claimed_total
-from switch_tracker.adapters.browser.profiles import PROFILES, effective_profile
+from switch_tracker.adapters.browser.profiles import PROFILES, StoreProfile, effective_profile
 
 
 @pytest.fixture
@@ -63,6 +64,46 @@ class TestProfiles:
 
     def test_url_paginated_stores_declare_no_next_control(self) -> None:
         assert not PROFILES["amazon_in"].next_page
+
+
+    def test_play_asia_pins_an_inr_session(self) -> None:
+        """What makes StoreConfig.currency='INR' true rather than asserted.
+
+        Play-Asia quotes whatever its session says. These cookies previously
+        existed only in a standalone scraping script, so the shipped config
+        claimed INR while the collector recorded the default session's
+        currency under an INR label.
+        """
+        profile = PROFILES["playasia"]
+        assert dict(profile.cookies)["currency"] == "INR"
+        assert dict(profile.cookies)["country"] == "IN"
+        assert profile.cookie_domain == ".play-asia.com"
+
+    def test_no_other_store_pins_cookies(self) -> None:
+        """The seam is opt-in; a shared session setting would leak everywhere."""
+        assert [k for k, v in PROFILES.items() if v.cookies] == ["playasia"]
+
+
+    def test_every_store_but_play_asia_keeps_the_default_page_mechanics(self) -> None:
+        """The regression contract for the per-store page-mechanics fields.
+
+        They exist so ONE store can differ. If a second profile starts setting
+        them this test fails, which is the point: it forces a deliberate
+        decision instead of a quiet drift where six stores each acquire a
+        slightly different wait strategy nobody chose as a whole.
+        """
+        defaults = {
+            "wait_until": "domcontentloaded",
+            "scroll_passes": 1,
+            "scroll_settle_ms": 0,
+            "reject_url_parts": (),
+            "require_digit_in_url": False,
+        }
+        for store_id, profile in PROFILES.items():
+            if store_id == "playasia":
+                continue
+            for field, expected in defaults.items():
+                assert getattr(profile, field) == expected, f"{store_id}.{field}"
 
 
 class TestProfileOverrides:
@@ -166,3 +207,116 @@ class TestReadClaimedTotal:
     def test_returns_nothing_when_the_page_never_says(self, text: str) -> None:
         """Plenty of stores show no count at all. That is not a failure."""
         assert read_claimed_total(text) is None
+
+
+class TestProductUrlFilter:
+    """Rejecting hrefs that are not products.
+
+    The classifier cannot do this job: a category link titled "Nintendo Switch"
+    on a store with a SWITCH platform_hint classifies as a GAME, because the
+    title genuinely does name the console.
+    """
+
+    @staticmethod
+    def _profile(**kw: object) -> StoreProfile:
+        return StoreProfile(card=("a",), title=("a",), price=("a",), link=("a",), **kw)  # type: ignore[arg-type]
+
+    def test_is_a_no_op_when_the_store_configures_nothing(self) -> None:
+        """The default for six of the seven browser stores."""
+        profile = self._profile()
+        for url in ("https://x.test/search/anything", "https://x.test/no-digits-here"):
+            assert rejects_url(profile, url) is False
+
+    def test_rejects_a_configured_path_fragment(self) -> None:
+        profile = self._profile(reject_url_parts=("/search/", "/category/"))
+        assert rejects_url(profile, "https://x.test/en/search/switch+games") is True
+        assert rejects_url(profile, "https://x.test/en/category/consoles") is True
+
+    def test_keeps_anything_that_matches_no_rule(self) -> None:
+        """Fails OPEN, deliberately.
+
+        A wrong rule must leave junk in the database -- recoverable -- rather
+        than silently deleting a whole store's listings, which is not.
+        """
+        profile = self._profile(reject_url_parts=("/search/",))
+        assert rejects_url(profile, "https://x.test/en/mario-kart-world/13/70abcd") is False
+
+    def test_rejects_a_digitless_url_only_when_asked(self) -> None:
+        url = "https://x.test/en/some-landing-page"
+        assert rejects_url(self._profile(require_digit_in_url=True), url) is True
+        assert rejects_url(self._profile(require_digit_in_url=False), url) is False
+
+    def test_a_digit_anywhere_in_the_url_satisfies_the_rule(self) -> None:
+        profile = self._profile(require_digit_in_url=True)
+        assert rejects_url(profile, "https://x.test/en/mario-kart-world/13/70abcd") is False
+
+
+class TestPagingPathSelection:
+    def test_play_asia_ships_with_no_css_pager_selectors(self) -> None:
+        """Guards the divergence that caused the 350-rows-39-listings bug.
+
+        Any CSS selector here is a control the verified sweep never clicked.
+        """
+        from switch_tracker.adapters.browser.profiles import PROFILES
+
+        assert PROFILES["playasia"].next_page == ()
+
+    def test_the_paging_rule_changes_path_selection_for_play_asia_only(self) -> None:
+        """Asserted against the SHIPPED stores and profiles, not a fixture.
+
+        The rule gained a second trigger ("no {p} to substitute"). This pins
+        which real store each trigger applies to, so a future edit to a search
+        URL cannot silently move a store onto the other mechanism.
+        """
+        from switch_tracker.adapters.browser.adapter import uses_click_paging
+        from switch_tracker.adapters.browser.profiles import PROFILES
+        from switch_tracker.config.stores import STORES
+        from switch_tracker.core.models import AdapterKind
+
+        chosen = {
+            store.id: "click"
+            if uses_click_paging(PROFILES[store.id], store.search_urls[0])
+            else "url"
+            for store in STORES
+            if store.kind is AdapterKind.BROWSER
+        }
+        assert chosen == {
+            "amazon_in": "url",
+            "flipkart": "url",
+            "gamestheshop": "url",
+            "gamenation": "click",
+            "mcubegames": "click",
+            "e2zstore": "click",
+            "playasia": "click",
+        }
+
+
+class TestBudgetInvariant:
+    def test_the_adapter_stops_before_the_service_gives_up(self) -> None:
+        """The whole partial-results mechanism depends on this ordering.
+
+        If the adapter's self-limit were the larger of the two, the service's
+        wait_for would always fire first, cancel the coroutine, and discard
+        every page scraped -- exactly the loss the self-limit exists to avoid.
+        A comment cannot fail a build; this can.
+        """
+        from switch_tracker.adapters.browser.adapter import DEFAULT_TIME_BUDGET_S
+        from switch_tracker.services.collect import CollectService
+
+        assert DEFAULT_TIME_BUDGET_S < CollectService.DEFAULT_BROWSER_DEADLINE_S
+
+
+class TestStoreOrdering:
+    def test_play_asia_is_the_first_browser_store(self) -> None:
+        """Browser stores run 4 at a time in list order.
+
+        Play-Asia is the slowest (networkidle plus a deep click-paged walk), so
+        it claims a slot immediately rather than queueing behind six others and
+        starting with most of the run's wall-clock already spent.
+        """
+        from switch_tracker.config.stores import STORES
+        from switch_tracker.core.models import AdapterKind
+
+        browser = [s.id for s in STORES if s.kind is AdapterKind.BROWSER]
+        assert browser[0] == "playasia", browser
+

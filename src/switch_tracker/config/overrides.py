@@ -12,7 +12,7 @@ the project folder, wrong for a double-clicked exe.
 """
 
 from __future__ import annotations
-import switch_tracker.config.stores
+
 import contextlib
 import json
 from dataclasses import replace

@@ -19,14 +19,36 @@ import argparse
 import asyncio
 import contextlib
 import multiprocessing
-import sys, os
+import os
+import sys
 
 if sys.stdout is None or sys.stderr is None:
-    log_dir = os.path.join(os.environ.get("LOCALAPPDATA", "."), "switch-tracker")
-    os.makedirs(log_dir, exist_ok=True)
-    log_file = open(os.path.join(log_dir, "windowed.log"), "a", buffering=1, encoding="utf-8")
-    sys.stdout = sys.stdout or log_file
-    sys.stderr = sys.stderr or log_file
+    # A --windowed frozen build has no standard handles at all, so the first
+    # print() anywhere would raise. Redirect them at import time, before any
+    # other module gets a chance to write.
+    #
+    # The path comes from paths.data_dir(), NOT a second hand-rolled
+    # LOCALAPPDATA join. That duplicate ignored TRACKER_DATA_DIR and was the
+    # only place left in the app resolving a writable path outside paths.py --
+    # the exact drift that module exists to make unrepresentable. Importing it
+    # here is safe: it pulls in os, sys, functools and pathlib and nothing else.
+    #
+    # The handle is deliberately never closed: it has to outlive this block and
+    # stay valid for the whole process, which is exactly what a context manager
+    # would prevent -- hence the SIM115 suppression rather than a `with`.
+    from switch_tracker import paths
+
+    try:
+        _log = open(  # noqa: SIM115 - must stay open for the process lifetime
+            paths.data_dir() / "windowed.log", "a", buffering=1, encoding="utf-8"
+        )
+    except OSError:
+        # An unwritable data directory must not stop the app before it can even
+        # say so. Discarding output is survivable; failing at import is not, and
+        # in a windowed build it would be a process that vanishes silently.
+        _log = open(os.devnull, "w", encoding="utf-8")  # noqa: SIM115 - same
+    sys.stdout = sys.stdout or _log
+    sys.stderr = sys.stderr or _log
 
 WORKERS = ("collect", "probe", "fx", "inspect")
 

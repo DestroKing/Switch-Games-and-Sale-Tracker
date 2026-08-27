@@ -44,6 +44,11 @@ Opens at `http://127.0.0.1:4173`, reachable only from this machine.
 Each button starts a separate background process and returns immediately. Live
 progress streams into the console panel underneath.
 
+**Collecting is something you ask for.** The app collects by itself exactly
+once — the first time you open it with an empty database and the stores already
+checked — so there is something to look at. After that, opening the dashboard
+never starts a run; press **Collect prices** when you want fresh prices.
+
 **You can close the tab.** The work is happening in another process, so
 closing, refreshing, or even restarting the app does not stop a collection —
 reopening picks the progress back up where it left off.
@@ -130,11 +135,22 @@ consoles — even on stores that file them all under one category.
 ## Development
 
 ```bash
-uv sync                      # dependencies
-uv run pytest                # 336 tests
-uv run ruff check src tests  # lint
-uv run mypy                  # types (strict)
+uv sync                              # dependencies
+uv run pytest                        # 347 tests
+uv run ruff check src tests scripts  # lint
+uv run mypy                          # types (strict)
 uv run python -m switch_tracker spike   # packaging self-check
+```
+
+`scripts/scrape_check.py <store_id>` runs one store's **real** collection path
+against the live site and prints what came back — which engine launched, which
+pager was used, how many listings survived. It drives the shipped adapter and
+the shipped profile on purpose: a check that carries its own private copy of a
+store profile can pass while the collector fails on the same page.
+
+```bash
+uv run python scripts/scrape_check.py playasia --pages 3
+uv run python scripts/scrape_check.py e2zstore --headful
 ```
 
 Design documents are in `docs/`: `python-rewrite-plan.md` (the original spec),
