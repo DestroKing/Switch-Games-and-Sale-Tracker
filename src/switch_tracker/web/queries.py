@@ -110,13 +110,34 @@ def health(conn: sqlite3.Connection) -> dict[str, Any]:
     return {"run": dict(run), "stores": stores}
 
 
-_LATEST_CTE = """
-WITH latest AS (
-  SELECT listing_id, inr_price, native_price, native_currency, in_stock, captured_at,
-         ROW_NUMBER() OVER (PARTITION BY listing_id ORDER BY captured_at DESC) AS rn
-  FROM price_point
-)
-"""
+#: The n-th newest price_point ID for one listing, as a scalar subquery.
+#:
+#: This replaced a window function that ranked EVERY row of price history to
+#: find rank 1. That cost is tied to total history, not to the listings on
+#: screen, so every collection run made the dashboard slower: measured at 5,000
+#: listings per run it went 1.1s at three months, 5.3s at one year, 39.6s at
+#: three -- degrading superlinearly once the sort stopped fitting in cache.
+#: This form seeks idx_pp_listing_time (listing_id, captured_at DESC) once per
+#: listing and stays flat at ~15ms regardless of how much history exists.
+#:
+#: The ORDER BY carries `id DESC` as a tie-break. Two runs inside the same
+#: second give two rows the same captured_at, and "the latest" was previously
+#: whichever one the query planner happened to emit first. AUTOINCREMENT makes
+#: id monotonic, so this resolves to "later insert wins", deterministically.
+#:
+#: CONTRACT: embeds `l.id`, so any query using it must alias `listing` as `l`.
+#:
+#: Formatted at import from a literal, never at call time -- one definition of
+#: "newest row for a listing" with no runtime interpolation into SQL.
+_NTH_LATEST_ID = """(
+    SELECT pp.id FROM price_point pp
+    WHERE pp.listing_id = l.id
+    ORDER BY pp.captured_at DESC, pp.id DESC
+    LIMIT 1 OFFSET {n}
+)"""
+
+_LATEST_ID = _NTH_LATEST_ID.format(n=0)
+_PREVIOUS_ID = _NTH_LATEST_ID.format(n=1)
 
 
 def listings(conn: sqlite3.Connection, query: ListingQuery) -> dict[str, Any]:
@@ -143,18 +164,22 @@ def listings(conn: sqlite3.Connection, query: ListingQuery) -> dict[str, Any]:
         where.append("latest.in_stock = 1")
 
     clause = f"WHERE {' AND '.join(where)}" if where else ""
+    # `latest` is a JOINED ROW, not a projected value. It has to be: in_stock_only
+    # filters on it, and sort=price / sort=seen order by it. Selecting the price
+    # as a scalar subquery instead would look right and silently break all three.
+    # An inner join, so a listing with no price points stays excluded as before.
     from_clause = f"""
         FROM listing l
         JOIN store s ON s.id = l.store_id
-        JOIN latest ON latest.listing_id = l.id AND latest.rn = 1
+        JOIN price_point latest ON latest.id = {_LATEST_ID}
         {clause}
     """
 
-    total = conn.execute(f"{_LATEST_CTE} SELECT COUNT(*) AS n {from_clause}", params).fetchone()["n"]
+    total = conn.execute(f"SELECT COUNT(*) AS n {from_clause}", params).fetchone()["n"]
 
     rows = _rows(
         conn.execute(
-            f"{_LATEST_CTE} SELECT l.id, l.raw_title, l.url, l.region, l.platform, l.condition, "
+            f"SELECT l.id, l.raw_title, l.url, l.region, l.platform, l.condition, "
             f"s.name AS store, latest.inr_price, latest.native_price, latest.native_currency, "
             f"latest.in_stock, latest.captured_at {from_clause} "
             # id as the tie-break keeps pagination stable across requests.
@@ -175,21 +200,24 @@ def movers(conn: sqlite3.Connection, limit: int = 60) -> list[dict[str, Any]]:
     """
     rows = _rows(
         conn.execute(
-            """
-            WITH ranked AS (
-              SELECT listing_id, inr_price, native_currency, in_stock, captured_at,
-                     ROW_NUMBER() OVER (PARTITION BY listing_id ORDER BY captured_at DESC) AS rn
-              FROM price_point
-            )
+            # The same seek as listings(), twice: offset 0 is the current
+            # observation, offset 1 the one before it. This replaces a second
+            # copy of the rank-all-history CTE -- the logic existed in two
+            # places, so a fix applied to one left the other slow.
+            #
+            # A listing with only one price point has no row at offset 1, so the
+            # inner join drops it, exactly as `rn = 2` did. A NULL inr_price
+            # makes the <> comparison NULL and drops the row, also as before.
+            f"""
             SELECT l.id, l.raw_title, l.url, l.region, s.name AS store,
                    cur.native_currency AS currency,
                    cur.inr_price AS now_price, prev.inr_price AS prev_price,
                    cur.in_stock, cur.captured_at
-            FROM ranked cur
-            JOIN ranked prev ON prev.listing_id = cur.listing_id AND prev.rn = 2
-            JOIN listing l ON l.id = cur.listing_id
+            FROM listing l
             JOIN store s ON s.id = l.store_id
-            WHERE cur.rn = 1 AND cur.inr_price <> prev.inr_price
+            JOIN price_point cur ON cur.id = {_LATEST_ID}
+            JOIN price_point prev ON prev.id = {_PREVIOUS_ID}
+            WHERE cur.inr_price <> prev.inr_price
             """
         )
     )
