@@ -104,6 +104,13 @@ class BrowserAdapter:
         problems: list[str] = []
         methods: set[str] = set()
         claimed_total: int | None = None
+        #: Tried, not found. Without this, a store that publishes no "showing
+        #: X of Y" text leaves claimed_total None forever, so the read re-fires
+        #: on EVERY page -- and document.body.innerText forces a full layout
+        #: pass over the whole DOM each time. Measured on Play-Asia at ~10s a
+        #: page, this was a meaningful slice of it, for an answer that was
+        #: already known after page 1.
+        claimed_total_attempted = False
         # Raw rows seen before the classifier drops consoles and accessories.
         # This is the number to compare against a store's own "X results"
         # text, which counts everything in the category rather than only games.
@@ -154,7 +161,8 @@ class BrowserAdapter:
                         continue
 
                     methods.add(method)
-                    if claimed_total is None:
+                    if not claimed_total_attempted:
+                        claimed_total_attempted = True
                         claimed_total = read_claimed_total(await _body_text(page))
 
                     new_on_page = 0
@@ -315,6 +323,21 @@ class BrowserAdapter:
                 raise
         await page.goto(url, wait_until=_DEFAULT_WAIT_UNTIL, timeout=_GOTO_TIMEOUT_MS)
 
+    def _render_ms_for(self, profile: StoreProfile) -> int:
+        """How long to let the grid finish after scrolling.
+
+        Per-profile because it is a property of the SITE, not of the adapter --
+        the same reasoning that already puts scroll_passes and wait_until on the
+        profile. Play-Asia can afford a shorter pause than the default: on its
+        click-paged path _advanced() has already polled until the results
+        actually changed, so a further full-length wait is mostly idling after
+        content we have confirmed arrived.
+
+        Not zero, and not shortened for everyone: _advanced only inspects the
+        first few cards, so the rest of the grid may still be painting.
+        """
+        return self._render_ms if profile.render_ms is None else profile.render_ms
+
     async def _hydrate(self, page: Page, profile: StoreProfile) -> None:
         """Give a lazily-rendered grid the nudge it needs -- on EVERY page.
 
@@ -339,7 +362,7 @@ class BrowserAdapter:
             for _ in range(profile.scroll_passes):
                 await page.evaluate("window.scrollBy(0, window.innerHeight)")
                 await page.wait_for_timeout(profile.scroll_settle_ms)
-        await page.wait_for_timeout(self._render_ms)
+        await page.wait_for_timeout(self._render_ms_for(profile))
 
     def _to_listing(
         self, store: StoreConfig, profile: StoreProfile, row: Extracted
