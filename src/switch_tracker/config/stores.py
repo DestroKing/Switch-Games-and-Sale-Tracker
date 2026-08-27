@@ -134,10 +134,7 @@ STORES: tuple[StoreConfig, ...] = (
         tier=1,
         enabled=True,
         platform_hint=Platform.SWITCH,
-        search_urls=(
-            "https://www.play-asia.com/en/search/nintendo+switch+games",
-            "https://www.play-asia.com/en/search/nintendo+switch+2+games",
-        ),
+        search_urls=("https://www.play-asia.com/en/search/nintendo+switch+games",),
         note=(
             "First in the browser group so it claims a concurrency slot immediately. "
             "Search URLs carry no {p}, so paging is a numeric page-number click; INR "

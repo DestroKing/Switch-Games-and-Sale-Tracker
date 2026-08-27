@@ -61,6 +61,11 @@ class StoreProfile:
     scroll_passes: int = 1
     #: Pause between those steps. Unused at scroll_passes == 1.
     scroll_settle_ms: int = 0
+    #: Overrides BrowserAdapter's render pause after scrolling. None keeps the
+    #: adapter default. Lower it only where paging is click-verified: there,
+    #: _advanced() has already confirmed the results changed, so the full pause
+    #: is largely idling.
+    render_ms: int | None = None
     #: Substrings that mark an href as NOT a product -- category and search
     #: links that sit inside product cards on some storefronts. Without this the
     #: classifier keeps them: a nav link titled "Nintendo Switch" plus a SWITCH
@@ -133,18 +138,28 @@ PROFILES: dict[str, StoreProfile] = {
         # mid-document and stops pulling more in.
         scroll_passes=2,
         scroll_settle_ms=600,
+        # 500 rather than the 1200 default. Measured: pages 2+ cost ~9.8s each,
+        # of which ~3.6s was fixed waiting. Safe to shorten here specifically
+        # because _click_next verifies the page turned before we get here --
+        # this pause is for the tail of the grid, not for the page itself.
+        render_ms=500,
         # Category and search links sit inside the result cards here, and the
         # classifier cannot reject them -- one titled "Nintendo Switch" plus
         # this store's SWITCH hint is a textbook GAME. Product URLs always
         # carry a numeric id, so its absence is a reliable negative.
         reject_url_parts=("/search/", "/category/"),
         require_digit_in_url=True,
-        # The live page reports 139 pages of 36 products -- roughly 5,000 titles,
-        # far more than any single run should attempt. 40 is a deliberate
-        # compromise: deep enough to be worth running, and the adapter's time
-        # budget is the real limiter, returning Partial with everything
-        # collected rather than discarding the run.
-        max_pages=40,
+        # The live page reports 139 pages of ~44 products -- roughly 6,000 titles.
+        #
+        # 60 pages is ~2,600 products at about 7s a page, so ~420s against the
+        # adapter's 540s budget. Raised from 40 when the redundant second search
+        # URL was dropped: max_pages is PER SEARCH URL, so halving the URLs
+        # halved the total work rather than deepening it. This spends the
+        # reclaimed budget on pages that return something new.
+        #
+        # Overrunning is safe rather than costly: the time budget returns
+        # Partial with everything collected instead of discarding the run.
+        max_pages=60,
         # Ordered narrowest-first, and that ordering is load-bearing:
         # from_selectors takes the FIRST card selector that yields rows, so a
         # bare ".item" ahead of these would win on any page where a nav or
@@ -184,11 +199,14 @@ PROFILES: dict[str, StoreProfile] = {
         out_of_stock=(".out-of-stock", ".sold-out", ":has-text('Sold out')", ":has-text('Out of stock')"),
         default_region=Region.ASIA_EN,
         platform_hint=Platform.SWITCH,
-        # ".item" deliberately NOT in the readiness probe. A nav element with
-        # that class satisfies it instantly, so the wait returns before a single
-        # product has rendered and extraction runs against an empty grid.
-        # Waiting on the product containers is the whole point of the probe.
-        ready=".product-item, .search-item, div.item",
+        # The real product container, confirmed live. The previous value listed
+        # ".product-item, .search-item, div.item" -- the first two match ZERO
+        # elements on this site and "div.item" matches exactly one piece of page
+        # furniture, so the probe was satisfied instantly by something that is
+        # not a product. It never waited for anything, which is worse than
+        # waiting too long: extraction could run against a grid that had not
+        # rendered, and nothing would say so.
+        ready="div.pa-modern-product-item",
         # Confirmed on the live page: a visible, semantically-named button, with
         # "1" / "139" siblings reporting position and total. Strictly better
         # than the numeric-text fallback this replaces -- it cannot be confused
