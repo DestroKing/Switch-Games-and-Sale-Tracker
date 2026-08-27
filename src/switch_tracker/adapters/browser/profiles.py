@@ -61,6 +61,11 @@ class StoreProfile:
     scroll_passes: int = 1
     #: Pause between those steps. Unused at scroll_passes == 1.
     scroll_settle_ms: int = 0
+    #: Overrides BrowserAdapter's render pause after scrolling. None keeps the
+    #: adapter default. Lower it only where paging is click-verified: there,
+    #: _advanced() has already confirmed the results changed, so the full pause
+    #: is largely idling.
+    render_ms: int | None = None
     #: Substrings that mark an href as NOT a product -- category and search
     #: links that sit inside product cards on some storefronts. Without this the
     #: classifier keeps them: a nav link titled "Nintendo Switch" plus a SWITCH
@@ -74,6 +79,14 @@ class StoreProfile:
     #: Product URLs on some stores always carry a numeric id. Where that holds,
     #: its absence is a reliable "this is not a product" signal.
     require_digit_in_url: bool = False
+    #: Overrides BrowserAdapter.DEFAULT_TIME_BUDGET_S for this store. None keeps
+    #: the default. Raise it only for a catalogue genuinely worth a long walk --
+    #: a browser store holds one of four concurrency slots for its whole run.
+    #:
+    #: MUST stay below CollectService.DEFAULT_BROWSER_DEADLINE_S. Above it, the
+    #: service's hard timeout fires first, cancels the coroutine, and every page
+    #: already scraped is discarded. A test asserts this for every profile.
+    time_budget_s: float | None = None
     #: Hard cap on pages walked PER SEARCH URL. None means only the adapter's
     #: global safety bound applies.
     #:
@@ -133,18 +146,37 @@ PROFILES: dict[str, StoreProfile] = {
         # mid-document and stops pulling more in.
         scroll_passes=2,
         scroll_settle_ms=600,
+        # 500 rather than the 1200 default. Measured: pages 2+ cost ~9.8s each,
+        # of which ~3.6s was fixed waiting. Safe to shorten here specifically
+        # because _click_next verifies the page turned before we get here --
+        # this pause is for the tail of the grid, not for the page itself.
+        render_ms=500,
         # Category and search links sit inside the result cards here, and the
         # classifier cannot reject them -- one titled "Nintendo Switch" plus
         # this store's SWITCH hint is a textbook GAME. Product URLs always
         # carry a numeric id, so its absence is a reliable negative.
         reject_url_parts=("/search/", "/category/"),
         require_digit_in_url=True,
-        # The live page reports 139 pages of 36 products -- roughly 5,000 titles,
-        # far more than any single run should attempt. 40 is a deliberate
-        # compromise: deep enough to be worth running, and the adapter's time
-        # budget is the real limiter, returning Partial with everything
-        # collected rather than discarding the run.
-        max_pages=40,
+        # FULL CATALOGUE. The live page reports 139 pages of ~44 products, so
+        # ~6,100 rows and ~5,200 distinct cartridges. 150 leaves headroom for
+        # the catalogue growing between runs.
+        #
+        # Sorting cannot help choose a better subset -- Play-Asia's sort control
+        # writes a URL FRAGMENT (#fc=o:3), which is never sent to the server, so
+        # there is no orderable URL to ship. And because paging is click-only
+        # with no page parameter, reaching page 100 costs 99 page loads first:
+        # depth is strictly sequential. Partial coverage would therefore always
+        # be the SAME arbitrary half, every run.
+        #
+        # Measured cost: 24s for page 1 (networkidle) plus ~8.5s each after,
+        # so 139 pages is roughly 20 minutes. That is a deliberate trade, not an
+        # oversight -- see time_budget_s below, and prefer running this store on
+        # its own from "Collect specific stores" rather than on every collection.
+        max_pages=150,
+        # 24 + 138 x 8.5 = ~1200s, plus margin. Below the service's 1500s
+        # deadline so the adapter stops itself first and returns Partial with
+        # everything collected.
+        time_budget_s=1320.0,
         # Ordered narrowest-first, and that ordering is load-bearing:
         # from_selectors takes the FIRST card selector that yields rows, so a
         # bare ".item" ahead of these would win on any page where a nav or
@@ -184,11 +216,14 @@ PROFILES: dict[str, StoreProfile] = {
         out_of_stock=(".out-of-stock", ".sold-out", ":has-text('Sold out')", ":has-text('Out of stock')"),
         default_region=Region.ASIA_EN,
         platform_hint=Platform.SWITCH,
-        # ".item" deliberately NOT in the readiness probe. A nav element with
-        # that class satisfies it instantly, so the wait returns before a single
-        # product has rendered and extraction runs against an empty grid.
-        # Waiting on the product containers is the whole point of the probe.
-        ready=".product-item, .search-item, div.item",
+        # The real product container, confirmed live. The previous value listed
+        # ".product-item, .search-item, div.item" -- the first two match ZERO
+        # elements on this site and "div.item" matches exactly one piece of page
+        # furniture, so the probe was satisfied instantly by something that is
+        # not a product. It never waited for anything, which is worse than
+        # waiting too long: extraction could run against a grid that had not
+        # rendered, and nothing would say so.
+        ready="div.pa-modern-product-item",
         # Confirmed on the live page: a visible, semantically-named button, with
         # "1" / "139" siblings reporting position and total. Strictly better
         # than the numeric-text fallback this replaces -- it cannot be confused

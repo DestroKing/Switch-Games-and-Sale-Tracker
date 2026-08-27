@@ -20,6 +20,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import sys
+import time
 
 from switch_tracker.adapters.browser import adapter as adapter_module
 from switch_tracker.adapters.browser.adapter import BrowserAdapter
@@ -30,10 +31,29 @@ from switch_tracker.core.models import Failed, Partial, StoreConfig
 
 
 class PrintSink:
-    """The adapter's ProgressSink, wired to stdout."""
+    """The adapter's ProgressSink, wired to stdout, with per-page timing.
+
+    Timing is the point: roughly 3.6s per page is fixed waiting the adapter
+    does regardless of the site (two scroll settles, a render pause and the
+    politeness gap). Knowing how much of a page's cost is that, versus the
+    site's own render time, is the difference between tuning the right
+    constant and guessing.
+    """
+
+    def __init__(self) -> None:
+        self._start = time.perf_counter()
+        self._last = self._start
+        self._prev_count = 0
 
     def page(self, store_id: str, page: int, count: int) -> None:
-        print(f"  page {page:>3}  ->  {count} listings so far")
+        now = time.perf_counter()
+        print(
+            f"  page {page:>3}  ->  {count:>5} listings"
+            f"   (+{count - self._prev_count:>3} this page)"
+            f"   {now - self._last:>5.1f}s   total {now - self._start:>5.1f}s"
+        )
+        self._last = now
+        self._prev_count = count
 
 
 def _store(store_id: str) -> StoreConfig:
@@ -77,12 +97,14 @@ async def _walk(store: StoreConfig, profile: StoreProfile, *, max_pages: int, he
     print()
 
     provider = BrowserProvider(headless=not headful)
+    started = time.perf_counter()
     try:
         outcome = await BrowserAdapter(provider).fetch(store, PrintSink())
     finally:
         await provider.close()
 
     print(f"\n  engine     : {provider.launched_channel}")
+    print(f"  wall clock : {time.perf_counter() - started:.1f}s")
     print(f"  outcome    : {type(outcome).__name__}")
     if isinstance(outcome, Failed):
         print(f"  reason     : {outcome.reason}")

@@ -139,14 +139,14 @@ class TestListings:
         assert [r["raw_title"] for r in result["rows"]] == ["Mario Kart World"]
 
     def test_filters_by_store(self, conn) -> None:
-        assert queries.listings(conn, queries.ListingQuery(store="amazon"))["total"] == 1
+        assert queries.listings(conn, queries.ListingQuery(stores=("amazon",)))["total"] == 1
 
     def test_filters_by_condition(self, conn) -> None:
         result = queries.listings(conn, queries.ListingQuery(condition="PRE_OWNED"))
         assert [r["raw_title"] for r in result["rows"]] == ["Metroid Dread"]
 
     def test_filters_by_region(self, conn) -> None:
-        assert queries.listings(conn, queries.ListingQuery(region="JP"))["total"] == 1
+        assert queries.listings(conn, queries.ListingQuery(regions=("JP",)))["total"] == 1
 
     def test_filters_out_of_stock(self, conn) -> None:
         result = queries.listings(conn, queries.ListingQuery(in_stock_only=True))
@@ -278,11 +278,14 @@ def _oracle_listings(conn: sqlite3.Connection, q: queries.ListingQuery) -> dict:
     if q.q:
         where.append(r"l.raw_title LIKE ? ESCAPE '\'")
         params.append(f"%{queries._escape_like(q.q)}%")
-    for column, value in (("l.platform", q.platform), ("l.region", q.region),
-                          ("l.store_id", q.store), ("l.condition", q.condition)):
+    for column, value in (("l.platform", q.platform), ("l.condition", q.condition)):
         if value:
             where.append(f"{column} = ?")
             params.append(value)
+    for column, values in (("l.store_id", q.stores), ("l.region", q.regions)):
+        if values:
+            where.append(f"{column} IN ({', '.join('?' * len(values))})")
+            params.extend(values)
     if q.in_stock_only:
         where.append("latest.in_stock = 1")
     clause = f"WHERE {' AND '.join(where)}" if where else ""
@@ -331,7 +334,8 @@ def populated(conn: sqlite3.Connection) -> sqlite3.Connection:
 
 def _case_id(q: queries.ListingQuery) -> str:
     """Readable pytest ids, so a failure names the parameter combination."""
-    filters = "-".join(x for x in (q.q, q.platform, q.region, q.store, q.condition) if x)
+    filters = "-".join(
+        x for x in (q.q, q.platform, q.condition, *q.regions, *q.stores) if x)
     stock = "instock" if q.in_stock_only else ""
     page = f"l{q.limit}o{q.offset}" if (q.limit, q.offset) != (100, 0) else ""
     return "-".join(x for x in (q.sort, q.direction, filters, stock, page) if x)
@@ -346,8 +350,8 @@ def _matrix() -> list[queries.ListingQuery]:
         queries.ListingQuery(q="mario"),
         queries.ListingQuery(q="%"),
         queries.ListingQuery(platform="SWITCH2"),
-        queries.ListingQuery(region="JP"),
-        queries.ListingQuery(store="amazon"),
+        queries.ListingQuery(regions=("JP",)),
+        queries.ListingQuery(stores=("amazon",)),
         queries.ListingQuery(condition="PRE_OWNED"),
         queries.ListingQuery(in_stock_only=True),
         queries.ListingQuery(in_stock_only=True, sort="price", direction="desc"),
@@ -411,4 +415,67 @@ class TestMatchesTheShippedQuery:
 
         rows = queries.listings(conn, queries.ListingQuery())["rows"]
         assert rows[0]["inr_price"] == 3499
+
+
+class TestMultiValueFilters:
+    """Stores and regions are sets.
+
+    Comparing two shops, or Asia against Japan, is the normal question a price
+    tracker gets asked. Single-select could only answer it one shop at a time.
+    """
+
+    @pytest.fixture
+    def spread(self, conn: sqlite3.Connection) -> sqlite3.Connection:
+        add_listing(conn, 1, "nistore", "Zelda", region="IN")
+        add_listing(conn, 2, "amazon", "Mario", region="JP")
+        add_listing(conn, 3, "nistore", "Metroid", region="ASIA_EN")
+        add_listing(conn, 4, "amazon", "Kirby", region="US")
+        for listing_id in (1, 2, 3, 4):
+            add_price(conn, listing_id, 1, 1000 * listing_id, at="2026-01-01T00:00:00Z")
+        return conn
+
+    @staticmethod
+    def _ids(result: dict) -> set[int]:
+        return {row["id"] for row in result["rows"]}
+
+    def test_no_selection_returns_everything(self, spread: sqlite3.Connection) -> None:
+        assert self._ids(queries.listings(spread, queries.ListingQuery())) == {1, 2, 3, 4}
+
+    def test_one_store_behaves_exactly_as_before(self, spread: sqlite3.Connection) -> None:
+        """The backward-compatible case: a bookmarked ?store=amazon still works."""
+        result = queries.listings(spread, queries.ListingQuery(stores=("amazon",)))
+        assert self._ids(result) == {2, 4}
+        assert result["total"] == 2
+
+    def test_several_stores(self, spread: sqlite3.Connection) -> None:
+        result = queries.listings(spread, queries.ListingQuery(stores=("amazon", "nistore")))
+        assert self._ids(result) == {1, 2, 3, 4}
+        assert result["total"] == 4
+
+    def test_several_regions(self, spread: sqlite3.Connection) -> None:
+        result = queries.listings(spread, queries.ListingQuery(regions=("JP", "ASIA_EN")))
+        assert self._ids(result) == {2, 3}
+
+    def test_stores_and_regions_combine_with_AND(self, spread: sqlite3.Connection) -> None:
+        """Amazon OR nistore, AND (JP OR ASIA_EN) -- not four independent ORs."""
+        result = queries.listings(
+            spread, queries.ListingQuery(stores=("amazon",), regions=("JP", "ASIA_EN")))
+        assert self._ids(result) == {2}
+
+    def test_an_unknown_id_simply_matches_nothing(self, spread: sqlite3.Connection) -> None:
+        result = queries.listings(spread, queries.ListingQuery(stores=("ghost",)))
+        assert result["total"] == 0
+
+    def test_total_counts_the_filtered_set_not_the_page(self, spread: sqlite3.Connection) -> None:
+        """total and rows must agree, or the count under the table lies."""
+        result = queries.listings(
+            spread, queries.ListingQuery(stores=("amazon", "nistore"), limit=2))
+        assert result["total"] == 4
+        assert len(result["rows"]) == 2
+
+    def test_a_store_id_cannot_inject_sql(self, spread: sqlite3.Connection) -> None:
+        """Values are bound; only the placeholder COUNT comes from the tuple."""
+        hostile = ("amazon", "'); DROP TABLE listing; --")
+        assert self._ids(queries.listings(spread, queries.ListingQuery(stores=hostile))) == {2, 4}
+        assert spread.execute("SELECT COUNT(*) c FROM listing").fetchone()["c"] == 4
 
