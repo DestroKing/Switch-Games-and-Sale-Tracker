@@ -91,3 +91,13 @@ a:hover { text-decoration: underline; }
   margin: .5rem 0 .75rem;
 }
 .muted { opacity: .55; }
+
+/* Multi-select filters: same grid as the subset collector, so the two
+   checkbox controls on the page look and behave identically. */
+.filter-group > summary { cursor: pointer; padding: .3rem .1rem; white-space: nowrap; }
+.filter-group .subset-grid { max-height: 220px; overflow-y: auto; }
+.filter-group .chosen { opacity: .6; font-size: .9em; }
+.linkish {
+  background: none; border: 0; padding: 0; cursor: pointer;
+  text-decoration: underline; opacity: .7; font: inherit;
+}

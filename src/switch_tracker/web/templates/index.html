@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Switch cartridge prices</title>
-<link rel="stylesheet" href="/static/app.css">
+<link rel="stylesheet" href="/static/app.css?v={{ asset_version }}">
 <script src="/static/htmx.min.js" defer></script>
 </head>
 <body>
@@ -90,8 +90,20 @@
       <button data-v="NEW" aria-pressed="false">New</button>
       <button data-v="PRE_OWNED" aria-pressed="false">Pre-Owned</button>
     </div>
-    <select id="store" aria-label="Store"><option value="">All stores</option></select>
-    <select id="region" aria-label="Region"><option value="">All regions</option></select>
+    <!-- Checkbox groups, not <select multiple>: ctrl-clicking to multi-select
+         is unintuitive and poor on touch, and this matches the "Collect
+         specific stores" control already on the page. Options are filled from
+         /api/facets, so only values that actually exist in the data appear. -->
+    <details class="filter-group" id="storeGroup">
+      <summary>Store <span class="chosen" data-for="store"></span></summary>
+      <div class="subset-grid" id="storeBoxes"></div>
+      <button type="button" class="linkish" data-clear="store">Clear</button>
+    </details>
+    <details class="filter-group" id="regionGroup">
+      <summary>Region <span class="chosen" data-for="region"></span></summary>
+      <div class="subset-grid" id="regionBoxes"></div>
+      <button type="button" class="linkish" data-clear="region">Clear</button>
+    </details>
     <label class="check"><input type="checkbox" id="stock"> In stock only</label>
     <button id="reset">Reset</button>
   </div>
@@ -102,6 +114,6 @@
 <script>
 const ACTIVE_RUN = {{ active_run | tojson }};
 </script>
-<script src="/static/app.js"></script>
+<script src="/static/app.js?v={{ asset_version }}"></script>
 </body>
 </html>
