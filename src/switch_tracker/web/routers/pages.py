@@ -33,6 +33,10 @@ def index(request: Request, conn: Conn, launcher: Launcher) -> HTMLResponse:
             # Only stores that a human can actually fix by clicking: it needs
             # a browser profile and pages to open.
             "fixable": [s for s in stores if s.kind is AdapterKind.BROWSER and s.search_urls],
+            # Every store, DISABLED ONES INCLUDED: naming a store overrides its
+            # enabled flag, and a store probe has just disabled is exactly the
+            # one worth running in isolation.
+            "collectable": list(stores),
             "probed": overrides.has_been_probed(),
             "onedrive_warning": paths.onedrive_hazard(),
             "data_dir": paths.data_dir(),

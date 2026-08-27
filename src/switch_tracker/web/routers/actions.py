@@ -12,6 +12,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
 
+from switch_tracker import selection
 from switch_tracker.config import overrides
 from switch_tracker.web.deps import get_launcher
 from switch_tracker.web.errors import ok, problem
@@ -20,8 +21,6 @@ from switch_tracker.web.runs import RunAlreadyActive, RunLauncher
 Launcher = Annotated[RunLauncher, Depends(get_launcher)]
 
 router = APIRouter(prefix="/actions", tags=["actions"])
-
-_LAUNCHABLE = {"collect", "probe", "fx"}
 
 
 def _start(launcher: RunLauncher, kind: str, *extra: str) -> JSONResponse:
@@ -37,8 +36,29 @@ def _start(launcher: RunLauncher, kind: str, *extra: str) -> JSONResponse:
 
 
 @router.post("/collect")
-def collect(launcher: Launcher) -> JSONResponse:
-    return _start(launcher, "collect")
+def collect(launcher: Launcher, only: str = "") -> JSONResponse:
+    """Collect every enabled store, or just the ones named in ``only``.
+
+    ONE route rather than a second /collect/{store_id}, because the empty
+    selection already means "everything" everywhere else in this feature. Two
+    routes would need two validation paths and two places to answer 409, for a
+    difference that is one optional query parameter.
+
+    Omitting --only entirely when nothing is selected keeps the all-stores argv
+    byte-identical to what it was before this feature existed.
+    """
+    wanted = selection.parse_ids(only)
+    if not wanted:
+        return _start(launcher, "collect")
+
+    known = {s.id for s in overrides.active_stores()}
+    unknown = [store_id for store_id in wanted if store_id not in known]
+    if unknown:
+        # Rejected before a run row exists, so a typo cannot occupy the single
+        # active-run slot.
+        return problem(404, f"Unknown store(s): {', '.join(unknown)}")
+
+    return _start(launcher, "collect", "--only", selection.format_ids(wanted))
 
 
 @router.post("/probe")

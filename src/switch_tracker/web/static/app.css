@@ -80,3 +80,14 @@ a:hover { text-decoration: underline; }
 .check { display: inline-flex; align-items: center; gap: 7px; color: var(--dim); font-size: 13.5px; }
 .count { color: var(--dim); font-size: 12.5px; margin-bottom: 8px; }
 .more { width: 100%; margin-top: 12px; }
+
+/* Subset collection: a compact grid so fourteen stores fit without scrolling. */
+.subset { margin: 0 0 1rem; }
+.subset > summary { cursor: pointer; padding: .35rem 0; }
+.subset-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: .25rem .75rem;
+  margin: .5rem 0 .75rem;
+}
+.muted { opacity: .55; }

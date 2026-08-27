@@ -291,3 +291,60 @@ class TestHasEverCollected:
         )
         assert queries.has_ever_collected(conn) is True
 
+
+class TestSubsetCollection:
+    """POST /actions/collect, with and without a selection."""
+
+    def test_no_selection_launches_exactly_the_old_command(
+        self, client: TestClient, spawned: list[list[str]]
+    ) -> None:
+        """The all-stores path must not gain an argv token it did not have."""
+        assert client.post("/actions/collect").status_code == 200
+        assert "--only" not in spawned[-1], spawned[-1]
+
+    def test_a_selection_is_forwarded_to_the_worker(
+        self, client: TestClient, spawned: list[list[str]]
+    ) -> None:
+        response = client.post("/actions/collect", params={"only": "playasia,e2zstore"})
+        assert response.status_code == 200
+        command = spawned[-1]
+        assert "--only" in command
+        assert command[command.index("--only") + 1] == "playasia,e2zstore"
+
+    def test_whitespace_and_empty_entries_are_tolerated(
+        self, client: TestClient, spawned: list[list[str]]
+    ) -> None:
+        response = client.post("/actions/collect", params={"only": " playasia , ,e2zstore "})
+        assert response.status_code == 200
+        assert spawned[-1][-1] == "playasia,e2zstore"
+
+    def test_an_all_whitespace_selection_means_every_store(
+        self, client: TestClient, spawned: list[list[str]]
+    ) -> None:
+        """Not a 404: it parses to an empty selection, which means "everything"."""
+        assert client.post("/actions/collect", params={"only": " , "}).status_code == 200
+        assert "--only" not in spawned[-1]
+
+    def test_an_unknown_store_is_rejected_before_a_run_exists(
+        self, client: TestClient, conn: sqlite3.Connection, spawned: list[list[str]]
+    ) -> None:
+        """A typo must not occupy the single active-run slot."""
+        before = len(spawned)
+        response = client.post("/actions/collect", params={"only": "playasia,ghost"})
+        assert response.status_code == 404
+        assert "ghost" in response.json()["error"]
+        assert len(spawned) == before, "a worker was spawned for an invalid selection"
+
+    def test_a_disabled_store_may_still_be_selected(
+        self, client: TestClient, spawned: list[list[str]]
+    ) -> None:
+        """zozila ships disabled; naming it explicitly is the whole feature."""
+        response = client.post("/actions/collect", params={"only": "zozila"})
+        assert response.status_code == 200
+        assert spawned[-1][-1] == "zozila"
+
+    def test_a_second_run_is_refused_while_one_is_active(self, client: TestClient) -> None:
+        assert client.post("/actions/collect", params={"only": "playasia"}).status_code == 200
+        second = client.post("/actions/collect", params={"only": "e2zstore"})
+        assert second.status_code == 409
+
