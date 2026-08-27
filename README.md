@@ -154,9 +154,14 @@ uv run python scripts/scrape_check.py playasia --pages 3
 uv run python scripts/scrape_check.py e2zstore --headful
 ```
 
-Design documents are in `docs/`: `python-rewrite-plan.md` (the original spec),
-`python-rewrite-hld.md` (architecture and the options that lost), and
-`python-rewrite-lld.md` (the build plan).
+Design documents are in `docs/`:
+
+- **`code-walkthrough.md`** — start here. The tech stack and why each piece was chosen
+  over its alternatives, then a feature-by-feature tour of the code. Assumes no prior
+  knowledge of any of the technologies.
+- `python-rewrite-plan.md` — the original spec
+- `python-rewrite-hld.md` — architecture, and the options that lost
+- `python-rewrite-lld.md` — the build plan
 
 The `src/` tree still contains the original TypeScript implementation. It is
 the behavioural reference for the port and will be removed once the Python
