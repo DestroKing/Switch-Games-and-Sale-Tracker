@@ -56,7 +56,14 @@ class CollectService:
     #: A browser store pages for as long as the site's own signal keeps
     #: working, so its budget has to cover a genuinely large catalogue rather
     #: than a guess about any one store's page count.
-    DEFAULT_BROWSER_DEADLINE_S = 600.0
+    #:
+    #: Raised from 600 to cover Play-Asia's full 139-page catalogue (~20 min).
+    #: This is a BACKSTOP, not the working limit: each adapter stops itself at
+    #: its own budget and returns Partial, and every individual browser
+    #: operation already has its own timeout (45s navigate, 5s click, 4s
+    #: advance-detect), so nothing can sit here for the full duration unless it
+    #: is genuinely wedged.
+    DEFAULT_BROWSER_DEADLINE_S = 1500.0
 
     DEFAULT_HTTP_CONCURRENCY = 8
     #: Was 2. With only two slots, two large catalogues landing in both at

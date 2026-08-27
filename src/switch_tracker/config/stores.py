@@ -134,10 +134,17 @@ STORES: tuple[StoreConfig, ...] = (
         tier=1,
         enabled=True,
         platform_hint=Platform.SWITCH,
-        search_urls=(
-            "https://www.play-asia.com/en/search/nintendo+switch+games",
-            "https://www.play-asia.com/en/search/nintendo+switch+2+games",
-        ),
+        # ONE search URL, not two. The "nintendo switch 2 games" search was
+        # dropped after a live run showed it is almost entirely redundant:
+        # 5 pages of each returned 422 rows but only 181 distinct products, and
+        # page 1 of THIS url already carries NSW2 titles (Oblivion Remastered,
+        # Ocarina of Time, Brigandine Abyss). Play-Asia tags most releases
+        # "NSW, NSW2", so both searches return the same catalogue.
+        #
+        # The second URL therefore spent half the run's page budget re-reading
+        # products the first had already found. Removing it converts that
+        # budget into depth instead.
+        search_urls=("https://www.play-asia.com/en/search/nintendo+switch+games",),
         note=(
             "First in the browser group so it claims a concurrency slot immediately. "
             "Search URLs carry no {p}, so paging is a numeric page-number click; INR "

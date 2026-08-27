@@ -38,6 +38,7 @@ def index(request: Request, conn: Conn, launcher: Launcher) -> HTMLResponse:
             # one worth running in isolation.
             "collectable": list(stores),
             "probed": overrides.has_been_probed(),
+            "asset_version": resources.asset_version(),
             "onedrive_warning": paths.onedrive_hazard(),
             "data_dir": paths.data_dir(),
         },

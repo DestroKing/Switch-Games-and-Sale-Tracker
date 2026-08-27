@@ -30,9 +30,17 @@ FX_CLUSTER_THRESHOLD = 8
 class ListingQuery:
     q: str = ""
     platform: str = ""
-    region: str = ""
-    store: str = ""
     condition: str = ""
+    #: Store ids and regions are SETS -- a listing view is far more useful when
+    #: you can compare two shops, or Asia against Japan, than when you can look
+    #: at exactly one. Empty means "no filter", the same as an empty string does
+    #: for the single-valued fields above.
+    #:
+    #: platform and condition stay single-valued on purpose: their controls are
+    #: three-way segmented buttons where the first option already means "all",
+    #: so a set would add a state the UI cannot express.
+    stores: tuple[str, ...] = ()
+    regions: tuple[str, ...] = ()
     in_stock_only: bool = False
     sort: str = "price"
     direction: str = "asc"
@@ -153,13 +161,22 @@ def listings(conn: sqlite3.Connection, query: ListingQuery) -> dict[str, Any]:
         params.append(f"%{_escape_like(query.q)}%")
     for column, value in (
         ("l.platform", query.platform),
-        ("l.region", query.region),
-        ("l.store_id", query.store),
         ("l.condition", query.condition),
     ):
         if value:
             where.append(f"{column} = ?")
             params.append(value)
+
+    for column, values in (
+        ("l.store_id", query.stores),
+        ("l.region", query.regions),
+    ):
+        if values:
+            # The placeholder COUNT comes from the tuple length; every value is
+            # still bound. Nothing the user typed is interpolated into SQL --
+            # the same rule the sort whitelist exists to enforce.
+            where.append(f"{column} IN ({', '.join('?' * len(values))})")
+            params.extend(values)
     if query.in_stock_only:
         where.append("latest.in_stock = 1")
 

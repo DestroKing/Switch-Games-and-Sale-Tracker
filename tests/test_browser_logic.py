@@ -318,6 +318,32 @@ class TestPagingPathSelection:
 
 
 class TestBudgetInvariant:
+    def test_no_profile_budget_reaches_the_services_hard_deadline(self) -> None:
+        """Extends the default-only check below to PER-STORE budgets.
+
+        A profile may raise its own budget for a large catalogue. If one ever
+        exceeds the service deadline, the service's wait_for fires first,
+        cancels the coroutine, and every page already scraped is discarded --
+        the precise loss the self-limit exists to prevent, reintroduced by a
+        single number in a config file.
+        """
+        from switch_tracker.services.collect import CollectService
+
+        for store_id, profile in PROFILES.items():
+            if profile.time_budget_s is not None:
+                assert profile.time_budget_s < CollectService.DEFAULT_BROWSER_DEADLINE_S, store_id
+
+    def test_a_profile_budget_covers_the_pages_it_allows(self) -> None:
+        """A cap it cannot reach in the time given is a misleading setting.
+
+        Play-Asia: 150 pages at the measured ~8.5s each needs ~1275s, and it is
+        allowed 1320s. Loose enough that the budget, not the cap, should be what
+        stops a genuinely huge run -- but not so loose that max_pages is fiction.
+        """
+        profile = PROFILES["playasia"]
+        assert profile.time_budget_s is not None and profile.max_pages is not None
+        assert profile.time_budget_s / profile.max_pages >= 8.0
+
     def test_the_adapter_stops_before_the_service_gives_up(self) -> None:
         """The whole partial-results mechanism depends on this ordering.
 
