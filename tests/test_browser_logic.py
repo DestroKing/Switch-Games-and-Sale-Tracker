@@ -252,14 +252,40 @@ class TestProductUrlFilter:
 
 
 class TestPagingPathSelection:
-    def test_play_asia_ships_with_no_css_pager_selectors(self) -> None:
-        """Guards the divergence that caused the 350-rows-39-listings bug.
+    def test_no_profile_uses_an_unscoped_has_text_pager(self) -> None:
+        """The shape that caused the 350-rows-36-listings bug.
 
-        Any CSS selector here is a control the verified sweep never clicked.
+        A bare ":has-text(...)" matches every element containing the text,
+        html and body included, so `.last` resolved to a footer <small> reading
+        "Terms > Privacy". _click_next clicked it and reported success.
+
+        This replaces an earlier assertion that Play-Asia must carry NO pager
+        selectors at all. That was the right guard while its only verified
+        mechanism was the numeric-text clicker; the live page has since been
+        confirmed to expose `button.pa-pagination-next`, which is strictly
+        better -- it cannot be confused with the Slick carousel's "1 2 3 4"
+        buttons that a text-matching clicker would press. The invariant worth
+        keeping is not "no selectors", it is "no selector that can match the
+        whole document".
         """
-        from switch_tracker.adapters.browser.profiles import PROFILES
+        for store_id, profile in PROFILES.items():
+            for selector in profile.next_page:
+                assert not selector.startswith(":"), f"{store_id}: unscoped {selector!r}"
 
-        assert PROFILES["playasia"].next_page == ()
+    def test_play_asia_pages_by_its_own_pagination_button(self) -> None:
+        """Confirmed on the live page, alongside "1" and "139" position labels."""
+        assert PROFILES["playasia"].next_page == ("button.pa-pagination-next",)
+
+    def test_play_asia_cards_are_the_confirmed_container_first(self) -> None:
+        """Every previously-shipped selector matched zero elements.
+
+        Extraction only worked by falling through to "[class*='product']",
+        which matches 488 elements of nav, carousels and page furniture -- and
+        that is what broke paging, because _click_next fingerprints the first
+        few cards to confirm a page turned. Furniture does not change between
+        pages, so a successful click read as a failure.
+        """
+        assert PROFILES["playasia"].card[0] == "div.pa-modern-product-item"
 
     def test_the_paging_rule_changes_path_selection_for_play_asia_only(self) -> None:
         """Asserted against the SHIPPED stores and profiles, not a fixture.

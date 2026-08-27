@@ -139,10 +139,12 @@ PROFILES: dict[str, StoreProfile] = {
         # carry a numeric id, so its absence is a reliable negative.
         reject_url_parts=("/search/", "/category/"),
         require_digit_in_url=True,
-        # The verified sweep capped at 5 per URL. 15 buys real depth while
-        # keeping 2 URLs x 15 pages inside the time budget even when pages are
-        # slow -- and the budget itself is the backstop if they are slower.
-        max_pages=15,
+        # The live page reports 139 pages of 36 products -- roughly 5,000 titles,
+        # far more than any single run should attempt. 40 is a deliberate
+        # compromise: deep enough to be worth running, and the adapter's time
+        # budget is the real limiter, returning Partial with everything
+        # collected rather than discarding the run.
+        max_pages=40,
         # Ordered narrowest-first, and that ordering is load-bearing:
         # from_selectors takes the FIRST card selector that yields rows, so a
         # bare ".item" ahead of these would win on any page where a nav or
@@ -150,12 +152,20 @@ PROFILES: dict[str, StoreProfile] = {
         # ".item-list-view .item" are the two that were verified by hand
         # against the live site; bare ".item" stays last as a fallback rather
         # than being deleted, since it costs nothing once it cannot pre-empt.
+        # Confirmed against the live page, not guessed. Every previous entry
+        # here matched ZERO elements; extraction only worked because it fell
+        # through to "[class*='product']", which matches 488 elements of page
+        # furniture, carousels and nav. That over-broad selector is also what
+        # broke pagination: _click_next verifies a page turn by fingerprinting
+        # the first few cards, and with furniture at the top of the list the
+        # fingerprint never changed, so a successful click read as a failure.
+        #
+        # 44 of these exist per page; 36 carry a price. The rest are the
+        # non-product tiles the price check in extract.py already drops.
         card=(
+            "div.pa-modern-product-item",
             ".product-item",
             ".search-item",
-            "div.item",
-            ".item-list-view .item",
-            ".item",
             "[class*='product']",
         ),
         title=(".item-name a", ".product-name a", "a.title", "h3 a", ".title", "a[href*='/en/']"),
@@ -179,19 +189,17 @@ PROFILES: dict[str, StoreProfile] = {
         # product has rendered and extraction runs against an empty grid.
         # Waiting on the product containers is the whole point of the probe.
         ready=".product-item, .search-item, div.item",
-        # EMPTY ON PURPOSE, and this is load-bearing.
+        # Confirmed on the live page: a visible, semantically-named button, with
+        # "1" / "139" siblings reporting position and total. Strictly better
+        # than the numeric-text fallback this replaces -- it cannot be confused
+        # with the Slick carousel's "1 2 3 4" buttons, which sit in the same
+        # document and which a text-matching clicker would happily press.
         #
-        # Its search URLs carry no "{p}", so BrowserAdapter still takes the
-        # click path -- but with no CSS selectors to try, _click_next goes
-        # straight to the numeric page-number mechanism, which is the ONLY
-        # mechanism the hand-verified sweep ever used.
-        #
-        # The previous list started with a bare ":has-text('>')" that matched
-        # html and body, so `.last` clicked a footer <small>. Replacing it with
-        # tag-scoped guesses would still mean production tries six controls the
-        # verified run never touched, any one of which could navigate somewhere
-        # the sweep never went. Trying nothing is what makes the two identical.
-        next_page=(),
+        # An earlier version of this list began with a bare ":has-text('>')".
+        # Unscoped, that matches every element containing the character --
+        # html and body included -- so `.last` resolved to a footer <small>
+        # reading "Terms > Privacy", clicked it, and reported success.
+        next_page=("button.pa-pagination-next",),
     ),
     "gamestheshop": StoreProfile(
         # Confirmed from a real dump: this site has stable "ak-" class names.
