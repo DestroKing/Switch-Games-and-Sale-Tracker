@@ -329,6 +329,14 @@ def populated(conn: sqlite3.Connection) -> sqlite3.Connection:
     return conn
 
 
+def _case_id(q: queries.ListingQuery) -> str:
+    """Readable pytest ids, so a failure names the parameter combination."""
+    filters = "-".join(x for x in (q.q, q.platform, q.region, q.store, q.condition) if x)
+    stock = "instock" if q.in_stock_only else ""
+    page = f"l{q.limit}o{q.offset}" if (q.limit, q.offset) != (100, 0) else ""
+    return "-".join(x for x in (q.sort, q.direction, filters, stock, page) if x)
+
+
 def _matrix() -> list[queries.ListingQuery]:
     out = [queries.ListingQuery()]
     for sort in ("price", "title", "store", "seen"):
@@ -359,7 +367,7 @@ class TestMatchesTheShippedQuery:
     and sort=seen, which is why this is a matrix and not one assertion.
     """
 
-    @pytest.mark.parametrize("query", _matrix(), ids=lambda q: f"{q.sort}-{q.direction}-{q.q}-{q.platform}-{q.region}-{q.store}-{q.condition}-{q.in_stock_only}-{q.limit}-{q.offset}")
+    @pytest.mark.parametrize("query", _matrix(), ids=_case_id)
     def test_listings_matches_the_oracle(
         self, populated: sqlite3.Connection, query: queries.ListingQuery
     ) -> None:
