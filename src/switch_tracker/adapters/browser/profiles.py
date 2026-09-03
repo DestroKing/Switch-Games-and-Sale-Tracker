@@ -96,6 +96,21 @@ class StoreProfile:
     #: results are persisted rather than thrown away.
     max_pages: int | None = None
 
+    #: When True, the SKU is derived from URL *and* inferred region, not the
+    #: URL alone.
+    #:
+    #: Play-Asia lists separate region editions of one title (Asia English,
+    #: Asia Chinese, Japan, US, ...) as separate search-result cards, but every
+    #: one of them links to the SAME product page -- region only appears in
+    #: the card's title text, never in the href. Deriving the SKU from the URL
+    #: alone therefore gives every regional edition the same SKU: `_dedupe`
+    #: keeps only the last one seen, and even if it didn't, `listing` has
+    #: UNIQUE(store_id, sku), so the persist step would upsert them into one
+    #: row regardless. Region is modelled everywhere else in this codebase as
+    #: a genuinely different, non-interchangeable product (core/models.py),
+    #: so silently merging them is data loss, not a cosmetic duplicate.
+    sku_includes_region: bool = False
+
 
 PROFILES: dict[str, StoreProfile] = {
     "amazon_in": StoreProfile(
@@ -177,6 +192,7 @@ PROFILES: dict[str, StoreProfile] = {
         # deadline so the adapter stops itself first and returns Partial with
         # everything collected.
         time_budget_s=1320.0,
+        sku_includes_region=True,
         # Ordered narrowest-first, and that ordering is load-bearing:
         # from_selectors takes the FIRST card selector that yields rows, so a
         # bare ".item" ahead of these would win on any page where a nav or

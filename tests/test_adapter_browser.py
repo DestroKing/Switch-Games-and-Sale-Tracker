@@ -130,6 +130,29 @@ class TestCollecting:
         assert result.listings[0].in_stock is False
 
 
+class TestRegionDisambiguation:
+    async def test_same_product_url_two_regions_are_kept_as_separate_listings(
+        self, provider: BrowserProvider, server
+    ) -> None:
+        base, recorder = server
+        body = (
+            card("Zelda (Asia English)", "Rs. 4499", "/p/zelda-shared")
+            + card("Zelda (Japan)", "Rs. 4299", "/p/zelda-shared")
+        )
+        recorder.plan_pages(
+            "/shop", (200, f"<html><body>{body}</body></html>", {}), (200, "<html></html>", {})
+        )
+
+        def region_profile(store_id: str):
+            return replace(_test_profile(store_id), sku_includes_region=True)
+
+        adapter = BrowserAdapter(provider, profile_for=region_profile, settle_ms=(0, 0), render_ms=0)
+        result = await adapter.fetch(shop_store(base), NullSink())
+
+        assert isinstance(result, Ok)
+        assert len(result.listings) == 2
+        assert {l.region for l in result.listings} == {Region.ASIA_EN, Region.JP}
+
 class TestPagination:
     async def test_follows_the_url_template_across_pages(self, adapter, server) -> None:
         base, recorder = server

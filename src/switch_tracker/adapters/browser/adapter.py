@@ -368,7 +368,7 @@ class BrowserAdapter:
                 await page.wait_for_timeout(profile.scroll_settle_ms)
         await page.wait_for_timeout(self._render_ms_for(profile))
 
-    def _to_listing(
+        def _to_listing(
         self, store: StoreConfig, profile: StoreProfile, row: Extracted
     ) -> RawListing | None:
         result = classify(row.title, profile.platform_hint or store.platform_hint)
@@ -381,9 +381,21 @@ class BrowserAdapter:
             return None
         split = urlsplit(absolute)
 
+        region = infer_region(row.title, profile.default_region)
+        sku = sku_from_url(absolute)
+        if profile.sku_includes_region:
+            # Some stores (Play-Asia) list separate region editions of one
+            # title as separate cards that all link to the SAME product URL --
+            # region only appears in the card's title text, never the href.
+            # sku_from_url alone therefore collapses every regional edition
+            # onto one SKU, which UNIQUE(store_id, sku) then upserts into a
+            # single row, silently discarding the rest. Suffixing the region
+            # is what keeps them as distinct listings.
+            sku = f"{sku}-{region.value.lower()}"
+
         return RawListing(
             store_id=store.id,
-            sku=sku_from_url(absolute),
+            sku=sku,
             # Query string dropped: session ids and tracking parameters churn
             # between runs and would make one product look like many.
             url=f"{split.scheme}://{split.netloc}{split.path}",
@@ -392,7 +404,7 @@ class BrowserAdapter:
             native_price=row.price,
             in_stock=row.in_stock,
             platform=result.platform,
-            region=infer_region(row.title, profile.default_region),
+            region=region,
             condition=infer_condition(row.title),
         )
 
