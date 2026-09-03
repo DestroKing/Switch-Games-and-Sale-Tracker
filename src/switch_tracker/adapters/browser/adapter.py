@@ -368,7 +368,7 @@ class BrowserAdapter:
                 await page.wait_for_timeout(profile.scroll_settle_ms)
         await page.wait_for_timeout(self._render_ms_for(profile))
 
-        def _to_listing(
+    def _to_listing(
         self, store: StoreConfig, profile: StoreProfile, row: Extracted
     ) -> RawListing | None:
         result = classify(row.title, profile.platform_hint or store.platform_hint)
