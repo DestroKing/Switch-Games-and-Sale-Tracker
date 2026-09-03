@@ -13,7 +13,7 @@ from pathlib import Path
 # Add src directory to sys.path so hooks can inspect local modules
 sys.path.insert(0, str(Path.cwd() / "src"))
 
-from PyInstaller.utils.hooks import collect_all, collect_data_files
+from PyInstaller.utils.hooks import collect_all, collect_data_files, collect_submodules
 
 # --- Playwright: Node driver + JS
 pw_datas, pw_binaries, pw_hidden = collect_all("playwright")
@@ -58,14 +58,14 @@ a = Analysis(
     pathex=["src"],
     binaries=pw_binaries + config_binaries,
     datas=pw_datas + cert_datas + stealth_datas + app_datas + _browser_datas() + config_datas,
-    hiddenimports=pw_hidden + config_hidden + [
+        hiddenimports=pw_hidden + config_hidden + [
         "switch_tracker.config",
         "switch_tracker.config.stores",
         "playwright_stealth",
         "uvicorn.logging",
         "uvicorn.protocols",
         "uvicorn.lifespan",
-    ],
+    ] + collect_submodules("switch_tracker.adapters"),
     hookspath=[],
     runtime_hooks=["packaging/runtime_hook_playwright.py"],
     excludes=["tkinter", "matplotlib", "numpy", "PIL"],
