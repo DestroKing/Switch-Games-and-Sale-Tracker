@@ -210,6 +210,25 @@ class TestProfiles:
         """
         assert [k for k, v in PROFILES.items() if v.sku_url_params] == ["cex_in"]
 
+    def test_gamepookie_skips_the_json_ld_layer(self) -> None:
+        """Confirmed via diagnose_extraction.py: 5 JSON-LD products, 24 real cards.
+
+        extract() prefers JSON-LD everywhere because it survives redesigns that
+        break CSS -- but here it is a "featured items" snippet, not the
+        catalogue, and extract() returns the instant ANY layer succeeds. So
+        click-paging alone did not fix the count: the page climbed, but every
+        page was still read as 5 until this stopped JSON-LD from winning first.
+        """
+        assert PROFILES["gamepookie"].skip_json_ld is True
+
+    def test_no_other_store_skips_json_ld(self) -> None:
+        """Opt-out, not a reordering: JSON-LD is the right default everywhere else.
+
+        A store correctly served by JSON-LD would lose that resilience for no
+        reason if this became the new default instead of an exception.
+        """
+        assert [k for k, v in PROFILES.items() if v.skip_json_ld] == ["gamepookie"]
+
     def test_cex_leads_with_the_selector_confirmed_against_the_live_page(self) -> None:
         """A --diagnose-pager run scored the profile's own candidates.
 

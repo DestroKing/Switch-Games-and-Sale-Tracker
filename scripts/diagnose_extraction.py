@@ -148,6 +148,51 @@ async def _report(
     return "|".join(f"{r.title}~{r.href}" for r in rows[:5])
 
 
+async def _jsonld_lockstep_probe(page: Page, profile: StoreProfile, template: str) -> None:
+    """Does JSON-LD stay frozen, or does it regenerate to track the grid?
+
+    Either answer still means ``skip_json_ld`` is the right fix -- extract()
+    runs on the FIRST render, before any click happens, so a JSON-LD block
+    that only mirrors whatever is currently on screen is no more useful than
+    a static one. But which one it is says something different about the
+    site: a frozen count is a "featured items" snippet unrelated to the
+    catalogue; a count that climbs in lockstep with the cards means the block
+    is real but always a step behind. Reported rather than assumed.
+
+    Skipped entirely for a store with no click control -- this only tests
+    what happens when MORE of the grid is loaded, which for a URL-paged store
+    is a separate page.goto(), not a click.
+    """
+    if not profile.next_page:
+        print("\n  (no next_page control on this profile -- click-lockstep probe not applicable)")
+        return
+
+    from switch_tracker.adapters.browser.adapter import _click_next
+
+    print("\n================ does JSON-LD track the grid as the next control is clicked? ================")
+    url = template.replace("{p}", "1")
+    try:
+        await page.goto(url, wait_until=profile.wait_until, timeout=_GOTO_TIMEOUT_MS)
+    except Exception as exc:  # noqa: BLE001 - a timeout here is the answer, not an error
+        print(f"      goto FAILED: {type(exc).__name__}: {exc}")
+        return
+    if profile.ready:
+        try:
+            await page.wait_for_selector(profile.ready, timeout=15_000)
+        except Exception:  # noqa: BLE001 - "never appeared" is exactly what we want to learn
+            print(f"      ready {profile.ready!r}: NEVER APPEARED")
+
+    for click_number in range(4):
+        if click_number > 0:
+            advanced = await _click_next(page, profile, click_number + 1)
+            if not advanced:
+                print(f"      click {click_number}: control did not advance -- stopping here")
+                break
+        ld = await page.evaluate(_LD_COUNTS)
+        cards = await page.locator(profile.card[0]).count() if profile.card else -1
+        print(f"      after {click_number} click(s): json-ld {ld['products']:>3} product(s)   cards {cards:>3}")
+
+
 async def run(store_id: str, url_index: int, headful: bool) -> int:
     store = _store(store_id)
     profile = effective_profile(store_id)
@@ -179,6 +224,7 @@ async def run(store_id: str, url_index: int, headful: bool) -> int:
                 print("\n      page 1 and page 2 differ: URL paging works")
             if profile.wait_until == "networkidle":
                 break
+        await _jsonld_lockstep_probe(page, profile, template)
         await context.close()
     finally:
         await provider.close()

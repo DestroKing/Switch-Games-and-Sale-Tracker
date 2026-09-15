@@ -159,6 +159,19 @@ class StoreProfile:
     #: price series at one point with nothing reporting an error.
     sku_url_params: tuple[str, ...] = ()
 
+    #: Skip JSON-LD and go straight to the CSS selectors.
+    #:
+    #: extract() prefers JSON-LD everywhere because it is the layer least
+    #: likely to break on a redesign -- it exists for search engines, not
+    #: layout, so this must stay opt-out rather than reordered globally.
+    #:
+    #: GamePookie needs the opt-out: confirmed via diagnose_extraction.py, its
+    #: JSON-LD block lists 5 products (a "featured items" SEO snippet, not the
+    #: catalogue) while the same page's CSS selectors find 24 real cards.
+    #: extract() returns the instant ANY layer succeeds, so every page was
+    #: silently capped at 5 regardless of how well paging or scrolling worked.
+    skip_json_ld: bool = False
+
 
 PROFILES: dict[str, StoreProfile] = {
     "amazon_in": StoreProfile(
@@ -408,6 +421,13 @@ PROFILES: dict[str, StoreProfile] = {
         out_of_stock=(":has-text('Out of Stock')",),
         ready="[data-hook='product-item-root']",
         platform_hint=Platform.SWITCH,
+        # Confirmed via diagnose_extraction.py: this page's JSON-LD block lists
+        # only 5 products (a "featured items" SEO snippet, not the catalogue),
+        # while the CSS selectors on the SAME page find 24 real cards. Without
+        # this, extract() takes the 5 JSON-LD rows and returns before the
+        # selectors ever run -- which is why click-paging alone did not fix the
+        # count: the page was climbing, but every page was still read as 5.
+        skip_json_ld=True,
         # This store has NO pagination. It has a "Load more" button at the end
         # of the grid, confirmed by eye on the live site -- which is why
         # ?page=2 existed as a link and still returned the same products, and
