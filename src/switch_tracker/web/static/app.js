@@ -451,7 +451,13 @@ const COLS = [
   { key: "store", label: "Store", sortable: true },
   { key: null, label: "Native", num: true },
   { key: "price", label: "INR", sortable: true, num: true },
-  { key: null, label: "Change", num: true, hint: "Movement since the previous run, where known" },
+  {
+    key: "change",
+    label: "Change",
+    sortable: true,
+    num: true,
+    hint: "Movement since the previous run, where known",
+  },
 ];
 
 function queryString() {
@@ -562,10 +568,25 @@ function headerCell(col) {
 
 function deltaCell(row) {
   const moved = movementById.get(row.id);
-  if (!moved) return `<td class="num dim">—</td>`;
-  const down = moved.pct < 0;
-  return `<td class="num"><span class="delta ${down ? "down" : "up"}"` +
-         ` title="was ${inr(moved.prev_price)}">${Math.abs(moved.pct).toFixed(1)}%</span></td>`;
+
+  // queries.py now returns change_pct for every listing that has
+  // a previous observation. Fall back to /api/movers for compatibility.
+  const pct = row.change_pct ?? moved?.pct;
+
+  if (pct === null || pct === undefined) {
+    return `<td class="num dim">—</td>`;
+  }
+
+  const down = pct < 0;
+
+  // /api/movers contains the previous absolute price, so retain the
+  // existing tooltip whenever that information is available.
+  const title = moved
+    ? ` title="was ${inr(moved.prev_price)}"`
+    : "";
+
+  return `<td class="num"><span class="delta ${down ? "down" : "up"}"${title}>` +
+         `${Math.abs(pct).toFixed(1)}%</span></td>`;
 }
 
 async function search(append = false) {
