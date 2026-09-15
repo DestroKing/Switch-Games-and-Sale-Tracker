@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from pathlib import Path
+from typing import ClassVar
 
 import pytest
 
@@ -89,13 +90,35 @@ class TestProfiles:
         assert [k for k, v in PROFILES.items() if v.cookies] == ["playasia"]
 
 
-    def test_every_store_but_play_asia_keeps_the_default_page_mechanics(self) -> None:
+    #: field -> the stores allowed to depart from its default, and nothing else.
+    #:
+    #: This replaces a blanket "every store except playasia" exemption. The
+    #: guard's purpose is unchanged and is NOT "only one store may differ" --
+    #: it is that a departure must be a decision somebody made and can point at
+    #: evidence for. Listing them per field keeps that true while allowing a
+    #: second store to opt into ONE mechanic without silently unlocking four
+    #: others for itself.
+    PAGE_MECHANIC_OPT_INS: ClassVar[dict[str, set[str]]] = {
+        "wait_until": {"playasia"},
+        "scroll_passes": {"playasia", "gamepookie"},
+        "scroll_settle_ms": {"playasia", "gamepookie"},
+        "reject_url_parts": {"playasia"},
+        "require_digit_in_url": {"playasia"},
+    }
+
+    def test_only_the_listed_stores_depart_from_the_default_page_mechanics(self) -> None:
         """The regression contract for the per-store page-mechanics fields.
 
-        They exist so ONE store can differ. If a second profile starts setting
-        them this test fails, which is the point: it forces a deliberate
-        decision instead of a quiet drift where six stores each acquire a
-        slightly different wait strategy nobody chose as a whole.
+        If a profile starts setting one of these without being named above,
+        this fails -- which is the point. It forces a deliberate decision
+        instead of a quiet drift where six stores each acquire a slightly
+        different wait strategy nobody chose as a whole.
+
+        GamePookie's entry is evidence-backed, not a preference: a live
+        --pages 3 run extracted exactly FIVE products from every page of a
+        category reporting ~88. Wix extends the grid as you scroll, and the
+        default single proportional jump lands at 60% of a document only five
+        cards tall, so it never reaches far enough to pull the next batch.
         """
         defaults = {
             "wait_until": "domcontentloaded",
@@ -105,10 +128,49 @@ class TestProfiles:
             "require_digit_in_url": False,
         }
         for store_id, profile in PROFILES.items():
-            if store_id == "playasia":
-                continue
             for field, expected in defaults.items():
+                if store_id in self.PAGE_MECHANIC_OPT_INS[field]:
+                    continue
                 assert getattr(profile, field) == expected, f"{store_id}.{field}"
+
+    def test_a_listed_store_actually_uses_the_opt_in_it_claims(self) -> None:
+        """The other half, or the list above rots into a permission slip.
+
+        An entry that no longer corresponds to a real departure should be
+        deleted, not left granting a store the right to drift later.
+        """
+        defaults = {
+            "wait_until": "domcontentloaded",
+            "scroll_passes": 1,
+            "scroll_settle_ms": 0,
+            "reject_url_parts": (),
+            "require_digit_in_url": False,
+        }
+        for field, store_ids in self.PAGE_MECHANIC_OPT_INS.items():
+            for store_id in store_ids:
+                assert getattr(PROFILES[store_id], field) != defaults[field], (
+                    f"{store_id} is listed as opting out of {field} but still uses the default"
+                )
+
+    def test_cex_derives_its_sku_from_the_query_parameter(self) -> None:
+        """The bug a live run found: 69 products scraped, ONE kept.
+
+        Every CeX URL is /product-detail?id=NNNN. The path tail is therefore
+        the same string for the entire catalogue, and UNIQUE(store_id, sku)
+        folded the whole shop into a single listing -- while the run still
+        reported Ok, because nothing in the pipeline treats "everything
+        deduped into one row" as an error.
+        """
+        assert PROFILES["cex_in"].sku_url_params == ("id",)
+
+    def test_no_other_store_keeps_query_parameters(self) -> None:
+        """Opt-in, because this function's job is a STABLE answer across runs.
+
+        A store whose URLs carry an unrelated ?id= tracking parameter would
+        have every SKU change the moment a global rule started reading it --
+        every price series restarting at one point, with no error anywhere.
+        """
+        assert [k for k, v in PROFILES.items() if v.sku_url_params] == ["cex_in"]
 
 
 class TestConditionResolution:

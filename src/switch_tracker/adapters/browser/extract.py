@@ -180,6 +180,33 @@ _CARD_SCRAPE = """
         || '',
     priceText: pick(n, cfg.price),
     cardText: n.textContent ?? '',
+    // textContent with SEPARATORS restored. textContent concatenates its text
+    // nodes with nothing between them, so a "Pre-owned" badge sitting flush
+    // against the product name yields "Pre-OwnedZelda TotK" -- and the
+    // word-boundary anchors in core/parse's PRE_OWNED patterns then fail to
+    // match on a card that plainly says it. Real markup usually has whitespace
+    // between the tags; minified markup does not, and which one a store ships
+    // is not something to leave a data field depending on.
+    //
+    // A TreeWalker rather than innerText: innerText is defined in terms of
+    // RENDERED text, so it forces a layout pass per card, and this codebase
+    // already found that cost worth caching around (see claimed_total in
+    // adapter.py). This walks the same nodes textContent does and only changes
+    // the glue.
+    //
+    // Kept SEPARATE from cardText rather than replacing it. cardText feeds the
+    // layer-4 rupee-pattern price fallback for all ten stores; this field is
+    // read by one. No reason to put nine stores' prices through a change made
+    // for one store's badge.
+    spacedText: (() => {
+      const walker = document.createTreeWalker(n, NodeFilter.SHOW_TEXT);
+      const parts = [];
+      while (walker.nextNode()) {
+        const t = (walker.currentNode.nodeValue ?? '').trim();
+        if (t) parts.push(t);
+      }
+      return parts.join(' ');
+    })(),
     href: (() => {
       for (const s of cfg.link) {
         try {
@@ -242,7 +269,7 @@ async def from_selectors(page: Page, profile: StoreProfile) -> list[Extracted]:
                     price,
                     href,
                     not row.get("oos"),
-                    context=str(row.get("cardText") or ""),
+                    context=str(row.get("spacedText") or row.get("cardText") or ""),
                 )
             )
 

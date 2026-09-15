@@ -141,6 +141,24 @@ class StoreProfile:
     #: so silently merging them is data loss, not a cosmetic duplicate.
     sku_includes_region: bool = False
 
+    #: Query parameters that ARE the product id on this store. Two effects,
+    #: and both are needed or neither helps: the SKU is derived from them
+    #: (see core/skus.sku_from_url), and they are the ONLY query parameters
+    #: kept on the stored URL.
+    #:
+    #: CeX routes its whole catalogue through ``/product-detail?id=NNNN``.
+    #: Stripping the query, which is right for every other store, leaves every
+    #: product with the path tail "product-detail" -- so UNIQUE(store_id, sku)
+    #: folds the entire shop into ONE listing and the stored URL points at a
+    #: page that does not exist. A live run scraped 69 products and kept 1,
+    #: reporting Ok.
+    #:
+    #: A WHITELIST rather than "keep the query string": session ids and
+    #: tracking parameters churn between runs, and letting those into either
+    #: the SKU or the URL mints a brand-new listing every run, restarting every
+    #: price series at one point with nothing reporting an error.
+    sku_url_params: tuple[str, ...] = ()
+
 
 PROFILES: dict[str, StoreProfile] = {
     "amazon_in": StoreProfile(
@@ -390,6 +408,14 @@ PROFILES: dict[str, StoreProfile] = {
         out_of_stock=(":has-text('Out of Stock')",),
         ready="[data-hook='product-item-root']",
         platform_hint=Platform.SWITCH,
+        # Confirmed live: a --pages 3 run extracted exactly FIVE products from
+        # every page of a category reporting ~88. Wix builds its grid as you
+        # scroll, and the default single proportional jump lands at 60% of a
+        # document still only five cards tall -- so it never travels far enough
+        # to trigger the next batch. Viewport-sized steps are the pattern the
+        # Play-Asia sweep proved for exactly this shape of grid.
+        scroll_passes=4,
+        scroll_settle_ms=600,
         # NOT Region.IN, and this is the load-bearing setting for this store.
         # GamePookie is an importer: US, Asian and Japanese pressings sit in the
         # same category as domestic stock, and most listings never say which.
@@ -426,6 +452,10 @@ PROFILES: dict[str, StoreProfile] = {
         # catalogue. Card text does not rescue it either; there is no badge to
         # find. The fact lives with the retailer, so it is configured here.
         default_condition=Condition.PRE_OWNED,
+        # Confirmed live: a --pages 3 run scraped 69 products and kept ONE.
+        # Every CeX URL is /product-detail?id=NNNN, so the path tail is the
+        # same string for the whole catalogue and dedupe collapsed all of it.
+        sku_url_params=("id",),
     ),
 }
 

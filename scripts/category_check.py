@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import os
 import sys
 from urllib.parse import quote
 
@@ -75,45 +76,84 @@ async def _shopify_count(client: PoliteClient, store: StoreConfig, handle: str) 
     return len(products) if isinstance(products, list) else None
 
 
-async def check(store: StoreConfig) -> None:
+async def check(store: StoreConfig) -> list[bool]:
+    """Returns which of this store's slugs came back UNREACHABLE.
+
+    An empty list means no network call was even attempted (no collections
+    configured, or a kind this script does not check) -- that must not count
+    toward "everything was unreachable" below, or a store with nothing to
+    check would falsely look like proof of a proxy problem.
+    """
     if not store.collections:
         print(f"\n{store.name} ({store.id}): no collections configured -- nothing to check")
-        return
+        return []
     if store.kind not in (AdapterKind.WOOCOMMERCE, AdapterKind.SHOPIFY):
         print(f"\n{store.name} ({store.id}): kind {store.kind} has no category API to check here")
-        return
+        return []
 
     print(f"\n{store.name} ({store.id}, {store.kind})")
     client = PoliteClient()
+    unreachable: list[bool] = []
     for slug in store.collections:
         count = (
             await _woo_count(client, store, slug)
             if store.kind is AdapterKind.WOOCOMMERCE
             else await _shopify_count(client, store, slug)
         )
+        unreachable.append(count is None)
         if count is None:
             print(f"    {slug:38}  UNREACHABLE -- store API did not answer")
         elif count <= _SUSPICIOUS_MAX:
             print(f"    {slug:38}  {count:>5} products  <-- SUSPICIOUSLY LOW, check this slug live")
         else:
             print(f"    {slug:38}  {count:>5} products")
+    return unreachable
+
+
+def _proxy_env() -> list[str]:
+    # Both cases, the way curl/requests/httpx itself would look for them.
+    names = ("HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy")
+    return [n for n in names if os.environ.get(n)]
 
 
 async def run(store_ids: list[str]) -> int:
     by_id = {s.id: s for s in overrides.active_stores()}
     exit_code = 0
+    all_unreachable: list[bool] = []
     for store_id in store_ids:
         store = by_id.get(store_id)
         if store is None:
             print(f"\n{store_id}: not in the shipped/overridden store list")
             exit_code = 1
             continue
-        await check(store)
+        all_unreachable.extend(await check(store))
+
+    # PoliteClient sets trust_env=False deliberately -- a public shop must
+    # never be reached through a corporate proxy, and on a locked-down
+    # machine going through one would be blocked anyway (see http.py). That
+    # is correct for the real collector, but it means this script fails
+    # exactly like a wall of wrong slugs on a machine where a proxy is the
+    # ONLY way out. Every slug checked coming back UNREACHABLE, on a machine
+    # that has a proxy configured, is that trap far more often than it is
+    # seven simultaneously-wrong slugs -- say so instead of leaving it to be
+    # misread as a slug problem.
+    proxy_vars = _proxy_env()
+    if proxy_vars and all_unreachable and all(all_unreachable):
+        print(
+            f"\nNOTE: every slug checked came back UNREACHABLE, and {', '.join(proxy_vars)} is set "
+            "in this environment. PoliteClient ignores the proxy by design (core/http.py), so on a "
+            "network that requires it for outbound access, this is not evidence any slug is wrong -- "
+            "it is evidence this run never left the machine. Check network access before touching stores.py."
+        )
+
     return exit_code
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser = argparse.ArgumentParser(
+        description=__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     parser.add_argument(
         "store_ids",
         nargs="*",

@@ -10,7 +10,7 @@ import asyncio
 import contextlib
 import random
 from collections.abc import Callable
-from urllib.parse import urljoin, urlsplit
+from urllib.parse import SplitResult, parse_qs, urlencode, urljoin, urlsplit
 
 from playwright.async_api import Page
 from playwright.async_api import TimeoutError as PlaywrightTimeoutError
@@ -383,7 +383,7 @@ class BrowserAdapter:
         split = urlsplit(absolute)
 
         region = infer_region(row.title, profile.default_region)
-        sku = sku_from_url(absolute)
+        sku = sku_from_url(absolute, profile.sku_url_params)
         if profile.sku_includes_region:
             # Some stores (Play-Asia) list separate region editions of one
             # title as separate cards that all link to the SAME product URL --
@@ -397,9 +397,12 @@ class BrowserAdapter:
         return RawListing(
             store_id=store.id,
             sku=sku,
-            # Query string dropped: session ids and tracking parameters churn
-            # between runs and would make one product look like many.
-            url=f"{split.scheme}://{split.netloc}{split.path}",
+            # Query string dropped except for a store's declared id params:
+            # session ids and tracking parameters churn between runs and would
+            # make one product look like many. CeX routes its whole catalogue
+            # through one path and identifies products ONLY by ?id=, so for it
+            # the bare path is a page that does not exist.
+            url=_canonical_url(split, profile.sku_url_params),
             title=row.title,
             native_currency=store.currency,
             native_price=row.price,
@@ -432,6 +435,26 @@ def _condition_for(profile: StoreProfile, row: Extracted) -> Condition:
     if profile.condition_from_context and row.context:
         return infer_condition(row.context)
     return infer_condition(row.title)
+
+
+def _canonical_url(split: SplitResult, keep_params: tuple[str, ...]) -> str:
+    """The stored URL: scheme, host, path, and ONLY the declared id params.
+
+    Rebuilt from the parsed parts rather than string-trimmed so parameter
+    order is ours and not the page's -- two cards linking to the same product
+    with their query parameters in a different order must not produce two
+    different stored URLs.
+    """
+    base = f"{split.scheme}://{split.netloc}{split.path}"
+    if not keep_params:
+        return base
+    found = parse_qs(split.query)
+    kept = [
+        (name, found[name][0])
+        for name in keep_params
+        if found.get(name) and found[name][0]
+    ]
+    return f"{base}?{urlencode(kept)}" if kept else base
 
 
 def uses_click_paging(profile: StoreProfile, template: str) -> bool:
