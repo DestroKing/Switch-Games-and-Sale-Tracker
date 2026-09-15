@@ -190,7 +190,10 @@ async def _jsonld_lockstep_probe(page: Page, profile: StoreProfile, template: st
                 break
         ld = await page.evaluate(_LD_COUNTS)
         cards = await page.locator(profile.card[0]).count() if profile.card else -1
-        print(f"      after {click_number} click(s): json-ld {ld['products']:>3} product(s)   cards {cards:>3}")
+        print(
+            f"      after {click_number} click(s): "
+            f"json-ld {ld['products']:>3} product(s)   cards {cards:>3}"
+        )
 
 
 async def run(store_id: str, url_index: int, headful: bool) -> int:

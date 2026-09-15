@@ -23,22 +23,16 @@ _MAX_LENGTH = 120
 def sku_from_url(url: str, id_params: tuple[str, ...] = ()) -> str:
     """The stable product id for this URL.
 
-    ``id_params`` names query parameters that ARE the product id on this
-    store, checked after Flipkart's ``pid`` and before the path tail.
+    ``id_params`` names query parameters that ARE the product id on this store,
+    checked after Flipkart's ``pid`` and before the path tail. It exists because
+    the path-tail rule fails outright on a shop that routes every product
+    through one path: CeX is ``/product-detail?id=847362`` for its whole
+    catalogue, so every row derived the tail "product-detail" and
+    UNIQUE(store_id, sku) collapsed 69 scraped products into 1, reporting Ok.
 
-    It exists because the path-tail rule fails completely on a storefront that
-    routes every product through one path and distinguishes them only by a
-    query parameter -- CeX is ``/product-detail?id=847362`` for the entire
-    catalogue. There the tail is the literal string "product-detail" for every
-    row, and since ``listing`` has UNIQUE(store_id, sku), an entire store
-    collapses to ONE listing. That is not a cosmetic duplicate: 69 scraped
-    products became 1, silently, with the run still reporting Ok.
-
-    Opt-in per store rather than a global "also look at ?id=" rule, because
-    this function's whole job is producing the SAME answer across runs. A
-    store whose URLs carry an unrelated ``?id=`` tracking parameter would have
-    every SKU change the moment a global rule started reading it, and every
-    price series would restart at one point with nothing reporting an error.
+    Opt-in rather than a global "also read ?id=", because this function's job is
+    the SAME answer across runs -- a shop with an unrelated ``?id=`` tracking
+    parameter would have every SKU change and every price series restart.
     """
     parsed = urlparse(url)
 
