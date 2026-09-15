@@ -47,9 +47,10 @@ class Extracted:
 
 async def extract(page: Page, store_id: str, profile: StoreProfile) -> tuple[list[Extracted], str]:
     """Try each layer in order; report which one produced the rows."""
-    rows = await from_json_ld(page)
-    if rows:
-        return rows, "json-ld"
+    if not profile.skip_json_ld:
+        rows = await from_json_ld(page)
+        if rows:
+            return rows, "json-ld"
 
     if store_id == "flipkart":
         rows = await from_flipkart_state(page)

@@ -1079,6 +1079,41 @@ class TestGamePookie:
             "Hollow Knight",
         }
 
+    async def test_a_smaller_json_ld_block_does_not_cap_the_real_card_count(
+        self, provider: BrowserProvider, server
+    ) -> None:
+        """The defect a live run exposed: 24 cards on the page, 5 rows collected.
+
+        GamePookie's JSON-LD block lists a "featured items" snippet, not the
+        catalogue -- smaller than the real grid on every page, every time.
+        extract() otherwise returns the instant JSON-LD succeeds, so the real
+        cards were never even reached. skip_json_ld is what makes this test
+        fail without the fix: delete it and this drops to 1 listing.
+        """
+        base, recorder = server
+        adapter = BrowserAdapter(
+            provider,
+            profile_for=lambda _: real_profile("gamepookie", ready=None),
+            settle_ms=(0, 0),
+            render_ms=0,
+        )
+        json_ld = (
+            '<script type="application/ld+json">'
+            '{"@type": "Product", "name": "Hades - Nintendo Switch", '
+            '"url": "/product-page/hades", "offers": {"price": "3299"}}'
+            "</script>"
+        )
+        body = json_ld + pookie_card("Hades", "/product-page/hades", "₹3,299") + pookie_card(
+            "Metroid Dread", "/product-page/metroid", "₹3,499"
+        )
+        recorder.plan("/category/nintendo-switch", (200, f"<html><body>{body}</body></html>", {}))
+        result = await adapter.fetch(
+            local_store("gamepookie", base, "/category/nintendo-switch"), NullSink()
+        )
+
+        assert isinstance(result, Ok)
+        assert {listing.title for listing in result.listings} == {"Hades", "Metroid Dread"}
+
     async def test_an_unlabelled_import_is_not_asserted_to_be_indian_stock(
         self, provider: BrowserProvider, server
     ) -> None:
