@@ -30,6 +30,11 @@ function log(text, cls = "") {
   consoleBox.scrollTop = consoleBox.scrollHeight;
 }
 
+$("consoleToggle").addEventListener("click", () => {
+  const hidden = consoleBox.classList.toggle("is-hidden");
+  $("consoleToggle").textContent = hidden ? "Show logs" : "Hide logs";
+});
+
 function setButtonsDisabled(disabled) {
   // By CLASS, not by looking each control up by id. The previous form named
   // #fixStore explicitly, so every control added afterwards stayed live during
