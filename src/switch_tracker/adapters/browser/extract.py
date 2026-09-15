@@ -31,6 +31,18 @@ class Extracted:
     price: float
     href: str
     in_stock: bool
+    #: The whole card's visible text, when the selector layer produced this row.
+    #:
+    #: Exists because some storefronts state a listing's CONDITION outside its
+    #: title -- GameLand puts "Pre-owned" in a badge and in the category strip
+    #: beside the product name, so ``infer_condition(title)`` reads NEW for a
+    #: shelf of used cartridges.
+    #:
+    #: Empty for the JSON-LD and hydration-state layers: neither has a "card",
+    #: and inventing one from the structured record would be guessing. Callers
+    #: must therefore treat "" as "no context available" and fall back to the
+    #: title, never as "the card said nothing".
+    context: str = ""
 
 
 async def extract(page: Page, store_id: str, profile: StoreProfile) -> tuple[list[Extracted], str]:
@@ -224,7 +236,15 @@ async def from_selectors(page: Page, profile: StoreProfile) -> list[Extracted]:
             price = parse_price(row.get("priceText")) or first_rupee_price(str(row.get("cardText") or ""))
             if price is None:
                 continue
-            parsed.append(Extracted(title, price, href, not row.get("oos")))
+            parsed.append(
+                Extracted(
+                    title,
+                    price,
+                    href,
+                    not row.get("oos"),
+                    context=str(row.get("cardText") or ""),
+                )
+            )
 
         if parsed:
             return parsed

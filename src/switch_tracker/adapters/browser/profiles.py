@@ -4,7 +4,7 @@ from dataclasses import dataclass, replace
 from typing import Literal
 
 from switch_tracker.adapters.browser import overrides as profile_overrides
-from switch_tracker.core.models import Platform, Region
+from switch_tracker.core.models import Condition, Platform, Region
 
 SELECTOR_FIELDS = ("card", "title", "price", "link")
 
@@ -21,6 +21,36 @@ class StoreProfile:
     link: tuple[str, ...]
     default_region: Region = Region.IN
     platform_hint: Platform | None = None
+    #: Asserted condition for a store whose ENTIRE catalogue is one condition,
+    #: overriding what the listing text says -- or, more often, does not say.
+    #:
+    #: The same shape as ``default_region`` and for the same reason: a fact
+    #: about the retailer that no amount of reading the page will recover. CeX
+    #: sells pre-owned stock exclusively and writes plain titles ("Mario Kart
+    #: World"), so ``infer_condition`` reads NEW for every row and the whole
+    #: store lands in the database mislabelled.
+    #:
+    #: Deliberately NOT the general mechanism. ``Condition`` documents that
+    #: per-store assertion is wrong for the normal store -- at least one real
+    #: retailer sells new and pre-owned out of one catalogue -- so this stays
+    #: None everywhere except the handful of shops that are single-condition
+    #: by their business model.
+    default_condition: Condition | None = None
+    #: Infer condition from the whole CARD's text rather than the title alone.
+    #:
+    #: Opt-in, and that is the load-bearing part. Some storefronts put
+    #: "Pre-owned" in a badge or a category strip next to the product name,
+    #: where a title-only read cannot see it -- GameLand does. But card text is
+    #: page furniture as much as it is product data, and ``PRE_OWNED`` matches
+    #: a bare ``\bused\b``: an Amazon search card routinely carries "6 used &
+    #: new offers" beneath the price, so switching every store over to card
+    #: text at once would relabel a large part of Amazon's catalogue as
+    #: second-hand. That is a silent, permanent data error of exactly the kind
+    #: this codebase keeps choosing to fail open on instead.
+    #:
+    #: So the wider signal is available to any store that has been LOOKED at,
+    #: and no store acquires it by accident.
+    condition_from_context: bool = False
     out_of_stock: tuple[str, ...] = ()
     #: Cookie banners and interstitials to click away before scraping.
     dismiss: tuple[str, ...] = ()
@@ -317,6 +347,85 @@ PROFILES: dict[str, StoreProfile] = {
         # /page/{p}/ works here, but the theme also renders a real next link;
         # keeping it lets paging survive the URL scheme changing.
         next_page=("a.next.page-number", "a.next", "ul.page-numbers a.next"),
+    ),
+    "gameland": StoreProfile(
+        # Another WooCommerce theme scraped rather than fetched, like e2zstore,
+        # but on the Flatsome theme: products carry "li.title" and
+        # "li.price-wrap" wrappers the default Woo theme does not.
+        card=("ul.products li.product", "li.product"),
+        title=("li.title h2 a", ".woocommerce-loop-product__title", "h2 a"),
+        # ins wraps the DISCOUNTED figure when a sale is running; the
+        # struck-through original sits in a del beside it. Sale price MUST come
+        # first, or every discounted row records its pre-sale price and the one
+        # event this whole tracker exists to notice is the one it misses.
+        price=(
+            "li.price-wrap .price ins .amount",
+            "li.price-wrap .price .amount",
+            ".price",
+        ),
+        link=("li.title h2 a", "a.woocommerce-LoopProduct-link"),
+        out_of_stock=(":has-text('Out of stock')",),
+        ready="ul.products li.product",
+        platform_hint=Platform.SWITCH,
+        # The only store that opts in, and the reason the seam exists. GameLand
+        # marks used stock with a badge and a category strip inside the card
+        # rather than in the product name, so a title-only read files its
+        # entire pre-owned shelf as NEW.
+        condition_from_context=True,
+    ),
+    "gamepookie": StoreProfile(
+        # Wix. Its generated class names are hashed and rotate per deploy, but
+        # data-hook attributes are Wix's OWN test hooks and survive that --
+        # the same reasoning that anchors Amazon on data-component-type.
+        card=("[data-hook='product-item-root']",),
+        title=("[data-hook='product-item-name']",),
+        price=(
+            "[data-hook='product-item-price-to-pay']",
+            "[data-hook='sr-product-item-price-to-pay']",
+        ),
+        link=(
+            "[data-hook='product-item-product-details-link']",
+            "a[href*='/product-page/']",
+        ),
+        out_of_stock=(":has-text('Out of Stock')",),
+        ready="[data-hook='product-item-root']",
+        platform_hint=Platform.SWITCH,
+        # NOT Region.IN, and this is the load-bearing setting for this store.
+        # GamePookie is an importer: US, Asian and Japanese pressings sit in the
+        # same category as domestic stock, and most listings never say which.
+        # Defaulting to IN would assert a region the store never claimed, and
+        # region is modelled here as a genuinely different product -- so a wrong
+        # one is not a mislabel, it merges two things that are not the same.
+        # UNKNOWN is the honest answer; infer_region still upgrades the rows
+        # whose titles DO say.
+        default_region=Region.UNKNOWN,
+    ),
+    "cex_in": StoreProfile(
+        # UNVERIFIED. These four selector lists are structural guesses against a
+        # client-rendered Nuxt/Algolia app and have NOT been confirmed against
+        # the live DOM -- the diagnostic that would confirm them needs a real
+        # browser run against in.webuy.com.
+        #
+        # Shipped as guesses rather than left empty because the failure mode is
+        # already handled and already useful: when nothing extracts, the adapter
+        # dumps the rendered HTML to diagnostics/cex_in.html and says to run
+        # "Fix a broken store". An empty profile would fail identically while
+        # producing a worse dump. Replace these from that dump before treating
+        # a cex_in run as trustworthy.
+        card=("[data-testid='search-product-card']", "article.product-card", "div.search-product-card"),
+        title=("[data-testid='product-title']", "h2.card-title", ".product-main-title"),
+        price=("[data-testid='sell-price']", ".product-main-price", ".price"),
+        link=("a[href*='/product-detail']", "a[href*='/product/']"),
+        out_of_stock=(":has-text('Out of Stock')", ":has-text('Sold Out')"),
+        ready="[data-testid='search-product-card'], article.product-card",
+        platform_hint=Platform.SWITCH,
+        # ASSERTED, not inferred, and the only store that does this. CeX deals
+        # exclusively in pre-owned stock, and precisely because that is its
+        # whole business it has no reason to label anything -- its titles read
+        # "Mario Kart World", so infer_condition returns NEW for the entire
+        # catalogue. Card text does not rescue it either; there is no badge to
+        # find. The fact lives with the retailer, so it is configured here.
+        default_condition=Condition.PRE_OWNED,
     ),
 }
 

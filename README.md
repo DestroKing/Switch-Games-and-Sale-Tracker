@@ -40,7 +40,7 @@ Opens at `http://127.0.0.1:4173`, reachable only from this machine.
 | **Update exchange rate** | Refreshes the USD→INR rate from the ECB |
 | **Fix a broken store** | Opens a store in a real browser window so you can click on the parts it failed to read |
 | **Reset corrections** | Undoes everything "Check stores" wrote |
-| **Collect specific stores…** | Tick any number of stores and collect only those — useful for testing one shop without waiting for all fourteen. Disabled stores can be picked too; naming a store overrides its disabled state |
+| **Collect specific stores…** | Tick any number of stores and collect only those — useful for testing one shop without waiting for all twenty-four. Disabled stores can be picked too; naming a store overrides its disabled state |
 
 Each button starts a separate background process and returns immediately. Live
 progress streams into the console panel underneath.
@@ -137,7 +137,7 @@ consoles — even on stores that file them all under one category.
 
 ```bash
 uv sync                              # dependencies
-uv run pytest                        # 414 tests
+uv run pytest                        # 494 tests
 uv run ruff check src tests scripts  # lint
 uv run mypy                          # types (strict)
 uv run python -m switch_tracker spike   # packaging self-check

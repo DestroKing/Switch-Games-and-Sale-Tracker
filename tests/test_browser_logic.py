@@ -15,9 +15,11 @@ import pytest
 
 from switch_tracker import paths
 from switch_tracker.adapters.browser import overrides as profile_overrides
-from switch_tracker.adapters.browser.adapter import rejects_url
+from switch_tracker.adapters.browser.adapter import _condition_for, rejects_url
+from switch_tracker.adapters.browser.extract import Extracted
 from switch_tracker.adapters.browser.pagination import ProductivityTracker, read_claimed_total
 from switch_tracker.adapters.browser.profiles import PROFILES, StoreProfile, effective_profile
+from switch_tracker.core.models import Condition, Region
 
 
 @pytest.fixture
@@ -38,6 +40,9 @@ class TestProfiles:
             "gamenation",
             "mcubegames",
             "e2zstore",
+            "gameland",
+            "gamepookie",
+            "cex_in",
         }
         assert expected == set(PROFILES)
 
@@ -104,6 +109,107 @@ class TestProfiles:
                 continue
             for field, expected in defaults.items():
                 assert getattr(profile, field) == expected, f"{store_id}.{field}"
+
+
+class TestConditionResolution:
+    """New or pre-owned, and where that answer is allowed to come from.
+
+    Wrong here is worse than missing: a mislabelled listing still shows up, in
+    the wrong bucket, forever, and nothing anywhere raises.
+    """
+
+    @staticmethod
+    def _row(title: str, context: str = "") -> Extracted:
+        return Extracted(title=title, price=1.0, href="/p/1", in_stock=True, context=context)
+
+    def test_the_title_is_still_the_default_source(self) -> None:
+        """The behaviour every existing store had before context existed."""
+        profile = PROFILES["e2zstore"]
+        assert _condition_for(profile, self._row("Zelda TotK (Pre-Owned)")) is Condition.PRE_OWNED
+        assert _condition_for(profile, self._row("Zelda TotK")) is Condition.NEW
+
+    def test_a_store_that_has_not_opted_in_ignores_card_context(self) -> None:
+        """The guard that keeps this change from corrupting Amazon.
+
+        An Amazon search card routinely carries "6 used & new offers" under the
+        price, and PRE_OWNED matches "used" on a bare word boundary. Reading card
+        text for
+        every store at once would therefore relabel a large slice of Amazon's
+        catalogue as second-hand -- silently, and permanently.
+        """
+        row = self._row("Mario Kart World", context="Mario Kart World ₹4,499 6 used & new offers")
+        assert PROFILES["amazon_in"].condition_from_context is False
+        assert _condition_for(PROFILES["amazon_in"], row) is Condition.NEW
+
+    def test_an_opted_in_store_reads_the_whole_card(self) -> None:
+        """GameLand's reason for the seam: the badge is not in the title."""
+        row = self._row("Zelda TotK", context="Pre-Owned Zelda TotK ₹3,499 Add to cart")
+        assert _condition_for(PROFILES["gameland"], row) is Condition.PRE_OWNED
+
+    def test_an_opted_in_store_falls_back_to_the_title_when_there_is_no_card(self) -> None:
+        """JSON-LD and hydration-state rows carry no context at all.
+
+        Empty must read as "nothing available", not as "the card said nothing",
+        or opting in would DISABLE the title read for every non-selector layer.
+        """
+        row = self._row("Zelda TotK (Pre-Owned)", context="")
+        assert _condition_for(PROFILES["gameland"], row) is Condition.PRE_OWNED
+
+    def test_an_asserted_condition_wins_over_everything_the_page_says(self) -> None:
+        """CeX deals only in used stock and, for that reason, never labels it.
+
+        Its titles read "Mario Kart World", so both the title and the card read
+        NEW for a catalogue where nothing is.
+        """
+        row = self._row("Mario Kart World", context="Mario Kart World ₹4,499 Buy now")
+        assert _condition_for(PROFILES["cex_in"], row) is Condition.PRE_OWNED
+
+    def test_exactly_one_store_asserts_a_condition(self) -> None:
+        """Per-store assertion is the exception the model warns about.
+
+        core/models.Condition records that at least one real retailer sells new
+        and pre-owned from one catalogue, so a per-store flag is wrong for the
+        normal shop. This fails if a second store quietly acquires one.
+        """
+        assert [k for k, v in PROFILES.items() if v.default_condition is not None] == ["cex_in"]
+
+    def test_exactly_one_store_reads_condition_from_card_text(self) -> None:
+        assert [k for k, v in PROFILES.items() if v.condition_from_context] == ["gameland"]
+
+
+class TestAddedBrowserProfiles:
+    def test_gameland_prefers_the_sale_price_over_the_struck_through_one(self) -> None:
+        """``ins`` wraps the discounted figure; ``del`` keeps the original.
+
+        Ordering is the whole assertion. If the plain ``.amount`` came first it
+        would match the ``del`` too, and every discounted row would record its
+        PRE-sale price -- so the one event this tracker exists to notice is the
+        one it would miss.
+        """
+        price = PROFILES["gameland"].price
+        assert price[0] == "li.price-wrap .price ins .amount"
+        assert price.index("li.price-wrap .price ins .amount") < price.index(".price")
+
+    def test_gamepookie_does_not_assume_an_indian_region(self) -> None:
+        """It imports US, Asian and Japanese pressings into the same category.
+
+        Region is modelled here as a genuinely different, non-interchangeable
+        product, so defaulting to IN would not be a mislabel -- it would merge
+        editions that are not the same thing.
+        """
+        assert PROFILES["gamepookie"].default_region is Region.UNKNOWN
+
+    def test_every_other_browser_store_still_defaults_to_the_indian_region(self) -> None:
+        for store_id, profile in PROFILES.items():
+            if store_id in ("gamepookie", "playasia"):
+                continue
+            assert profile.default_region is Region.IN, store_id
+
+    def test_gamepookie_anchors_on_wix_data_hooks_not_generated_classes(self) -> None:
+        """Wix class names are hashed and rotate per deploy; data-hook does not."""
+        profile = PROFILES["gamepookie"]
+        for field in ("card", "title", "price"):
+            assert any("data-hook" in selector for selector in getattr(profile, field)), field
 
 
 class TestProfileOverrides:
@@ -314,6 +420,12 @@ class TestPagingPathSelection:
             "mcubegames": "click",
             "e2zstore": "click",
             "playasia": "click",
+            # All three of the newly added browser stores page by URL: each
+            # carries a real {p} and none declares a next-page control, which
+            # is the combination that keeps them off the click path.
+            "gameland": "url",
+            "gamepookie": "url",
+            "cex_in": "url",
         }
 
 

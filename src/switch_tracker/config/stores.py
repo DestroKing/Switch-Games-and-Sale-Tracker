@@ -124,6 +124,116 @@ STORES: tuple[StoreConfig, ...] = (
             "stores.local.json. Scoped to its one Nintendo category; no games-only split exists."
         ),
     ),
+    # ---- Tier 2: "legit but less established". Same adapters, smaller shops. ----
+    #
+    # These seven were added as one batch and every one of them is a
+    # CONFIGURATION change only -- no new adapter, no new code path. Each was
+    # confirmed to serve the public feed its kind implies before being listed
+    # (WooCommerce /wp-json/wc/store/v1/products/categories, Shopify
+    # /collections.json), so the slugs below are read off the store's own
+    # category list rather than guessed from its navigation menu.
+    #
+    # `tier` stays what it has always meant here -- which adapter group a store
+    # belongs to and when it runs -- and is deliberately NOT repurposed as a
+    # trust or reputation score. Those are different questions, and one integer
+    # answering both would make the collection order depend on an opinion.
+    StoreConfig(
+        id="sheenu",
+        name="Sheenu Game Center",
+        base_url="https://sheenugamecenter.com",
+        kind=AdapterKind.WOOCOMMERCE,
+        currency="INR",
+        tier=2,
+        enabled=True,
+        platform_hint=Platform.SWITCH,
+        collections=("switch-games", "switch-2-games"),
+        note="Scoped to its two Switch games categories; consoles and accessories sit elsewhere.",
+    ),
+    StoreConfig(
+        id="gamebuy",
+        name="GameBuy",
+        base_url="https://gamebuy.in",
+        kind=AdapterKind.WOOCOMMERCE,
+        currency="INR",
+        tier=2,
+        enabled=True,
+        platform_hint=Platform.SWITCH,
+        # The PARENT category only, on purpose. WooCommerce returns a product
+        # under its parent as well as its child terms, so listing the children
+        # beside it fetches the same products two or three times over -- paid
+        # for in requests on every run, then thrown away at dedupe.
+        collections=("nintendo-switch",),
+        note="Parent Nintendo category only; its feed already carries the child categories.",
+    ),
+    StoreConfig(
+        id="hitechgamez",
+        name="Hitech Gamez",
+        base_url="https://hitechgamez.in",
+        kind=AdapterKind.WOOCOMMERCE,
+        currency="INR",
+        tier=2,
+        enabled=True,
+        platform_hint=Platform.SWITCH,
+        # Three SIBLING categories with no shared parent to collapse them into,
+        # unlike gamebuy above. The pre-owned one is not redundant: it is where
+        # this store's used stock lives, and infer_condition reads the category
+        # name out of the listing context, so dropping it would lose both the
+        # rows and the only signal that says they are second-hand.
+        collections=(
+            "nintendo-switch-games",
+            "buy-nintendo-switch-2-games",
+            "preowned-nintendo-switch-games",
+        ),
+        note="New Switch, Switch 2 and pre-owned are three separate top-level categories here.",
+    ),
+    StoreConfig(
+        id="gamebot",
+        name="GameBot",
+        base_url="https://gamebot.co.in",
+        kind=AdapterKind.WOOCOMMERCE,
+        currency="INR",
+        tier=2,
+        enabled=True,
+        platform_hint=Platform.SWITCH,
+        collections=("switch-games", "switch-2"),
+        note="Slugs confirmed against its live wc/store/v1 category feed.",
+    ),
+    StoreConfig(
+        id="gamekart",
+        name="GameKart",
+        base_url="https://gamekart.in",
+        kind=AdapterKind.WOOCOMMERCE,
+        currency="INR",
+        tier=2,
+        enabled=True,
+        platform_hint=Platform.SWITCH,
+        collections=("games-nintendo",),
+        note="Parent Nintendo games category only, for the same reason as gamebuy.",
+    ),
+    StoreConfig(
+        id="consolegarage",
+        name="Console Garage",
+        base_url="https://consolegarage.com",
+        kind=AdapterKind.SHOPIFY,
+        currency="INR",
+        tier=2,
+        enabled=True,
+        platform_hint=Platform.SWITCH,
+        collections=("switch", "switch-2"),
+        note="Multi-console Shopify store, scoped to its two Switch collections.",
+    ),
+    StoreConfig(
+        id="hadiro",
+        name="Hadiro",
+        base_url="https://www.hadiro.in",
+        kind=AdapterKind.SHOPIFY,
+        currency="INR",
+        tier=2,
+        enabled=True,
+        platform_hint=Platform.SWITCH,
+        collections=("nintendo-switch-games", "nintendo-switch-2"),
+        note="Slugs confirmed against its live /collections.json.",
+    ),
     # ---- Tier 1: browser automation. No public product API. ----
     StoreConfig(
         id="playasia",
@@ -241,6 +351,77 @@ STORES: tuple[StoreConfig, ...] = (
         search_urls=("https://e2zstore.com/category/nintendo-games/page/{p}/",),
         note=(
             "Uses /category/ structure matching working test script."
+        ),
+    ),
+    StoreConfig(
+        id="gameland",
+        name="GameLand",
+        base_url="https://gameland.co.in",
+        kind=AdapterKind.BROWSER,
+        currency="INR",
+        tier=1,
+        enabled=True,
+        platform_hint=Platform.SWITCH,
+        # The /product-category/games/ path plus a platform FILTER, not the
+        # platform landing page. The platform page is a superset: it returns
+        # controllers, cases and consoles alongside cartridges, and while the
+        # classifier drops those, they still cost pages of the walk and
+        # unproductive pages are what ends it early.
+        #
+        # ?swoof=1 is the WOOF filter plugin's own marker. Without it the
+        # pdt_type parameter is inert and the unfiltered category comes back.
+        search_urls=(
+            "https://gameland.co.in/product-category/games/page/{p}/?pdt_type=switch&swoof=1",
+            "https://gameland.co.in/product-category/games/page/{p}/?pdt_type=switch-2&swoof=1",
+        ),
+        note=(
+            "WooCommerce storefront whose Store API is not exposed, so it is scraped. Its "
+            "profile reads condition from the whole card: pre-owned is a badge here, not "
+            "part of the title."
+        ),
+    ),
+    StoreConfig(
+        id="gamepookie",
+        name="GamePookie",
+        base_url="https://www.gamepookie.com",
+        kind=AdapterKind.BROWSER,
+        currency="INR",
+        tier=1,
+        enabled=True,
+        platform_hint=Platform.SWITCH,
+        search_urls=(
+            "https://www.gamepookie.com/category/nintendo-switch?page={p}",
+            "https://www.gamepookie.com/category/nintendo-switch-2?page={p}",
+        ),
+        note=(
+            "Wix storefront: no product API, but stable data-hook attributes. Its categories "
+            "report roughly 88 Switch and 36 Switch 2 products, so the walk is short."
+        ),
+    ),
+    StoreConfig(
+        id="cex_in",
+        name="CeX India",
+        base_url="https://in.webuy.com",
+        kind=AdapterKind.BROWSER,
+        currency="INR",
+        tier=1,
+        enabled=True,
+        platform_hint=Platform.SWITCH,
+        # 1038 = Switch Software, 1086 = Switch 2 Games. CeX's own numeric
+        # category ids, which are stable across its regional sites.
+        #
+        # BROWSER rather than the /v3/boxes API this store is best known for:
+        # that endpoint is behind Cloudflare for product searches, and the
+        # public site is a client-rendered Nuxt/Algolia app, so the catalogue
+        # only exists after its JavaScript runs.
+        search_urls=(
+            "https://in.webuy.com/search?categoryIds=1038&categoryName=Switch%20Software&page={p}",
+            "https://in.webuy.com/search?categoryIds=1086&categoryName=Switch%202%20Games&page={p}",
+        ),
+        note=(
+            "Pre-owned by business model, asserted in its profile rather than inferred -- CeX "
+            "titles do not say so. Its selectors are UNVERIFIED first guesses: run 'Fix a "
+            "broken store' against the rendered page before trusting a run."
         ),
     ),
 )

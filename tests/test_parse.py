@@ -176,6 +176,31 @@ class TestClassifyPlatform:
     def test_switch_2_is_detected(self, title: str) -> None:
         assert classify(title).platform is Platform.SWITCH2
 
+    @pytest.mark.parametrize(
+        "title", ["Mario Kart World Switch 2", "Zelda NS2", "Metroid Nintendo Switch 2"]
+    )
+    def test_switch_2_beats_a_switch_store_hint(self, title: str) -> None:
+        """The hint must not flatten Switch 2 stock into Switch.
+
+        Every store in the shipped list carries platform_hint=SWITCH, including
+        the ones scoped to a Switch 2 category. If the hint could win, an entire
+        Switch 2 catalogue would file itself under the wrong platform -- and
+        because platform_of checks SWITCH2 before SWITCH, the bare word "Switch"
+        inside "Switch 2" must not be allowed to match first either.
+
+        Both orderings are asserted at once here: explicit marker over hint, and
+        SWITCH2 over SWITCH.
+        """
+        assert classify(title, Platform.SWITCH).platform is Platform.SWITCH2
+
+    def test_a_terse_title_on_a_switch_2_store_still_falls_back_to_the_hint(self) -> None:
+        """The hint is a floor, not a competitor.
+
+        Beating it with an explicit Switch 2 marker must not stop it doing its
+        actual job on a title that names no console at all.
+        """
+        assert classify("Hogwarts Legacy", Platform.SWITCH).platform is Platform.SWITCH
+
     @pytest.mark.parametrize("title", ["Hogwarts Legacy NSW", "Hogwarts Legacy NS", "Zelda Nintendo Switch"])
     def test_terse_importer_markers_count_as_switch(self, title: str) -> None:
         """'NSW'/'NS' are genuinely used by Indian importers in terse titles."""
