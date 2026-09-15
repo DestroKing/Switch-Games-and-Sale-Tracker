@@ -35,7 +35,7 @@ input[type=search] { flex: 1 1 260px; }
   padding: 12px 14px; margin-top: 14px; max-height: 260px; overflow-y: auto;
   font: 12.5px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--dim);
 }
-#console:empty { display: none; }
+#console:empty, #console.is-hidden { display: none; }
 #console .ok { color: var(--ok); } #console .failed { color: var(--bad); }
 #console .partial { color: var(--warn); } #console .skipped { color: var(--dim); }
 
