@@ -19,6 +19,7 @@ SORT_COLUMNS = {
     "title": "l.raw_title",
     "store": "s.name",
     "seen": "latest.captured_at",
+    "change": "change_pct",
 }
 
 #: How many listings must move by the same rounded percentage, in the same
@@ -189,18 +190,42 @@ def listings(conn: sqlite3.Connection, query: ListingQuery) -> dict[str, Any]:
         FROM listing l
         JOIN store s ON s.id = l.store_id
         JOIN price_point latest ON latest.id = {_LATEST_ID}
+        LEFT JOIN price_point previous ON previous.id = {_PREVIOUS_ID}
         {clause}
     """
 
     total = conn.execute(f"SELECT COUNT(*) AS n {from_clause}", params).fetchone()["n"]
 
+    sort_column = query.sort_column()
+    if query.sort == "change":
+        # NULL means there is no previous observation yet. Keep those rows at the
+        # bottom in both directions rather than letting SQLite put them first
+        # when sorting ascending.
+        order_by = (
+            f"change_pct IS NULL ASC, "
+            f"change_pct {query.sort_direction()}, "
+            f"l.id ASC"
+        )
+    else:
+        order_by = (
+            f"{sort_column} {query.sort_direction()}, "
+            f"l.id ASC"
+        )
+
     rows = _rows(
         conn.execute(
             f"SELECT l.id, l.raw_title, l.url, l.region, l.platform, l.condition, "
             f"s.name AS store, latest.inr_price, latest.native_price, latest.native_currency, "
-            f"latest.in_stock, latest.captured_at {from_clause} "
-            # id as the tie-break keeps pagination stable across requests.
-            f"ORDER BY {query.sort_column()} {query.sort_direction()}, l.id ASC LIMIT ? OFFSET ?",
+            f"latest.in_stock, latest.captured_at, "
+            f"CASE "
+            f"    WHEN previous.inr_price IS NOT NULL "
+            f"         AND previous.inr_price != 0 "
+            f"         AND latest.inr_price IS NOT NULL "
+            f"    THEN ((latest.inr_price - previous.inr_price) / previous.inr_price) * 100.0 "
+            f"    ELSE NULL "
+            f"END AS change_pct "
+            f"{from_clause} "
+            f"ORDER BY {order_by} LIMIT ? OFFSET ?",
             [*params, query.safe_limit(), query.safe_offset()],
         )
     )
