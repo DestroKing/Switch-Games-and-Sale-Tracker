@@ -78,10 +78,22 @@ def parse_price(raw: str | float | None) -> float | None:
 _RUPEE_FIGURE = re.compile(r"(?:₹|Rs\.?|INR)\s*([\d.,]+)", re.IGNORECASE)
 
 
-def first_rupee_price(text: str) -> float | None:
-    """Pull the first rupee figure out of a blob of card text."""
-    match = _RUPEE_FIGURE.search(text)
-    return parse_price(match.group(1)) if match else None
+def first_rupee_price(text: str | None) -> float | None:
+    if not text:
+        return None
+
+    match = re.search(
+        r"₹\s*([\d,]+(?:\.\d{1,2})?)",
+        text,
+    )
+
+    if not match:
+        return None
+
+    try:
+        return float(match.group(1).replace(",", ""))
+    except ValueError:
+        return None
 
 
 # ------------------------------------------------------------- classification
