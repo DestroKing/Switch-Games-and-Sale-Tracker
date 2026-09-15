@@ -3,50 +3,77 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
 <title>Switch cartridge prices</title>
 <link rel="stylesheet" href="/static/app.css?v={{ asset_version }}">
 <script src="/static/htmx.min.js" defer></script>
 </head>
 <body>
-<div class="wrap">
+<a class="skip-link" href="#listingsHead">Skip to listings</a>
 
-  <header>
-    <h1>Switch cartridge prices</h1>
-    <span class="stamp" id="stamp"></span>
-    <p class="lede" id="lede">Loading…</p>
-  </header>
+<!-- Sticky, because the run status and the primary action must stay reachable
+     while scrolling a few thousand rows. It holds exactly three things: what
+     this is, whether anything is running, and the one action you most likely
+     came to press. -->
+<header class="topbar">
+  <div class="brand"><h1>Switch cartridge prices</h1></div>
+  <span class="status idle" id="runStatus">Idle</span>
+  <span class="spacer"></span>
+  <span class="stamp" id="stamp"></span>
+  {% if probed %}
+  <button class="primary" data-action="collect">Collect prices</button>
+  {% else %}
+  <button class="primary" data-action="probe">Check stores</button>
+  {% endif %}
+</header>
+
+<main class="wrap">
 
   {% if onedrive_warning %}
-  <div class="warning">{{ onedrive_warning }}</div>
+  <div class="notice warn" role="alert">
+    <div><b>OneDrive detected.</b> {{ onedrive_warning }}</div>
+  </div>
   {% endif %}
 
   {% if not probed %}
-  <div class="note">
-    <b>Start with “Check stores”.</b> The shipped store list is a guess about which
-    shop runs on which platform, and it is wrong for most of them. Checking first
-    corrects it automatically — collecting before that just produces failures that
-    look like bugs.
+  <div class="notice info">
+    <div>
+      <b>Start with “Check stores”.</b> The shipped store list is a guess about which
+      shop runs on which platform, and it is wrong for most of them. Checking first
+      corrects it automatically — collecting before that just produces failures that
+      look like bugs.
+    </div>
   </div>
   {% endif %}
 
   <!-- Every capability is a button here. Each one starts a separate worker
-       process; none of them runs inside this page's request. -->
-  <div class="actions">
+       process; none of them runs inside this page's request.
+
+       Ordered by frequency and grouped by risk: everyday actions on the left,
+       a divider, then diagnostic and destructive ones pushed to the far end.
+       Distance is the safety mechanism -- a confirm dialog is the backstop. -->
+  <div class="actionbar" role="group" aria-label="Collection actions">
+    {# The action promoted into the topbar is NOT repeated here. Two identical
+       primary buttons on one screen is a Hick's Law problem: the user has to
+       decide which one is the real one before pressing either. #}
     {% if probed %}
-    <button class="primary" data-action="collect">Collect prices</button>
     <button data-action="probe">Check stores</button>
     {% else %}
-    <button class="primary" data-action="probe">Check stores</button>
     <button data-action="collect">Collect prices</button>
     {% endif %}
     <button data-action="fx">Update exchange rate</button>
+
+    <span class="spacer"></span>
+
     {% if fixable %}
-    <select id="fixStore" class="js-run-control" aria-label="Store to fix">
+    <select id="fixStore" class="js-run-control" aria-label="Open a store in a browser to fix its selectors">
       <option value="">Fix a broken store…</option>
       {% for store in fixable %}<option value="{{ store.id }}">{{ store.name }}</option>{% endfor %}
     </select>
     {% endif %}
-    <button data-action="reset-corrections" data-confirm="Wipe all store corrections?">
+    <span class="divider" aria-hidden="true"></span>
+    <button class="danger" data-action="reset-corrections"
+            data-confirm="Wipe all store corrections? This undoes everything “Check stores” has written.">
       Reset corrections
     </button>
   </div>
@@ -61,57 +88,105 @@
       {% for store in collectable %}
       <label class="check">
         <input type="checkbox" class="js-run-control js-store" value="{{ store.id }}">
-        {{ store.name }}{% if not store.enabled %} <span class="muted">(disabled)</span>{% endif %}
+        <span>{{ store.name }}{% if not store.enabled %} <span class="muted">(disabled)</span>{% endif %}</span>
       </label>
       {% endfor %}
     </div>
     <button id="collectSelected" class="js-run-control" disabled>Collect selected</button>
   </details>
 
-  <button id="consoleToggle" type="button">Hide logs</button>
-  <div id="console" aria-live="polite"></div>
-
-  <h2>Collector</h2>
-  <div class="strip" id="strip"></div>
-
-  <h2>Moved since last run</h2>
-  <div id="fxnote"></div>
-  <div id="movers"></div>
-
-  <h2>All listings</h2>
-  <div class="filters">
-    <input type="search" id="q" placeholder="Search titles — try zelda, mario, pokemon">
-    <div class="seg" id="platform" role="group" aria-label="Console">
-      <button data-v="" aria-pressed="true">Both consoles</button>
-      <button data-v="SWITCH" aria-pressed="false">Switch</button>
-      <button data-v="SWITCH2" aria-pressed="false">Switch 2</button>
+  <!-- Structured progress. Hidden until a run exists, because an empty panel
+       is noise. The raw log lives INSIDE it, collapsed, so diagnostics never
+       dominate the page the way a always-open console did. -->
+  <section class="progress" id="progress" hidden aria-labelledby="progressWhat">
+    <div class="progress-head">
+      <span class="status running" id="progressState">Running</span>
+      <span class="what" id="progressWhat">Collection</span>
+      <span class="spacer"></span>
+      <span class="counts" id="progressCounts"></span>
+      <button class="quiet" id="consoleToggle" type="button" aria-expanded="false"
+              aria-controls="console">Show log</button>
     </div>
-    <div class="seg" id="condition" role="group" aria-label="Condition">
-      <button data-v="" aria-pressed="true">New + Pre-Owned</button>
-      <button data-v="NEW" aria-pressed="false">New</button>
-      <button data-v="PRE_OWNED" aria-pressed="false">Pre-Owned</button>
-    </div>
-    <!-- Checkbox groups, not <select multiple>: ctrl-clicking to multi-select
-         is unintuitive and poor on touch, and this matches the "Collect
-         specific stores" control already on the page. Options are filled from
-         /api/facets, so only values that actually exist in the data appear. -->
-    <details class="filter-group" id="storeGroup">
-      <summary>Store <span class="chosen" data-for="store"></span></summary>
-      <div class="subset-grid" id="storeBoxes"></div>
-      <button type="button" class="linkish" data-clear="store">Clear</button>
-    </details>
-    <details class="filter-group" id="regionGroup">
-      <summary>Region <span class="chosen" data-for="region"></span></summary>
-      <div class="subset-grid" id="regionBoxes"></div>
-      <button type="button" class="linkish" data-clear="region">Clear</button>
-    </details>
-    <label class="check"><input type="checkbox" id="stock"> In stock only</label>
-    <button id="reset">Reset</button>
-  </div>
-  <div class="count" id="count"></div>
-  <div id="list"></div>
+    <div class="progress-bar is-indeterminate" id="progressBar"
+         role="progressbar" aria-labelledby="progressWhat"><i></i></div>
+    <p class="progress-now" id="progressNow" aria-live="polite"></p>
+    <div id="console" class="console is-hidden" aria-live="polite" role="log"></div>
+  </section>
 
-</div>
+  <dl class="stats" id="stats"></dl>
+
+  <section class="section" aria-labelledby="collectorHead">
+    <div class="section-head">
+      <h2 id="collectorHead">Collector</h2>
+      <span class="sub" id="collectorSub"></span>
+    </div>
+    <div class="strip" id="strip"></div>
+  </section>
+
+  <section class="section" aria-labelledby="moversHead">
+    <div class="section-head">
+      <h2 id="moversHead">Moved since last run</h2>
+      <span class="sub" id="moversSub"></span>
+    </div>
+    <div id="fxnote"></div>
+    <div id="movers"></div>
+  </section>
+
+  <section class="section" aria-labelledby="listingsHead">
+    <div class="section-head">
+      <h2 id="listingsHead">All listings</h2>
+      <span class="spacer"></span>
+      <span class="sub count" id="count"></span>
+    </div>
+
+    <div class="toolbar">
+      <div class="searchwrap">
+        <input type="search" id="q" aria-label="Search titles"
+               placeholder="Search titles — try zelda, mario, pokemon">
+        <kbd aria-hidden="true">/</kbd>
+      </div>
+      <div class="seg" id="platform" role="group" aria-label="Console">
+        <button data-v="" aria-pressed="true">Both</button>
+        <button data-v="SWITCH" aria-pressed="false">Switch</button>
+        <button data-v="SWITCH2" aria-pressed="false">Switch 2</button>
+      </div>
+      <div class="seg" id="condition" role="group" aria-label="Condition">
+        <button data-v="" aria-pressed="true">Any</button>
+        <button data-v="NEW" aria-pressed="false">New</button>
+        <button data-v="PRE_OWNED" aria-pressed="false">Pre-owned</button>
+      </div>
+      <!-- Checkbox groups, not <select multiple>: ctrl-clicking to multi-select
+           is unintuitive and poor on touch, and this matches the "Collect
+           specific stores" control already on the page. Options are filled from
+           /api/facets, so only values that actually exist in the data appear.
+           <details> gives keyboard and screen-reader semantics for free. -->
+      <details class="filter-group" id="storeGroup">
+        <summary>Store <span class="chosen" data-for="store"></span></summary>
+        <div class="pop">
+          <div id="storeBoxes"></div>
+          <footer><button type="button" class="linkish" data-clear="store">Clear stores</button></footer>
+        </div>
+      </details>
+      <details class="filter-group" id="regionGroup">
+        <summary>Region <span class="chosen" data-for="region"></span></summary>
+        <div class="pop">
+          <div id="regionBoxes"></div>
+          <footer><button type="button" class="linkish" data-clear="region">Clear regions</button></footer>
+        </div>
+      </details>
+      <label class="check"><input type="checkbox" id="stock"> In stock only</label>
+      <button id="reset">Reset all</button>
+    </div>
+
+    <!-- Active filters as removable chips: recognition over recall, so the user
+         can see what is narrowing the results without reopening four menus. -->
+    <div class="chips" id="chips" aria-live="polite" aria-label="Active filters"></div>
+
+    <div id="list"></div>
+  </section>
+
+</main>
+
 <script>
 const ACTIVE_RUN = {{ active_run | tojson }};
 </script>

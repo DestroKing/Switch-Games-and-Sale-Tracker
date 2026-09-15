@@ -72,8 +72,17 @@ cross-reference looks like §3.4 — so skipping around is safe.
   - [3.15 Collecting once, not every launch](#315-collecting-once-not-every-launch)
   - [3.16 The self-repair tools](#316-the-self-repair-tools)
   - [3.17 Shipping it as an .exe](#317-shipping-it-as-an-exe)
-- **[Part 4 — The five ideas that recur](#part-4--the-five-ideas-that-recur)**
-- **[Part 5 — What is deliberately not built](#part-5--what-is-deliberately-not-built)**
+- **[Part 4 — The interface, feature by feature](#part-4--the-interface-feature-by-feature)**
+  - [4.1 The design system](#41-the-design-system)
+  - [4.2 Status, and why colour is never alone](#42-status-and-why-colour-is-never-alone)
+  - [4.3 The dashboard, top to bottom](#43-the-dashboard-top-to-bottom)
+  - [4.4 The listings table](#44-the-listings-table)
+  - [4.5 Filters](#45-filters)
+  - [4.6 Every state a view can be in](#46-every-state-a-view-can-be-in)
+  - [4.7 Accessibility, measured](#47-accessibility-measured)
+  - [4.8 What was deliberately NOT done](#48-what-was-deliberately-not-done)
+- **[Part 5 — The five ideas that recur](#part-5--the-five-ideas-that-recur)**
+- **[Part 6 — What is deliberately not built](#part-6--what-is-deliberately-not-built)**
   - [Where to start reading](#where-to-start-reading)
 - **[Appendix A — Glossary](#appendix-a--glossary)**
 - **[Appendix B — Working on the code](#appendix-b--working-on-the-code)**
@@ -506,22 +515,32 @@ would still be empty.
 program and downloads a ~400 MB browser. That single fact dominates the packaging story
 (§1.11) and is why the browser scraping runs in a **separate process** (§2).
 
-## 1.9 htmx + plain JavaScript — the front end
+## 1.9 Plain CSS + plain JavaScript — the front end
 
-**What it is.** The dashboard's interactive bits: buttons that start a job, a live console,
-a filterable table. `web/static/app.js` is about 200 lines of ordinary JavaScript, plus a
-vendored copy of **htmx** (a small library that lets HTML elements make requests without
-you writing JavaScript for each one).
+**What it is.** Three files, served exactly as they sit on disk:
 
-**Why not React.** React (or Vue, or Svelte) is the industry default for interactive
-pages, and it was rejected for a specific reason: those frameworks require a **build
-step** — a separate toolchain that compiles your source into files a browser can load.
-That means Node.js, a package manager, a bundler, and a build stage in the packaging
-process, all to render a table and five buttons for one user. The whole front end here is
-two files served as-is.
+| File | Lines | Job |
+|---|---|---|
+| `web/templates/index.html` | ~195 | The shell the server renders once |
+| `web/static/app.css` | ~725 | The design system (Part 4) |
+| `web/static/app.js` | ~740 | Everything that happens after load |
 
-**The trade-off, honestly.** State is managed by hand. If the dashboard grew into
-something with many interacting views, this would become the wrong choice.
+**Why not React.** React, Vue and Svelte all need a **build step** — a toolchain that
+compiles your source into files a browser can load. That means Node.js, a package
+manager, a bundler, and a new stage in the packaging process, all to render one table
+and six buttons for one user on one machine. These three files need none of it, which is
+also why `switch_tracker.spec` can bundle them by copying.
+
+**The trade-off, honestly.** State is managed by hand. `app.js` holds two small state
+objects — `run` (what the current collection is doing) and `state` (what the table is
+filtered to) — and functions that repaint from them. That is a pattern that stops
+scaling somewhere around "several interacting views", and this app has one.
+
+**The rule that keeps it honest.** Every repaint reads from those objects, never from
+the DOM. The temptation in framework-free code is to ask the page what it currently
+shows — `document.querySelectorAll('.js-store:checked')` and so on. Do that for
+*display* state and the screen slowly drifts out of sync with the thing it is
+describing, because you are now parsing text you printed yourself.
 
 ## 1.10 Server-Sent Events — live progress
 
@@ -1381,6 +1400,22 @@ The writer swallows its own errors on purpose:
 > *"Progress reporting is worth having; it is not worth losing a multi-minute collection
 > over."*
 
+**What the page does with those events.** `follow()` in `app.js` subscribes once and
+folds every event into one small object:
+
+```js
+const run = { total: 0, done: 0, failed: 0, listings: 0, store: "", page: 0 };
+```
+
+`run_started` sets `total`; `store_progress` updates `store`/`page`; `store_finished`
+increments `done` and adds to `listings`. Then `paintProgress()` renders that object.
+
+Two details worth copying. First, the progress bar stays **indeterminate** until at
+least one store finishes — before that there is no honest percentage, because a store's
+page count is not known in advance, and a fake one is worse than none. Second, the panel
+**stays on screen after the run ends**, showing the outcome. A run that vanishes the
+moment it completes leaves the user with no answer to "did that work?".
+
 ## 3.14 Collecting from just some shops
 
 **Files:** `services/collect.py`, `services/collect_worker.py`, `selection.py`,
@@ -1505,7 +1540,267 @@ sameness is the whole point.
 
 ---
 
-# Part 4 — The five ideas that recur
+# Part 4 — The interface, feature by feature
+
+Parts 1–3 are about getting prices into a database. This part is about getting them
+back out of it in a form a person can read quickly.
+
+The whole interface is one page, and its job is narrow: **let someone see, in a few
+seconds, whether the collector is healthy and whether anything got cheaper.** Every
+decision below traces back to that sentence.
+
+## 4.1 The design system
+
+**File:** `web/static/app.css`, the `:root` block.
+
+Everything the interface draws comes from named values at the top of one file. There are
+no loose pixel numbers further down — a hardcoded `13px` next to a `--t-base: 13.5px`
+token is a bug, because the next person will copy whichever they see first.
+
+| Scale | Values | Why these |
+|---|---|---|
+| Spacing | `--s1` 4px → `--s7` 48px | A 4px base. Every margin, padding and gap uses one. |
+| Type | `--t-micro` 10.5 → `--t-xl` 21px | A tight 1.15 ratio, so six steps fit on screen without any one shouting. |
+| Radius | `--r-sm` 4, `--r-md` 6, `--r-lg` 10 | Tied to element size. Not applied uniformly. |
+| Motion | `--dur` 120ms, one easing curve | Short. This is a tool; transitions acknowledge input, they don't perform. |
+
+**The surface ramp is the part worth understanding.** There are five background values,
+and they are not arbitrary shades:
+
+```
+--bg-sunken   #0a0c10   inputs, the log — things you type into or read from
+--bg          #0f1115   the page itself
+--surface     #161920   panels resting on the page
+--surface-raised #1c2029  table headers, popovers, buttons
+--surface-hover  #212632  the row under your pointer
+```
+
+Darker means *recessed*, lighter means *raised*. That is how a physical stack reads under
+one light source, and following it means depth never needs a shadow to be legible. The
+whole app uses exactly two shadows, both on popovers.
+
+**Colour is split into two systems that never mix.** `--accent` (a single red) marks the
+one primary action. `--ok / --warn / --bad / --info` mean status and nothing else. Mixing
+them is how you end up with a green "success" message sitting next to a green button that
+is not a success — the reader cannot tell which green means what.
+
+There is one more pair worth calling out:
+
+```css
+--drop: var(--ok);    /* a price went DOWN — good news here */
+--rise: var(--bad);
+```
+
+Named for **meaning**, not hue. On a price tracker "down" is good, which is the opposite
+of a stock ticker. Aliasing it means the table never has to know which colour that is.
+
+## 4.2 Status, and why colour is never alone
+
+**File:** `app.css`, the `.status` component.
+
+A store can be `ok`, `partial`, `failed`, `skipped`, `running` or `idle`. Each renders
+through one class, and each carries **three independent signals**:
+
+```css
+.status.ok      { color: var(--ok); }   .status.ok::before      { content: "✓"; }
+.status.failed  { color: var(--bad); }  .status.failed::before  { content: "✕"; }
+.status.partial { color: var(--warn); } .status.partial::before { content: "▲"; }
+```
+
+colour · glyph · and (where it matters) the word itself. Roughly one man in twelve has
+some form of colour vision deficiency, so a red border alone is not a status — it is a
+decoration that happens to be meaningful to most people. The glyph is what makes the
+state survive a monochrome screen, and WCAG 1.4.1 requires exactly this.
+
+The same principle drives the price columns: a drop renders `▼23.1%`, not just green
+text.
+
+## 4.3 The dashboard, top to bottom
+
+The order of the page is the order of the questions:
+
+**1. The topbar** — sticky, because the run status and the primary action must stay
+reachable while you scroll a few thousand rows. It holds three things: what this is,
+whether anything is running, and the single action you most likely came to press.
+
+**2. The action bar** — everyday actions on the left, then a spacer, then the diagnostic
+and destructive ones pushed to the far end. That distance is the safety mechanism.
+Fitts's Law says a close, large target is easy to hit; the corollary is that the thing
+you must *not* hit by accident gets distance. `Reset corrections` also keeps a confirm
+dialog, but the layout does the first half of the work.
+
+Note it is a **toolbar, not a card**. Boxing a row of buttons in its own rounded panel
+adds a container whose only job is to announce "these are buttons", which the buttons
+already do.
+
+**3. The stats strip** — one bordered strip holding four figures, not four cards holding
+one figure each. Same information, a third of the height. Cards would be right only if
+each figure had its own actions or its own detail view. None of them does.
+
+**4. The collector** — one panel containing a dense list, one line per store:
+
+```
+✕ Flipkart                    0
+  failed · page loaded but nothing extracted...
+✓ NI Gaming Store           338
+```
+
+This started as a grid of bordered status cards. At 24 stores that is 24 rounded boxes
+wrapping about fifteen characters each — the brightly-coloured dashboard that scans
+*badly*, precisely because every item shouts equally. A list answers the real question
+("which broke?") faster: the glyphs line up into a column your eye can run down, and
+`boot()` sorts failures to the top, so you find them without reading a single name.
+
+Healthy stores get one line. Only a store worth investigating spends a second line on its
+reason — a column of two dozen identical "ok"s is noise.
+
+**5. Progress** — hidden until a run exists, because an empty panel is noise. When a run
+starts it shows the current store, page, running totals and failure count, with the raw
+log **collapsed inside it**. Diagnostics matter when something breaks and should not
+dominate the page the rest of the time.
+
+**6. Moved since last run** — capped at six rows with `Show all N changes`. The backend
+returns sixty. Showing all sixty measured 3,176px of a 9,409px page — a third of the
+document for a secondary section, pushing the main table out of sight.
+
+## 4.4 The listings table
+
+**File:** `app.js`, `search()` and `headerCell()`.
+
+This is the part people actually use, so it gets the most attention.
+
+**Sorting is keyboard-operable**, which it previously was not:
+
+```js
+return `<th class="${cls}" scope="col"${active ? ` aria-sort="${dir}"` : ""}>
+  <button class="sort" type="button" data-sort="${col.key}">…</button></th>`;
+```
+
+The old version put a click handler on the `<th>` itself. That works with a mouse and is
+invisible to a keyboard — a `<th>` is not focusable, so the sort could never be reached
+by Tab. A real `<button>` fixes it and gets Enter/Space handling for free. `aria-sort`
+lives on the `<th>`, which is where assistive technology looks.
+
+**Sorting re-queries the server.** Re-sorting the hundred rows already on screen would
+sort a *subset* and present it as the whole answer — the cheapest price on this page is
+not the cheapest price.
+
+**The Change column costs no backend work.** `/api/movers` and `/api/listings` both
+return `l.id`, so the two are joined in the browser:
+
+```js
+movementById = new Map(mv.map((m) => [m.id, m]));
+```
+
+A row whose price dropped gets `▼23.1%` and a green rule in the gutter. The rule is
+`inset 3px 0 0` on the first cell — not a coloured row background, which would destroy
+the scannability the table exists for and collide with the hover state.
+
+**Row height was a real measurement.** Tags originally sat on their own line under the
+title; median row height was 55px. Putting the title and tags on one shared, clamped line
+brought it to 40px — a 1000px viewport went from eighteen visible products to twenty-eight.
+
+**The table has its own scroll viewport, and that is load-bearing:**
+
+```css
+.tablewrap { overflow: auto; max-height: calc(100vh - var(--table-chrome)); }
+```
+
+The horizontal half stops the page body scrolling sideways. The vertical half is subtler:
+`overflow-x: auto` alone already makes an element a scroll container (CSS computes the
+other axis to `auto` when one is not `visible`), so `position: sticky` on the header
+sticks to *that box*, not the viewport. Unbounded, the box never scrolls internally and
+the header simply leaves with the page. The height limit is what gives sticky something
+to stick inside. This is a trap worth remembering — it looks like a `top` offset bug and
+is not one.
+
+## 4.5 Filters
+
+Search, two segmented controls, two checkbox popovers, a stock toggle, and a reset.
+
+**Active filters appear as removable chips**, each removing exactly one condition:
+
+```
+[search zelda ×] [console Switch 2 ×] [store CeX India ×]  Clear all
+```
+
+Recognition rather than recall: you can see what is narrowing the list without reopening
+four menus, and narrowing is never a one-way door you have to hunt to undo.
+
+**The popovers are `<details>` elements.** Native disclosure semantics give keyboard
+operation and screen-reader state for free. The only thing JavaScript adds is
+click-outside and Escape to close, because that is the one behaviour `<details>` does not
+have and every other menu on the platform does (Jakob's Law).
+
+**`/` focuses the search box** and Escape clears it — the convention every search-bearing
+app shares. The handler ignores the keypress while you are typing in a field, or the
+character could never be typed *into* one.
+
+## 4.6 Every state a view can be in
+
+A view that can load has a **loading** state, a view that can be empty has an **empty**
+state, and anything that can fail has an **error** state. Each is built, not left to
+chance:
+
+| State | What renders |
+|---|---|
+| Loading | A skeleton the same shape as the content, so nothing jumps when data lands |
+| Empty (no data) | "Nothing collected yet — press Collect prices to fill this in" |
+| Empty (no matches) | "Nothing matches those filters" + a pointer at the chips above |
+| Error | A red notice naming what failed and what to do |
+| Running | Status pill, progress bar, current store and page, live counts |
+| Finished | The panel **stays**, showing the outcome |
+
+The skeleton matters more than it looks. A spinner occupies no space, so when real
+content arrives the page lurches downward — the metric for that is Cumulative Layout
+Shift, and a skeleton of roughly the right height keeps it near zero.
+
+## 4.7 Accessibility, measured
+
+Not asserted — measured, with a script driving the real rendered page.
+
+**Contrast.** Every text node in the rendered DOM was walked, its computed colour compared
+against the nearest ancestor that actually paints a background. All 669 pass their
+threshold (4.5:1 normal, 3:1 large). One token moved because of it: `--ink-3` cleared
+4.63:1 on `--surface` but only **4.29:1** on `--surface-raised`, which is exactly where
+column headers and popovers put it. The fix is to check against the *lightest* surface a
+colour lands on, not the page.
+
+**Control boundaries** get their own token for a reason:
+
+```css
+--line-control: #606a88;   /* 3.52:1 on --bg */
+```
+
+WCAG 1.4.11 wants 3:1 for the visual information required to identify a control, and
+nothing at all for a decorative divider. On this palette a button's fill reaches only
+1.16:1 against the page and an input's 1.04:1 — so the border *is* the boundary and has
+to carry that contrast alone.
+
+**Keyboard.** A real Tab pass: 24 stops, every one with a visible focus ring, no positive
+`tabindex`, order matching the visual layout. A skip link jumps past the lot to the table.
+
+**Reflow.** No horizontal scrolling on the page body at any width from 1920px down to
+320px (WCAG 1.4.10).
+
+## 4.8 What was deliberately NOT done
+
+Worth recording, because these are the things a redesign reaches for by default:
+
+- **No gradients, no glassmorphism, no glow.** A measurement of the rendered page finds
+  zero gradient backgrounds and two shadows, both on popovers.
+- **Two radii, three font weights, six type sizes** on screen. Checked by reading computed
+  styles off the live page, not by intent.
+- **One animation** — the pulsing dot while a run is active, and it is the only thing on
+  screen that moves. All motion sits behind `prefers-reduced-motion`.
+- **No icon set.** The status glyphs are text characters. A dependency that ships a
+  thousand icons to use six is a packaging problem, not a design win.
+- **Dark only.** A deliberate choice for a data-dense utility rather than an unfinished
+  one — a light theme is a second set of contrast decisions, not an inverted hue.
+
+---
+
+# Part 5 — The five ideas that recur
 
 If you remember nothing else:
 
@@ -1534,7 +1829,7 @@ classifier's ordering back into breaking.
 
 ---
 
-# Part 5 — What is deliberately not built
+# Part 6 — What is deliberately not built
 
 Two features, and they are the reason the project exists.
 

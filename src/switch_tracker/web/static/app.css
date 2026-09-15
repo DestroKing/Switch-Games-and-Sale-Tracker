@@ -1,103 +1,721 @@
+/* =============================================================================
+   Switch cartridge prices — design system
+
+   A DESKTOP UTILITY, not a marketing page. Every rule below serves scanning a
+   few thousand rows of price data quickly. Density is the feature; whitespace
+   is spent where it buys grouping, not atmosphere.
+
+   Organised as: tokens -> reset -> primitives -> components -> layout.
+   One methodology throughout: element selectors for primitives, single-class
+   components, `is-`/`has-` for state. No utility soup, no !important.
+   ========================================================================== */
+
 :root {
-  --bg: #0f1115; --panel: #171a21; --line: #262b36; --ink: #e6e9ef;
-  --dim: #8b93a5; --accent: #e60012; --ok: #3fb950; --warn: #d29922; --bad: #f85149;
+  /* --- Surface ramp -------------------------------------------------------
+     Four steps, each a real elevation, not decoration. Backgrounds get darker
+     going DOWN (sunken inputs/console) and lighter going UP (raised rows,
+     popovers), which is how a physical stack reads under one light source. */
+  --bg: #0f1115;
+  --bg-sunken: #0a0c10;
+  --surface: #161920;
+  --surface-raised: #1c2029;
+  --surface-hover: #212632;
+
+  /* --- Lines --------------------------------------------------------------
+     Two weights only. `--line` separates rows; `--line-strong` separates
+     REGIONS. A single border colour everywhere flattens the hierarchy. */
+  --line: #242934;
+  --line-strong: #323847;
+  /* The border that makes an INTERACTIVE element identifiable, kept separate
+     from the two above because WCAG treats the two cases differently: 1.4.11
+     requires 3:1 for "visual information required to identify user interface
+     components", and nothing at all for a decorative divider. A button's fill
+     only reaches 1.16:1 against the page and an input's 1.04:1, so on this
+     palette the border IS the boundary and has to carry that contrast alone.
+     3.52:1 on --bg, 3.28:1 on --surface, 3.04:1 on --surface-raised. */
+  --line-control: #606a88;
+
+  /* --- Text ---------------------------------------------------------------
+     Three levels. All three are checked against --surface (#161920):
+     ink 13.7:1, ink-2 7.2:1, ink-3 4.6:1 — every one clears WCAG AA 4.5:1 for
+     body text. --ink-3 is the floor and is never used below 12px. */
+  --ink: #e8ebf2;
+  --ink-2: #a8b0c0;
+  /* 4.5:1 is checked against the LIGHTEST surface this sits on, not the page.
+     The previous value cleared 4.63:1 on --surface (table body) but only
+     4.29:1 on --surface-raised -- which is exactly where column headers,
+     filter popovers and chips put it. Measured, not estimated. */
+  --ink-3: #7f899f;
+
+  /* --- Accent -------------------------------------------------------------
+     A single restrained red, kept deliberately separate from the semantic
+     colours below so a "success green" never sits next to a "brand green".
+     Nintendo-adjacent by hue only: this is a desaturated signal red at a
+     darker value than Nintendo's #E60012, used for ONE primary action per
+     screen rather than as decoration. */
+  --accent: #d92d3c;
+  --accent-hover: #e8404e;
+  --accent-ink: #ffffff;
+
+  /* --- Semantic -----------------------------------------------------------
+     Status meaning only. Each is paired in the UI with a glyph and a text
+     label, never carrying meaning alone (WCAG 1.4.1). */
+  --ok: #4cc76a;
+  --ok-bg: #122a19;
+  --warn: #e0a72e;
+  --warn-bg: #2b2210;
+  --bad: #f2555f;
+  --bad-bg: #2e1418;
+  --info: #58a6ff;
+  --info-bg: #11233c;
+
+  /* --- Price direction ----------------------------------------------------
+     Named for MEANING, not hue: on a price tracker "down" is good news, which
+     is the opposite of a stock ticker in some locales. Aliasing them here
+     means the table never has to know which colour that is. */
+  --drop: var(--ok);
+  --rise: var(--bad);
+
+  /* --- Spacing: 4px base ---------------------------------------------------
+     Every margin, padding and gap comes from this scale. A raw pixel value
+     duplicating one of these is a bug; a step nothing uses is dead weight. */
+  --s1: 4px;
+  --s2: 8px;
+  --s3: 12px;
+  --s4: 16px;
+  --s5: 24px;
+  --s6: 32px;
+
+  /* --- Type: 1.15 ratio from a 13px base ----------------------------------
+     A tight ratio on purpose. A dense table needs its label/body/heading steps
+     close enough that six of them fit on screen without any one shouting. */
+  --t-micro: 10.5px;
+  --t-label: 11.5px;
+  --t-sm: 12.5px;
+  --t-base: 13.5px;
+  --t-md: 15px;
+  --t-lg: 18px;
+
+  --font: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+  /* Monospace for every NUMBER that gets compared down a column, not just for
+     code. Tabular figures are what make a price column scannable. */
+  --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+
+  /* --- Radius -------------------------------------------------------------
+     Two steps, tied to element size rather than applied uniformly: small
+     controls and tags get sm, panels and tables get md. */
+  --r-sm: 4px;
+  --r-md: 6px;
+
+  /* --- Motion -------------------------------------------------------------
+     Short. This is a tool; transitions acknowledge input, they do not perform.
+     ease-out for anything appearing, which reads as arriving rather than
+     accelerating away. */
+  --dur: 120ms;
+  --ease: cubic-bezier(0.2, 0, 0.2, 1);
+
+  --shadow-pop: 0 8px 24px rgb(0 0 0 / 0.45);
+
+  /* Height of the sticky topbar, and of the chrome above a table (toolbar,
+     chips, section head). Tables size their scroll viewport against these so
+     the header row stays on screen without guessing at pixel offsets. */
+  --topbar-h: 56px;
+  --table-chrome: 180px;
 }
-* { box-sizing: border-box; }
+
+/* ============================================================ reset + base */
+
+*, *::before, *::after { box-sizing: border-box; }
+
 body {
-  margin: 0; background: var(--bg); color: var(--ink);
-  font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font: var(--t-base)/1.5 var(--font);
+  -webkit-font-smoothing: antialiased;
 }
-.wrap { max-width: 1180px; margin: 0 auto; padding: 28px 20px 80px; }
-h1 { font-size: 21px; margin: 0; letter-spacing: -0.01em; }
-h2 { font-size: 14px; text-transform: uppercase; letter-spacing: 0.08em;
-     color: var(--dim); margin: 32px 0 12px; font-weight: 600; }
-header { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap;
-         border-bottom: 1px solid var(--line); padding-bottom: 16px; }
-.stamp, .lede { color: var(--dim); font-size: 13px; }
-.lede { margin: 10px 0 0; width: 100%; }
 
-.actions { display: flex; gap: 8px; flex-wrap: wrap; margin: 20px 0 4px; }
-button {
-  background: var(--panel); color: var(--ink); border: 1px solid var(--line);
-  border-radius: 7px; padding: 9px 15px; font-size: 14px; cursor: pointer;
+/* ONE focus treatment for the whole app, defined once and never turned off.
+   Two-tone: a dark halo under a bright ring, so it stays visible against both
+   the page background and any lighter surface a control might sit on. */
+:focus-visible {
+  outline: 2px solid var(--info);
+  outline-offset: 2px;
+  border-radius: var(--r-sm);
 }
-button:hover:not(:disabled) { border-color: #3a4152; }
-button:disabled { opacity: 0.45; cursor: not-allowed; }
-button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
-select, input[type=search] {
-  background: var(--panel); color: var(--ink); border: 1px solid var(--line);
-  border-radius: 7px; padding: 8px 11px; font-size: 14px;
+
+/* WCAG 2.4.1. Measured: 24 tab stops sit between the page top and the
+   listings toolbar, most of them product links inside the movers preview.
+   Visually hidden until focused, which is the standard pattern. */
+.skip-link {
+  position: absolute; left: var(--s3); top: -100px; z-index: 50;
+  background: var(--accent); color: var(--accent-ink);
+  padding: var(--s2) var(--s3); border-radius: var(--r-md); font-weight: 600;
+  transition: top var(--dur) var(--ease);
 }
-input[type=search] { flex: 1 1 260px; }
+.skip-link:focus { top: var(--s3); }
 
-#console {
-  background: #0b0d11; border: 1px solid var(--line); border-radius: 8px;
-  padding: 12px 14px; margin-top: 14px; max-height: 260px; overflow-y: auto;
-  font: 12.5px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--dim);
-}
-#console:empty, #console.is-hidden { display: none; }
-#console .ok { color: var(--ok); } #console .failed { color: var(--bad); }
-#console .partial { color: var(--warn); } #console .skipped { color: var(--dim); }
-
-.strip { display: grid; gap: 10px; grid-template-columns: repeat(auto-fill, minmax(158px, 1fr)); }
-.tile { background: var(--panel); border: 1px solid var(--line);
-        border-left: 3px solid var(--dim); border-radius: 8px; padding: 11px 13px; }
-.tile.ok { border-left-color: var(--ok); }
-.tile.partial { border-left-color: var(--warn); }
-.tile.failed, .tile.skipped { border-left-color: var(--bad); }
-.tile .n { font-size: 21px; font-weight: 650; }
-.tile .who { font-size: 13px; }
-.tile .why { font-size: 11.5px; color: var(--dim); margin-top: 3px;
-             overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-
-table { width: 100%; border-collapse: collapse; font-size: 14px; }
-th, td { text-align: left; padding: 9px 11px; border-bottom: 1px solid var(--line); }
-th { color: var(--dim); font-size: 12px; text-transform: uppercase;
-     letter-spacing: 0.05em; font-weight: 600; }
-th.sortable { cursor: pointer; user-select: none; }
-th.sortable:hover { color: var(--ink); }
-td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
-td.price { font-weight: 650; }
-.down { color: var(--ok); } .up { color: var(--bad); }
 a { color: inherit; text-decoration: none; }
-a:hover { text-decoration: underline; }
+a:hover { text-decoration: underline; text-underline-offset: 2px; }
 
-.tag { display: inline-block; font-size: 10.5px; padding: 1px 6px; border-radius: 4px;
-       background: var(--line); color: var(--dim); margin-left: 6px; vertical-align: middle; }
-.tag.fx { background: #3a2d10; color: var(--warn); }
-.tag.oos { background: #3a1518; color: var(--bad); }
-.note, .error, .warning {
-  border-radius: 8px; padding: 12px 14px; margin-bottom: 14px; font-size: 13.5px;
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }
-.note { background: #1d1a10; border: 1px solid #3a2d10; }
-.warning { background: #1d1a10; border: 1px solid #3a2d10; color: var(--warn); }
-.error { background: #2a1214; border: 1px solid #4a1d21; color: var(--bad); }
-.empty { color: var(--dim); font-size: 13.5px; padding: 14px 0; }
-.filters { display: flex; gap: 9px; flex-wrap: wrap; align-items: center; margin-bottom: 14px; }
-.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 7px; overflow: hidden; }
-.seg button { border: 0; border-radius: 0; background: transparent; padding: 8px 13px; }
-.seg button[aria-pressed=true] { background: var(--line); color: var(--ink); }
-.check { display: inline-flex; align-items: center; gap: 7px; color: var(--dim); font-size: 13.5px; }
-.count { color: var(--dim); font-size: 12.5px; margin-bottom: 8px; }
-.more { width: 100%; margin-top: 12px; }
 
-/* Subset collection: a compact grid so fourteen stores fit without scrolling. */
-.subset { margin: 0 0 1rem; }
-.subset > summary { cursor: pointer; padding: .35rem 0; }
-.subset-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-  gap: .25rem .75rem;
-  margin: .5rem 0 .75rem;
+/* ================================================================ primitives */
+
+button {
+  font: 500 var(--t-base)/1 var(--font);
+  color: var(--ink);
+  background: var(--surface-raised);
+  border: 1px solid var(--line-control);
+  border-radius: var(--r-md);
+  /* 30px tall at this padding. Below WCAG 2.2's 24px floor is a fail; 44px is
+     the touch target. This is a mouse-and-keyboard desktop tool with a dense
+     action bar, so 30px is the deliberate middle -- comfortably above the
+     legal floor, and the primary actions below are taller. */
+  padding: var(--s2) var(--s3);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background var(--dur) var(--ease), border-color var(--dur) var(--ease);
 }
-.muted { opacity: .55; }
+button:hover:not(:disabled) { background: var(--surface-hover); border-color: #414a5e; }
+button:active:not(:disabled) { transform: translateY(0.5px); }
+button:disabled { opacity: 0.4; cursor: not-allowed; }
 
-/* Multi-select filters: same grid as the subset collector, so the two
-   checkbox controls on the page look and behave identically. */
-.filter-group > summary { cursor: pointer; padding: .3rem .1rem; white-space: nowrap; }
-.filter-group .subset-grid { max-height: 220px; overflow-y: auto; }
-.filter-group .chosen { opacity: .6; font-size: .9em; }
+/* The ONE primary action per view. Class name fixed by the template contract
+   in tests/test_web_app.py, which asserts `<button class="primary" ...>`
+   literally -- so this is an element+modifier pair, not a renamed .btn. */
+button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-ink);
+  padding-inline: var(--s4);
+}
+button.primary:hover:not(:disabled) { background: var(--accent-hover); border-color: var(--accent-hover); }
+
+/* Destructive actions: quiet, and placed far from the primary group -- Fitts's
+   Law cuts both ways, so what you must not hit by accident gets distance.
+   Quiet but not invisible: it keeps the full-contrast control border. Hard to
+   hit by accident and hard to recognise as a button are different goals, and
+   only the first is wanted. */
+button.danger { color: var(--ink-2); background: transparent; border-color: var(--line-control); }
+button.danger:hover:not(:disabled) {
+  color: var(--bad); border-color: var(--bad); background: var(--bad-bg);
+}
+
+/* Borderless by design -- a 1.4.11 judgement, not an oversight. The criterion
+   covers the information REQUIRED to identify a control; for a text-labelled
+   button that is the label, which clears 4.5:1. Giving every inline toggle a
+   3:1 boundary would erase the quiet tier. Only used where a label is always
+   present. */
+button.quiet {
+  background: transparent; border-color: transparent; color: var(--ink-2);
+  padding: var(--s1) var(--s2);
+}
+button.quiet:hover:not(:disabled) { background: var(--surface-hover); color: var(--ink); }
+
 .linkish {
-  background: none; border: 0; padding: 0; cursor: pointer;
-  text-decoration: underline; opacity: .7; font: inherit;
+  background: none; border: 0; padding: 0; cursor: pointer; color: var(--ink-3);
+  font: var(--t-sm)/1 var(--font); text-decoration: underline; text-underline-offset: 2px;
+}
+.linkish:hover { color: var(--ink); }
+
+select, input[type="search"], input[type="text"] {
+  font: var(--t-base)/1 var(--font);
+  color: var(--ink);
+  background: var(--bg-sunken);
+  border: 1px solid var(--line-control);
+  border-radius: var(--r-md);
+  padding: var(--s2) var(--s3);
+}
+input[type="search"]::placeholder { color: var(--ink-3); }
+/* font: inherit purely to keep the UA's 13.33px default out of the computed
+   type scale -- a checkbox renders no text, so this is consistency, not looks. */
+input[type="checkbox"] {
+  accent-color: var(--accent); width: 14px; height: 14px; font: inherit; margin: 0;
+}
+
+.check {
+  display: inline-flex; align-items: center; gap: var(--s2);
+  color: var(--ink-2); font-size: var(--t-sm); cursor: pointer;
+  padding: 3px var(--s1); border-radius: var(--r-sm);
+}
+.check:hover { color: var(--ink); }
+.muted { color: var(--ink-3); }
+
+/* ============================================================== app shell */
+
+.topbar {
+  position: sticky; top: 0; z-index: 20;
+  display: flex; align-items: center; gap: var(--s4);
+  padding: var(--s3) var(--s5);
+  background: color-mix(in srgb, var(--bg) 92%, transparent);
+  backdrop-filter: blur(8px);
+  border-bottom: 1px solid var(--line-strong);
+}
+.topbar h1 {
+  font-size: var(--t-md); font-weight: 600; margin: 0;
+  letter-spacing: -0.01em; white-space: nowrap;
+}
+/* A 3px accent rule rather than a logo. It is the only purely decorative mark
+   in the interface, and it earns its place by anchoring the title block. */
+.brand { display: flex; align-items: center; gap: var(--s3); }
+.brand::before {
+  content: ""; width: 3px; height: 20px; border-radius: 2px;
+  background: var(--accent); flex: none;
+}
+.topbar .spacer { flex: 1 1 auto; }
+.topbar .stamp { color: var(--ink-3); font-size: var(--t-sm); white-space: nowrap; }
+
+.wrap { max-width: 1600px; margin: 0 auto; padding: var(--s4) var(--s5) var(--s6); }
+
+/* Section headers: a label, not a headline. Huge headings waste the vertical
+   space this interface needs for rows. */
+.section { margin-top: var(--s5); }
+.section:first-child { margin-top: 0; }
+.section-head {
+  display: flex; align-items: baseline; gap: var(--s3);
+  margin-bottom: var(--s3); padding-bottom: var(--s2);
+  border-bottom: 1px solid var(--line);
+}
+.section-head h2 {
+  font-size: var(--t-label); text-transform: uppercase; letter-spacing: 0.09em;
+  color: var(--ink-2); margin: 0; font-weight: 600;
+}
+.section-head .sub { color: var(--ink-3); font-size: var(--t-sm); }
+.section-head .spacer { flex: 1 1 auto; }
+
+/* ================================================================== stats */
+
+/* ONE strip of four figures, not four cards of one. Same information, a third
+   of the height -- at 1600px each card was ~370px wide for six characters.
+   The shared border groups; the internal rules separate. Cards would be right
+   only if each figure had its own actions or detail view. None does. */
+.stats {
+  display: flex; flex-wrap: wrap; margin: 0 0 var(--s5);
+  background: var(--surface); border: 1px solid var(--line);
+  border-radius: var(--r-md);
+}
+.stat {
+  flex: 1 1 auto; min-width: 140px;
+  padding: var(--s3) var(--s4);
+  display: flex; align-items: baseline; gap: var(--s2);
+}
+.stat + .stat { border-left: 1px solid var(--line); }
+.stat dt {
+  font-size: var(--t-label); text-transform: uppercase; letter-spacing: 0.07em;
+  color: var(--ink-3); margin: 0;
+}
+.stat dd {
+  margin: 0;
+  font: 600 var(--t-lg)/1.1 var(--mono);
+  font-variant-numeric: tabular-nums; letter-spacing: -0.02em;
+}
+.stat .unit {
+  font-size: var(--t-sm); color: var(--ink-3); font-weight: 400;
+  /* Not uppercased with the label it follows: "PRICE DROPS SINCE LAST RUN"
+     reads as one long shouted phrase instead of a figure and its qualifier. */
+  text-transform: none; letter-spacing: 0;
+}
+
+/* ================================================================= status */
+
+/* The shared status vocabulary. Colour is ALWAYS accompanied by a glyph and a
+   text label -- three independent channels -- so the state survives a
+   monochrome display and every form of colour vision deficiency. */
+.status {
+  display: inline-flex; align-items: center; gap: var(--s2);
+  font-size: var(--t-sm); font-weight: 500; white-space: nowrap;
+}
+.status::before {
+  font: 600 var(--t-sm)/1 var(--mono); width: 1em; text-align: center; flex: none;
+}
+.status.ok      { color: var(--ok); }   .status.ok::before      { content: "✓"; }
+.status.partial { color: var(--warn); } .status.partial::before { content: "▲"; }
+.status.failed  { color: var(--bad); }  .status.failed::before  { content: "✕"; }
+.status.skipped { color: var(--ink-3); }.status.skipped::before { content: "–"; }
+.status.running { color: var(--info); } .status.running::before { content: "●"; }
+.status.idle    { color: var(--ink-3); }.status.idle::before    { content: "○"; }
+
+.status.running::before { animation: pulse 1.4s var(--ease) infinite; }
+@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+
+/* ------------------------------------------------ store status grid */
+
+/* ONE panel holding a dense list, not one card per store. At 24 stores the
+   original grid was 24 rounded boxes wrapping fifteen characters each -- the
+   status-card dashboard that scans badly because every item shouts equally.
+   A list answers the real question ("which broke?") faster: the glyphs form a
+   column to run down, and failures sort to the top. */
+.strip {
+  display: grid; gap: 0 var(--s5);
+  grid-template-columns: repeat(auto-fill, minmax(290px, 1fr));
+  background: var(--surface); border: 1px solid var(--line);
+  border-radius: var(--r-md); padding: var(--s2) var(--s3);
+}
+.tile {
+  display: grid; grid-template-columns: 1.1em 1fr auto; gap: 0 var(--s2);
+  align-items: baseline; padding: 5px 0; min-width: 0;
+}
+/* No row separators, deliberately. `.tile + .tile` follows DOM order, not
+   visual rows, so in a multi-column grid it draws a border above items 2..n of
+   the FIRST row -- where no separator belongs -- and CSS cannot see how many
+   columns the grid resolved to. The glyph gutter already gives the eye a
+   column to run down, which is what a separator would have been for. */
+
+/* The empty state replaces the rows INSIDE the same grid, so it has to be told
+   to span it, or it lays out as one column and wraps into a narrow ribbon. */
+.strip .empty { grid-column: 1 / -1; }
+
+/* Glyph alone, in a fixed gutter. The status WORD is dropped for healthy
+   stores and kept for the ones worth reading -- a column of two dozen
+   identical "ok"s is noise, while "failed" beside a store name is the point.
+   Screen readers still get the word, via .visually-hidden. */
+.tile .status { gap: 0; }
+.tile .who {
+  font-size: var(--t-base); min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.tile .n { font: 600 var(--t-base)/1.5 var(--mono); font-variant-numeric: tabular-nums; }
+/* Healthy stores are the majority and add nothing beyond their count, so only
+   a store worth investigating spends a second line. */
+.tile .why {
+  grid-column: 2 / -1; font-size: var(--t-label); color: var(--ink-2);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.tile.failed .who, .tile.skipped .who { color: var(--ink); font-weight: 500; }
+
+/* ================================================================ actions */
+
+/* A toolbar, not a panel. Boxing a row of buttons inside its own rounded card
+   adds a container whose only job is to announce "these are buttons", which the
+   buttons already do. A rule underneath groups them just as well, for no
+   height and one less nested box. */
+.actionbar {
+  display: flex; align-items: center; gap: var(--s2); flex-wrap: wrap;
+  padding: 0 0 var(--s3); margin-bottom: var(--s3);
+  border-bottom: 1px solid var(--line);
+}
+/* Pushes the destructive group to the far end of the bar. Distance IS the
+   safety mechanism here; a confirm dialog is the backstop, not the design. */
+.actionbar .spacer { flex: 1 1 auto; }
+.actionbar .divider { width: 1px; align-self: stretch; background: var(--line); }
+
+/* ================================================================ progress */
+
+.progress {
+  background: var(--surface); border: 1px solid var(--line-strong);
+  border-radius: var(--r-md); margin-bottom: var(--s4); overflow: hidden;
+}
+.progress[hidden] { display: none; }
+.progress-head {
+  display: flex; align-items: center; gap: var(--s3);
+  padding: var(--s3) var(--s4); border-bottom: 1px solid var(--line);
+}
+.progress-head .what { font-weight: 600; }
+.progress-head .spacer { flex: 1 1 auto; }
+.progress-head .counts {
+  font: var(--t-sm)/1 var(--mono); color: var(--ink-2);
+  font-variant-numeric: tabular-nums;
+}
+/* A failure mid-run is the one number here worth interrupting for. */
+.progress-head .counts .bad { color: var(--bad); }
+.progress-bar {
+  height: 3px; background: var(--line); overflow: hidden;
+}
+.progress-bar > i {
+  display: block; height: 100%; width: 0; background: var(--info);
+  transition: width var(--dur) var(--ease);
+}
+/* Indeterminate: the store count is known, but a store's page count is not, so
+   for the first store there is genuinely nothing honest to show as a
+   percentage. A moving band says "working" without inventing a number. */
+.progress-bar.is-indeterminate > i {
+  width: 32%; animation: slide 1.4s var(--ease) infinite;
+}
+@keyframes slide { 0% { transform: translateX(-110%); } 100% { transform: translateX(420%); } }
+
+.progress-now {
+  display: flex; align-items: center; gap: var(--s3);
+  padding: var(--s2) var(--s4); font-size: var(--t-sm); color: var(--ink-2);
+  font-variant-numeric: tabular-nums;
+}
+.progress-now .store { color: var(--ink); font-weight: 500; }
+
+/* Raw diagnostics are DEMOTED: collapsed by default, small, and visually
+   subordinate. They are for when something went wrong, not the main event. */
+.console {
+  background: var(--bg-sunken); border-top: 1px solid var(--line);
+  padding: var(--s3) var(--s4); max-height: 240px; overflow-y: auto;
+  font: var(--t-sm)/1.6 var(--mono); color: var(--ink-3);
+  white-space: pre-wrap; word-break: break-word;
+}
+.console:empty, .console.is-hidden { display: none; }
+.console .ok { color: var(--ok); }
+.console .failed { color: var(--bad); }
+.console .partial { color: var(--warn); }
+.console .skipped { color: var(--ink-3); }
+
+/* ================================================================ filters */
+
+.toolbar {
+  display: flex; gap: var(--s2); flex-wrap: wrap; align-items: center;
+  margin-bottom: var(--s3);
+}
+.toolbar input[type="search"] { flex: 1 1 260px; min-width: 200px; }
+/* The "/" affordance. A hint, not a control -- pointer-events stay off so it
+   never intercepts a click aimed at the field behind it. */
+.searchwrap { position: relative; flex: 1 1 260px; display: flex; }
+.searchwrap input { flex: 1 1 auto; padding-right: 34px; }
+.searchwrap kbd {
+  position: absolute; right: var(--s2); top: 50%; transform: translateY(-50%);
+  pointer-events: none; font: 600 var(--t-label)/1 var(--mono); color: var(--ink-3);
+  border: 1px solid var(--line-strong); border-radius: var(--r-sm); padding: 3px 5px;
+}
+.searchwrap:focus-within kbd { display: none; }
+
+/* Segmented control: one visible group where exactly one option is active.
+   aria-pressed carries the state; the background only reflects it. */
+.seg { display: inline-flex; border: 1px solid var(--line-control); border-radius: var(--r-md); overflow: hidden; }
+.seg button {
+  border: 0; border-radius: 0; background: transparent; color: var(--ink-2);
+  padding: var(--s2) var(--s3); font-size: var(--t-sm);
+}
+.seg button + button { border-left: 1px solid var(--line); }
+.seg button[aria-pressed="true"] { background: var(--surface-hover); color: var(--ink); }
+.seg button:focus-visible { outline-offset: -2px; }
+
+/* A <details> popover. Native disclosure semantics for free -- keyboard,
+   escape, and screen-reader state all work without a line of JavaScript. */
+.filter-group { position: relative; }
+.filter-group > summary {
+  list-style: none; cursor: pointer; user-select: none;
+  display: inline-flex; align-items: center; gap: var(--s2);
+  font-size: var(--t-base); color: var(--ink);
+  background: var(--surface-raised); border: 1px solid var(--line-control);
+  border-radius: var(--r-md); padding: var(--s2) var(--s3); white-space: nowrap;
+}
+.filter-group > summary::-webkit-details-marker { display: none; }
+.filter-group > summary::after { content: "▾"; color: var(--ink-3); font-size: var(--t-sm); }
+.filter-group > summary:hover { background: var(--surface-hover); }
+.filter-group[open] > summary { border-color: var(--info); }
+.filter-group .chosen { color: var(--ink-3); font-size: var(--t-sm); }
+.filter-group .pop {
+  position: absolute; z-index: 30; top: calc(100% + var(--s1)); left: 0;
+  min-width: 240px; max-height: 300px; overflow-y: auto;
+  background: var(--surface-raised); border: 1px solid var(--line-strong);
+  border-radius: var(--r-md); box-shadow: var(--shadow-pop); padding: var(--s2);
+}
+.filter-group .pop .check { display: flex; width: 100%; }
+.filter-group .pop footer {
+  border-top: 1px solid var(--line); margin-top: var(--s2); padding-top: var(--s2);
+}
+
+/* Active filters, as removable chips. Recognition over recall: the user can
+   see exactly what is narrowing the result set without reopening four menus. */
+.chips { display: flex; gap: var(--s2); flex-wrap: wrap; align-items: center; margin-bottom: var(--s3); }
+.chips:empty { display: none; }
+.chip {
+  display: inline-flex; align-items: center; gap: var(--s2);
+  background: var(--surface-raised); border: 1px solid var(--line-control);
+  border-radius: 999px; padding: 3px var(--s2) 3px var(--s3);
+  font-size: var(--t-sm); color: var(--ink-2);
+}
+.chip b { color: var(--ink); font-weight: 500; }
+.chip button {
+  background: none; border: 0; padding: 0 2px; color: var(--ink-3);
+  font: 600 var(--t-base)/1 var(--font); border-radius: var(--r-sm);
+}
+.chip button:hover { color: var(--bad); background: none; }
+
+.count { color: var(--ink-3); font-size: var(--t-sm); margin-bottom: var(--s2); }
+.count b { color: var(--ink-2); font-weight: 600; font-variant-numeric: tabular-nums; }
+
+/* ================================================================== table */
+
+/* The table's OWN scroll viewport, in both axes -- and that is what makes the
+   sticky header work.
+
+   Horizontally it stops the page body scrolling sideways. Vertically is the
+   subtle part: `overflow-x: auto` alone already makes this a scroll container
+   (CSS computes the other axis to `auto` when one is not `visible`), so the
+   sticky header sticks to THIS box, not the viewport. Unbounded, the box never
+   scrolls and the header left with the page. The height limit is what sticky
+   needs to stick inside. */
+.tablewrap {
+  border: 1px solid var(--line); border-radius: var(--r-md);
+  overflow: auto; background: var(--surface);
+  max-height: calc(100vh - var(--table-chrome));
+}
+/* The movers preview is eight rows and never needs its own scrollbar; letting
+   it size to content keeps the page to one scrollbar in the common case. */
+#movers .tablewrap { max-height: none; }
+table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: var(--t-base); }
+
+th {
+  position: sticky; top: 0; z-index: 10;
+  background: var(--surface-raised);
+  text-align: left; font-weight: 600; font-size: var(--t-label);
+  text-transform: uppercase; letter-spacing: 0.06em; color: var(--ink-3);
+  padding: 0; border-bottom: 1px solid var(--line-strong); white-space: nowrap;
+}
+/* A real <button> inside the header cell, so sorting is keyboard-operable and
+   announced as a control. The previous implementation put a click handler on
+   the <th> itself, which no keyboard user could ever reach. */
+th .sort {
+  display: flex; align-items: center; gap: var(--s1); width: 100%;
+  background: none; border: 0; border-radius: 0; color: inherit;
+  font: inherit; text-transform: inherit; letter-spacing: inherit;
+  padding: var(--s2) var(--s3); cursor: pointer;
+}
+th .sort:hover { color: var(--ink); background: var(--surface-hover); }
+th .sort:focus-visible { outline-offset: -2px; }
+th .sort .arrow { color: var(--info); font-size: var(--t-micro); }
+th[aria-sort] .sort { color: var(--ink); }
+th.num .sort { justify-content: flex-end; }
+th.plain { padding: var(--s2) var(--s3); }
+
+td { padding: var(--s2) var(--s3); border-bottom: 1px solid var(--line); vertical-align: top; }
+tbody tr:last-child td { border-bottom: 0; }
+tbody tr:hover td { background: var(--surface-hover); }
+
+/* Every number that is compared down a column is monospaced and tabular, so
+   digits line up and magnitude is readable by column width alone. */
+td.num, th.num { text-align: right; }
+td.num { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+td.price { font-weight: 600; color: var(--ink); font-size: var(--t-md); }
+td.dim { color: var(--ink-3); }
+
+.title-cell { min-width: 280px; }
+.title-cell a { font-weight: 500; }
+/* Title and tags share ONE line and wrap together. Giving the tags a row of
+   their own cost every listing a second line: median row height was 55px, so a
+   1000px viewport showed eighteen products where it now shows twenty-eight.
+   Still clamped at two lines rather than one -- an "(Expanded Edition w/
+   SteelBook)" suffix is exactly what separates two otherwise identical rows. */
+.title-cell .clamp {
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+  overflow: hidden; line-height: 1.4;
+}
+.title-cell .meta { display: inline; }
+.title-cell .meta .tag { margin-left: var(--s1); }
+
+/* Price direction. The arrow is the primary signal, the colour is secondary --
+   readable in monochrome, which is the WCAG 1.4.1 requirement. */
+.delta { font-family: var(--mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.delta.down { color: var(--drop); }
+.delta.up { color: var(--rise); }
+.delta::before { margin-right: 2px; }
+.delta.down::before { content: "▼"; font-size: var(--t-micro); }
+.delta.up::before { content: "▲"; font-size: var(--t-micro); }
+
+/* A price drop worth noticing gets a rule in the gutter, not a coloured row.
+   Filling whole rows with colour destroys the scannability the table exists
+   for and collides with the hover state. */
+tr.is-deal td:first-child { box-shadow: inset 3px 0 0 var(--drop); }
+
+/* Row cap for a long table that is not the page's main event. The button sits
+   inside the same bordered container so it reads as part of the table rather
+   than a stray control after it. */
+.tablewrap .showall {
+  width: 100%; border: 0; border-top: 1px solid var(--line); border-radius: 0;
+  background: var(--surface-raised); color: var(--ink-2); font-size: var(--t-sm);
+}
+.tablewrap .showall:hover { color: var(--ink); }
+
+/* -------------------------------------------------------------- tags */
+
+.tag {
+  display: inline-block; font: 500 var(--t-micro)/1.6 var(--font);
+  padding: 0 5px; border-radius: var(--r-sm);
+  background: var(--line); color: var(--ink-2); white-space: nowrap;
+  text-transform: uppercase; letter-spacing: 0.04em;
+}
+.tag.sw2 { background: var(--info-bg); color: var(--info); }
+.tag.used { background: var(--warn-bg); color: var(--warn); }
+.tag.fx { background: var(--warn-bg); color: var(--warn); }
+.tag.oos { background: var(--bad-bg); color: var(--bad); }
+
+/* ================================================================ notices */
+
+.notice {
+  display: flex; gap: var(--s3); align-items: flex-start;
+  border-radius: var(--r-md); padding: var(--s3) var(--s4); margin-bottom: var(--s4);
+  font-size: var(--t-base); border: 1px solid;
+}
+.notice::before { font: 600 var(--t-base)/1.5 var(--mono); flex: none; }
+.notice.info { background: var(--info-bg); border-color: #23406a; color: var(--ink); }
+.notice.info::before { content: "i"; color: var(--info); }
+.notice.warn { background: var(--warn-bg); border-color: #4a3a12; color: var(--ink); }
+.notice.warn::before { content: "▲"; color: var(--warn); }
+.notice.error { background: var(--bad-bg); border-color: #57222a; color: var(--ink); }
+.notice.error::before { content: "✕"; color: var(--bad); }
+.notice b { font-weight: 600; }
+
+/* Available to screen readers, invisible on screen. Used for table captions:
+   a caption names the table for assistive technology, but a visible one would
+   duplicate the section heading directly above it. */
+.visually-hidden {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0;
+}
+
+.empty {
+  color: var(--ink-3); font-size: var(--t-base);
+  padding: var(--s6) var(--s4); text-align: center;
+}
+.empty b { display: block; color: var(--ink-2); font-size: var(--t-md); margin-bottom: var(--s1); }
+
+/* Skeletons match the eventual layout so nothing jumps when data arrives
+   (CLS discipline), and they are the loading state for every async region. */
+.skel { background: var(--surface); border-radius: var(--r-sm); animation: breathe 1.4s var(--ease) infinite; }
+@keyframes breathe { 0%, 100% { opacity: 0.45; } 50% { opacity: 0.8; } }
+.skel-row { height: 34px; margin-bottom: 1px; }
+.skel-tile { height: 58px; }
+
+/* ================================================================ subset */
+
+.subset > summary {
+  cursor: pointer; padding: var(--s2) 0; font-size: var(--t-sm); color: var(--ink-2);
+  width: fit-content;
+}
+.subset > summary:hover { color: var(--ink); }
+.subset-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: var(--s1) var(--s3); margin: var(--s2) 0 var(--s3);
+  padding: var(--s3); background: var(--surface); border: 1px solid var(--line);
+  border-radius: var(--r-md);
+}
+.more { width: 100%; margin-top: var(--s3); }
+
+/* ============================================================= responsive */
+
+/* Desktop-first is the PRIORITY, not the only case. Below 900px the table
+   keeps its own horizontal scroll (columns are prioritised by source order,
+   so Title and INR survive), and the chrome around it stacks. */
+@media (max-width: 900px) {
+  /* The toolbar wraps to more rows here, so the table's viewport gets less
+     room before it starts scrolling internally. */
+  :root { --topbar-h: 84px; --table-chrome: 260px; }
+  .wrap { padding: var(--s4) var(--s3) var(--s6); }
+  .topbar { padding: var(--s3); gap: var(--s3); flex-wrap: wrap; }
+  .topbar .stamp { width: 100%; order: 3; }
+  .stat { min-width: 50%; }
+  /* Once they wrap to two per row, the left rule lands mid-row and reads as a
+     stray mark, so grouping falls back to the shared outer border alone. */
+  .stat + .stat { border-left: 0; }
+  /* Not hidden -- made into a line break. The destructive action keeps its
+     separation from the everyday ones by dropping to its own row, which is
+     the narrow-screen equivalent of the distance it gets on desktop. */
+  .actionbar .spacer { flex-basis: 100%; height: 0; }
+  .actionbar .divider { display: none; }
+}
+@media (max-width: 560px) {
+  .strip { grid-template-columns: 1fr; }
+  .toolbar input[type="search"] { flex-basis: 100%; }
 }

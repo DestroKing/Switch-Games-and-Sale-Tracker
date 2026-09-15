@@ -397,11 +397,9 @@ class BrowserAdapter:
         return RawListing(
             store_id=store.id,
             sku=sku,
-            # Query string dropped except for a store's declared id params:
-            # session ids and tracking parameters churn between runs and would
-            # make one product look like many. CeX routes its whole catalogue
-            # through one path and identifies products ONLY by ?id=, so for it
-            # the bare path is a page that does not exist.
+            # Query dropped except a store's declared id params: tracking
+            # parameters churn and would make one product look like many. CeX
+            # identifies products only by ?id=, so for it the bare path 404s.
             url=_canonical_url(split, profile.sku_url_params),
             title=row.title,
             native_currency=store.currency,
@@ -416,19 +414,12 @@ class BrowserAdapter:
 def _condition_for(profile: StoreProfile, row: Extracted) -> Condition:
     """New or pre-owned, from the strongest signal the store actually gives.
 
-    Three tiers, narrowest first:
+    Narrowest first: a profile that ASSERTS it (CeX, whose listings never say),
+    then the card text if the profile opted in (GameLand, where it is a badge),
+    then the title -- the default, and what every store did before.
 
-    1. The profile ASSERTS it. A shop whose entire catalogue is one condition
-       (CeX) cannot be read off its own listings, because those listings never
-       say -- a pre-owned-only retailer has no reason to label anything.
-    2. The profile opts into card text. "Pre-owned" lives in a badge or a
-       category strip beside the title on some storefronts, so the title alone
-       reads NEW for a used cartridge.
-    3. The title, which is what every store did before and still the default.
-
-    Tier 2 is opt-in rather than universal on purpose; see
-    ``StoreProfile.condition_from_context`` for the Amazon case that makes
-    turning it on globally a data-corruption bug rather than an improvement.
+    Tier 2 is opt-in on purpose; ``StoreProfile.condition_from_context`` has
+    the Amazon case that makes enabling it globally a corruption bug.
     """
     if profile.default_condition is not None:
         return profile.default_condition
@@ -438,12 +429,11 @@ def _condition_for(profile: StoreProfile, row: Extracted) -> Condition:
 
 
 def _canonical_url(split: SplitResult, keep_params: tuple[str, ...]) -> str:
-    """The stored URL: scheme, host, path, and ONLY the declared id params.
+    """Scheme, host, path, and ONLY the declared id params.
 
-    Rebuilt from the parsed parts rather than string-trimmed so parameter
-    order is ours and not the page's -- two cards linking to the same product
-    with their query parameters in a different order must not produce two
-    different stored URLs.
+    Rebuilt from parsed parts rather than string-trimmed, so parameter order is
+    ours: two cards linking to one product with their query in a different
+    order must not become two different stored URLs.
     """
     base = f"{split.scheme}://{split.netloc}{split.path}"
     if not keep_params:

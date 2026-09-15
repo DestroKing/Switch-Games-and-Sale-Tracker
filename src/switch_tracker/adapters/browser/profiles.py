@@ -21,35 +21,21 @@ class StoreProfile:
     link: tuple[str, ...]
     default_region: Region = Region.IN
     platform_hint: Platform | None = None
-    #: Asserted condition for a store whose ENTIRE catalogue is one condition,
-    #: overriding what the listing text says -- or, more often, does not say.
+    #: Asserted condition for a shop whose whole catalogue is one condition,
+    #: overriding what the listing text says -- or fails to say.
     #:
-    #: The same shape as ``default_region`` and for the same reason: a fact
-    #: about the retailer that no amount of reading the page will recover. CeX
-    #: sells pre-owned stock exclusively and writes plain titles ("Mario Kart
-    #: World"), so ``infer_condition`` reads NEW for every row and the whole
-    #: store lands in the database mislabelled.
-    #:
-    #: Deliberately NOT the general mechanism. ``Condition`` documents that
-    #: per-store assertion is wrong for the normal store -- at least one real
-    #: retailer sells new and pre-owned out of one catalogue -- so this stays
-    #: None everywhere except the handful of shops that are single-condition
-    #: by their business model.
+    #: Same shape as ``default_region``: a fact about the retailer that reading
+    #: the page cannot recover. Deliberately rare -- ``Condition`` notes that at
+    #: least one real shop sells both out of one catalogue, so per-store
+    #: assertion is wrong for the normal case.
     default_condition: Condition | None = None
-    #: Infer condition from the whole CARD's text rather than the title alone.
+    #: Infer condition from the whole CARD's text, not the title alone.
     #:
-    #: Opt-in, and that is the load-bearing part. Some storefronts put
-    #: "Pre-owned" in a badge or a category strip next to the product name,
-    #: where a title-only read cannot see it -- GameLand does. But card text is
-    #: page furniture as much as it is product data, and ``PRE_OWNED`` matches
-    #: a bare ``\bused\b``: an Amazon search card routinely carries "6 used &
-    #: new offers" beneath the price, so switching every store over to card
-    #: text at once would relabel a large part of Amazon's catalogue as
-    #: second-hand. That is a silent, permanent data error of exactly the kind
-    #: this codebase keeps choosing to fail open on instead.
-    #:
-    #: So the wider signal is available to any store that has been LOOKED at,
-    #: and no store acquires it by accident.
+    #: Opt-in, and that is the point. GameLand puts "Pre-owned" in a badge the
+    #: title cannot see. But ``PRE_OWNED`` matches a bare word-boundary "used",
+    #: and an Amazon search card carries "6 used & new offers" under the price
+    #: -- enabling this globally would relabel much of Amazon as second-hand,
+    #: silently and permanently.
     condition_from_context: bool = False
     out_of_stock: tuple[str, ...] = ()
     #: Cookie banners and interstitials to click away before scraping.
@@ -141,22 +127,17 @@ class StoreProfile:
     #: so silently merging them is data loss, not a cosmetic duplicate.
     sku_includes_region: bool = False
 
-    #: Query parameters that ARE the product id on this store. Two effects,
-    #: and both are needed or neither helps: the SKU is derived from them
-    #: (see core/skus.sku_from_url), and they are the ONLY query parameters
-    #: kept on the stored URL.
+    #: Query parameters that ARE the product id here. Both effects are needed
+    #: or neither helps: the SKU derives from them, and they are the only query
+    #: parameters kept on the stored URL.
     #:
     #: CeX routes its whole catalogue through ``/product-detail?id=NNNN``.
-    #: Stripping the query, which is right for every other store, leaves every
-    #: product with the path tail "product-detail" -- so UNIQUE(store_id, sku)
-    #: folds the entire shop into ONE listing and the stored URL points at a
-    #: page that does not exist. A live run scraped 69 products and kept 1,
-    #: reporting Ok.
+    #: Dropping the query -- right everywhere else -- gave every row the path
+    #: tail "product-detail", so UNIQUE(store_id, sku) folded the shop into one
+    #: listing: a live run scraped 69 products, kept 1, and reported Ok.
     #:
-    #: A WHITELIST rather than "keep the query string": session ids and
-    #: tracking parameters churn between runs, and letting those into either
-    #: the SKU or the URL mints a brand-new listing every run, restarting every
-    #: price series at one point with nothing reporting an error.
+    #: A whitelist, not "keep the query": tracking parameters churn, and one in
+    #: the SKU mints a new listing every run and restarts every price series.
     sku_url_params: tuple[str, ...] = ()
 
     #: Skip JSON-LD and go straight to the CSS selectors.
@@ -428,17 +409,13 @@ PROFILES: dict[str, StoreProfile] = {
         # selectors ever run -- which is why click-paging alone did not fix the
         # count: the page was climbing, but every page was still read as 5.
         skip_json_ld=True,
-        # This store has NO pagination. It has a "Load more" button at the end
-        # of the grid, confirmed by eye on the live site -- which is why
-        # ?page=2 existed as a link and still returned the same products, and
-        # why every page of a --pages 3 run came back identical.
+        # No pagination at all -- a "Load more" button at the end of the grid,
+        # confirmed live. That is why ?page=2 existed as a link and still
+        # returned page 1's products.
         #
-        # Load-more paging differs from every other click-paged store here in
-        # one way worth knowing: it APPENDS rather than replaces, so page N
-        # contains pages 1..N. That is already handled -- _advanced()
-        # fingerprints card COUNT as well as the first few hrefs, so a grid
-        # growing 24 -> 48 reads as a real advance even though the leading
-        # cards never change, and _dedupe collapses the repeats.
+        # Load-more APPENDS rather than replaces, so page N holds pages 1..N.
+        # Already handled: _advanced() fingerprints card COUNT as well as the
+        # first few hrefs, so 24 -> 48 reads as a real advance.
         next_page=(
             "[data-hook='load-more-button']",
             "button[data-hook='load-more-button']",
@@ -461,41 +438,22 @@ PROFILES: dict[str, StoreProfile] = {
         default_region=Region.UNKNOWN,
     ),
     "cex_in": StoreProfile(
-        # UNVERIFIED. These four selector lists are structural guesses against a
-        # client-rendered Nuxt/Algolia app and have NOT been confirmed against
-        # the live DOM -- the diagnostic that would confirm them needs a real
-        # browser run against in.webuy.com.
-        #
-        # Shipped as guesses rather than left empty because the failure mode is
-        # already handled and already useful: when nothing extracts, the adapter
-        # dumps the rendered HTML to diagnostics/cex_in.html and says to run
-        # "Fix a broken store". An empty profile would fail identically while
-        # producing a worse dump. Replace these from that dump before treating
-        # a cex_in run as trustworthy.
-        # CONFIRMED live, narrowest-first. A --diagnose-pager run reported
-        # "[data-testid='search-product-card']" -> 0 and "article.product-card"
-        # -> 0, with "div.search-product-card" -> 17. The two guesses stay as
-        # trailing fallbacks (a site can change back) but must not sit AHEAD of
-        # the one that works: from_selectors takes the first selector that
-        # yields rows, and Play-Asia is the standing lesson in what a wrong
-        # winner costs -- see this file's playasia card= comment.
+        # Scored against the live page: "div.search-product-card" matched 17,
+        # the other two matched zero. Working selector first -- from_selectors
+        # takes the first that yields rows (see the playasia card= comment);
+        # the zero-matchers stay as fallbacks in case the site reverts.
         card=("div.search-product-card", "[data-testid='search-product-card']", "article.product-card"),
         title=("[data-testid='product-title']", "h2.card-title", ".product-main-title"),
         price=("[data-testid='sell-price']", ".product-main-price", ".price"),
         link=("a[href*='/product-detail']", "a[href*='/product/']"),
         out_of_stock=(":has-text('Out of Stock')", ":has-text('Sold Out')"),
-        # Was the two zero-matching guesses above, which cost the FULL 15s
-        # wait_for_selector timeout on every page for a container that was
-        # already there. Measured: 18.1s per page, near-identical across six
-        # pages -- 15s of that was this.
+        # Must name a selector that MATCHES. Pointing this at the two
+        # zero-matchers cost the full 15s wait on every page: 18.1s per page.
         ready="div.search-product-card",
         platform_hint=Platform.SWITCH,
-        # ASSERTED, not inferred, and the only store that does this. CeX deals
-        # exclusively in pre-owned stock, and precisely because that is its
-        # whole business it has no reason to label anything -- its titles read
-        # "Mario Kart World", so infer_condition returns NEW for the entire
-        # catalogue. Card text does not rescue it either; there is no badge to
-        # find. The fact lives with the retailer, so it is configured here.
+        # CeX sells only pre-owned stock and, for that reason, labels none of
+        # it -- titles read "Mario Kart World", so inference returns NEW for
+        # the whole catalogue. The fact belongs to the retailer, so it lives here.
         default_condition=Condition.PRE_OWNED,
         # Confirmed live: a --pages 3 run scraped 69 products and kept ONE.
         # Every CeX URL is /product-detail?id=NNNN, so the path tail is the
