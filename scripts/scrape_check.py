@@ -13,6 +13,12 @@ so it never exercised the adapter's click-paging, where the real defect was.
 
     uv run python scripts/scrape_check.py playasia
     uv run python scripts/scrape_check.py e2zstore --pages 3 --headful
+
+The sample listing now also prints ``condition``, and the summary flags a run
+where the raw per-page pushes and the unique listings kept diverge sharply --
+the shape a store repeating page 1's content under every {p} produces. For a
+WooCommerce/Shopify store's ``collections`` slugs instead, see
+category_check.py; this script only drives BROWSER-kind stores.
 """
 
 from __future__ import annotations
@@ -44,6 +50,12 @@ class PrintSink:
         self._start = time.perf_counter()
         self._last = self._start
         self._prev_count = 0
+        #: The raw, pre-dedup count from the LAST page callback -- the adapter
+        #: reports len(listings) before dedupe.py collapses repeated skus, so
+        #: this is what a page repeating its predecessor's content looks like
+        #: from here: "+N this page" that never shows up as +N unique at the
+        #: end. Read by _walk() once the run finishes to say so explicitly.
+        self.last_raw_count = 0
 
     def page(self, store_id: str, page: int, count: int) -> None:
         now = time.perf_counter()
@@ -54,6 +66,7 @@ class PrintSink:
         )
         self._last = now
         self._prev_count = count
+        self.last_raw_count = count
 
 
 def _store(store_id: str) -> StoreConfig:
@@ -98,8 +111,9 @@ async def _walk(store: StoreConfig, profile: StoreProfile, *, max_pages: int, he
 
     provider = BrowserProvider(headless=not headful)
     started = time.perf_counter()
+    sink = PrintSink()
     try:
-        outcome = await BrowserAdapter(provider).fetch(store, PrintSink())
+        outcome = await BrowserAdapter(provider).fetch(store, sink)
     finally:
         await provider.close()
 
@@ -112,11 +126,28 @@ async def _walk(store: StoreConfig, profile: StoreProfile, *, max_pages: int, he
     if isinstance(outcome, Partial):
         print(f"  reason     : {outcome.reason}")
 
-    print(f"  listings   : {len(outcome.listings)}")
+    print(f"  listings   : {len(outcome.listings)}  (raw pushes across all pages: {sink.last_raw_count})")
+    # A page that repeats its predecessor's content still pushes rows -- it is
+    # dedupe.py, not the page loop, that notices. A wide gap between raw
+    # pushes and unique listings kept is exactly what broken pagination
+    # (identical content served for every {p}) looks like from the outside:
+    # run with --diagnose-pager next to see what pagination control the page
+    # actually offers.
+    if sink.last_raw_count > 0:
+        duplicate_rate = 1 - (len(outcome.listings) / sink.last_raw_count)
+        if duplicate_rate > 0.4:
+            print(
+                f"  WARNING    : {duplicate_rate:.0%} of raw pushes were duplicates -- "
+                "pagination may not be advancing. Try --diagnose-pager."
+            )
+
     print("\n  sample:")
     for item in outcome.listings[:15]:
         stock = "in stock" if item.in_stock else "OUT"
-        print(f"    {item.native_currency} {item.native_price:>9.2f}  [{stock:>8}]  {item.title[:58]}")
+        print(
+            f"    {item.native_currency} {item.native_price:>9.2f}  [{stock:>8}]  "
+            f"[{item.condition:>10}]  {item.title[:58]}"
+        )
         print(f"        sku={item.sku}  {item.url}")
     return 0
 

@@ -14,7 +14,16 @@ from switch_tracker.adapters.base import NullSink
 from switch_tracker.adapters.browser import adapter as adapter_module
 from switch_tracker.adapters.browser.adapter import BrowserAdapter
 from switch_tracker.adapters.browser.provider import BrowserProvider
-from switch_tracker.core.models import AdapterKind, Failed, Ok, Partial, Platform, StoreConfig
+from switch_tracker.core.models import (
+    AdapterKind,
+    Condition,
+    Failed,
+    Ok,
+    Partial,
+    Platform,
+    Region,
+    StoreConfig,
+)
 
 pytestmark = pytest.mark.asyncio(loop_scope="module")
 
@@ -151,7 +160,7 @@ class TestRegionDisambiguation:
 
         assert isinstance(result, Ok)
         assert len(result.listings) == 2
-        assert {l.region for l in result.listings} == {Region.ASIA_EN, Region.JP}
+        assert {listing.region for listing in result.listings} == {Region.ASIA_EN, Region.JP}
 
 class TestPagination:
     async def test_follows_the_url_template_across_pages(self, adapter, server) -> None:
@@ -768,3 +777,297 @@ class TestTimeBudget:
         assert seen == [1, 2, 3], seen
         assert len(outcome.listings) == 9
 
+
+# ---------------------------------------------------------- the added stores
+#
+# These run the REAL shipped profiles against markup shaped like the stores'
+# own, rather than against the simplified div.card fixture the tests above
+# use. That is the point: what can go wrong with a new store is almost never
+# the adapter, it is the four selector lists, and a simplified fixture cannot
+# fail on those.
+
+
+def real_profile(store_id: str, **kw: object):  # type: ignore[no-untyped-def]
+    """The shipped profile for a store, with test-only adjustments."""
+    from switch_tracker.adapters.browser.profiles import PROFILES
+
+    return replace(PROFILES[store_id], **kw)  # type: ignore[arg-type]
+
+
+def local_store(store_id: str, base: str, *paths_: str) -> StoreConfig:
+    return StoreConfig(
+        id=store_id,
+        name=store_id,
+        base_url=base,
+        kind=AdapterKind.BROWSER,
+        currency="INR",
+        tier=1,
+        enabled=True,
+        platform_hint=Platform.SWITCH,
+        search_urls=tuple(f"{base}{path}" for path in paths_),
+    )
+
+
+def gameland_card(name: str, href: str, was: str | None, now: str) -> str:
+    """Flatsome's loop markup: title and price live in their own <li> wrappers.
+
+    The sale shape is what matters -- ``del`` keeps the original price and
+    ``ins`` carries the discounted one, both inside the same ``span.price``.
+    """
+    original = f'<del><span class="amount">{was}</span></del>' if was else ""
+    return (
+        '<li class="product"><ul class="meta">'
+        f'<li class="title"><h2><a href="{href}">{name}</a></h2></li>'
+        f'<li class="price-wrap"><span class="price">{original}'
+        f'<ins><span class="amount">{now}</span></ins></span></li>'
+        "</ul></li>"
+    )
+
+
+def gameland_page(*cards: str) -> str:
+    return f'<html><body><ul class="products">{"".join(cards)}</ul></body></html>'
+
+
+class TestGameLand:
+    async def test_records_the_sale_price_not_the_struck_through_original(
+        self, provider: BrowserProvider, server
+    ) -> None:
+        """The single most consequential selector ordering in the profile.
+
+        ``del`` and ``ins`` sit side by side inside one ``span.price``, so a
+        price list that reached a bare ``.amount`` first would match the
+        struck-through figure -- and a discounted listing would record its
+        PRE-sale price. A sale tracker that reports the pre-sale price on every
+        sale has failed at the only thing it does, silently and plausibly.
+        """
+        base, recorder = server
+        # ready= is a 15s wait for a container the terminating empty page never
+        # sends. Dropping it only removes dead waiting: an empty extraction is
+        # what ends the walk either way.
+        adapter = BrowserAdapter(
+            provider,
+            profile_for=lambda _: real_profile("gameland", ready=None),
+            settle_ms=(0, 0),
+            render_ms=0,
+        )
+        recorder.plan_pages(
+            "/shop",
+            (200, gameland_page(gameland_card("Zelda", "/product/zelda/", "₹4,499", "₹3,299")), {}),
+            (200, gameland_page(), {}),
+        )
+        result = await adapter.fetch(local_store("gameland", base, "/shop?page={p}"), NullSink())
+
+        assert isinstance(result, Ok)
+        assert result.listings[0].native_price == 3299.0
+
+    async def test_a_full_price_listing_still_reads_its_price(
+        self, provider: BrowserProvider, server
+    ) -> None:
+        """Most rows have no ``del`` at all; the ins-first rule must not need one."""
+        base, recorder = server
+        adapter = BrowserAdapter(
+            provider,
+            profile_for=lambda _: real_profile("gameland", ready=None),
+            settle_ms=(0, 0),
+            render_ms=0,
+        )
+        recorder.plan_pages(
+            "/shop",
+            (200, gameland_page(gameland_card("Metroid Prime 4", "/product/mp4/", None, "₹4,999")), {}),
+            (200, gameland_page(), {}),
+        )
+        result = await adapter.fetch(local_store("gameland", base, "/shop?page={p}"), NullSink())
+
+        assert isinstance(result, Ok)
+        assert result.listings[0].native_price == 4999.0
+
+    async def test_accessories_in_the_same_grid_never_become_listings(
+        self, provider: BrowserProvider, server
+    ) -> None:
+        """Scoping the URL to the games category is a reduction, not a guarantee.
+
+        Carry cases and controllers still appear in it, and both name the
+        console -- so with this store's SWITCH hint they would classify as
+        games on the title alone if the exclusion patterns did not run first.
+        """
+        base, recorder = server
+        adapter = BrowserAdapter(
+            provider,
+            profile_for=lambda _: real_profile("gameland", ready=None),
+            settle_ms=(0, 0),
+            render_ms=0,
+        )
+        cards = (
+            gameland_card("Zelda TotK", "/product/zelda-totk/", None, "₹4,299"),
+            gameland_card("Nintendo Switch Pro Controller", "/product/pro-controller/", None, "₹5,999"),
+            gameland_card("Nintendo Switch Carry Case", "/product/case/", None, "₹999"),
+            gameland_card("Nintendo Switch OLED Console", "/product/oled/", None, "₹34,999"),
+        )
+        recorder.plan_pages("/shop", (200, gameland_page(*cards), {}), (200, gameland_page(), {}))
+        result = await adapter.fetch(local_store("gameland", base, "/shop?page={p}"), NullSink())
+
+        assert isinstance(result, Ok)
+        assert [listing.title for listing in result.listings] == ["Zelda TotK"]
+
+    async def test_a_pre_owned_badge_outside_the_title_is_still_read(
+        self, provider: BrowserProvider, server
+    ) -> None:
+        """This store's reason for ``condition_from_context``.
+
+        The badge sits in the card beside the product name, never in it, so a
+        title-only read files the whole used shelf as NEW.
+        """
+        base, recorder = server
+        adapter = BrowserAdapter(
+            provider,
+            profile_for=lambda _: real_profile("gameland", ready=None),
+            settle_ms=(0, 0),
+            render_ms=0,
+        )
+        # The trailing newline is not decoration. textContent concatenates with
+        # NO separator, so a badge sitting flush against the title yields
+        # "Pre-OwnedZelda TotK" -- and PRE_OWNED's trailing \\b then fails to
+        # match. Real markup carries the whitespace; minified markup would not.
+        card_html = gameland_card("Zelda TotK", "/product/zelda-totk-used/", None, "₹2,999").replace(
+            '<ul class="meta">', '<span class="badge">Pre-Owned</span>\n<ul class="meta">'
+        )
+        recorder.plan_pages("/shop", (200, gameland_page(card_html), {}), (200, gameland_page(), {}))
+        result = await adapter.fetch(local_store("gameland", base, "/shop?page={p}"), NullSink())
+
+        assert isinstance(result, Ok)
+        assert result.listings[0].condition is Condition.PRE_OWNED
+        # And the title genuinely never said so -- otherwise this proves nothing.
+        assert "owned" not in result.listings[0].title.lower()
+
+
+def pookie_card(name: str, href: str, price: str) -> str:
+    return (
+        "<div data-hook='product-item-root'>"
+        f"<a data-hook='product-item-product-details-link' href='{href}'>"
+        f"<span data-hook='product-item-name'>{name}</span></a>"
+        f"<span data-hook='product-item-price-to-pay'>{price}</span>"
+        "</div>"
+    )
+
+
+class TestGamePookie:
+    async def test_pages_by_url_and_stops_on_the_first_empty_page(
+        self, provider: BrowserProvider, server
+    ) -> None:
+        """Wix pages by a real ``?page=`` parameter, unlike gamenation/mcubegames.
+
+        Both halves matter. Paging by URL means the walk must actually advance
+        the parameter; stopping means a store with ~88 products must not run to
+        MAX_PAGES_SAFETY re-reading an empty grid 297 more times.
+        """
+        base, recorder = server
+        adapter = BrowserAdapter(
+            provider,
+            profile_for=lambda _: real_profile("gamepookie", ready=None),
+            settle_ms=(0, 0),
+            render_ms=0,
+        )
+        recorder.plan_pages(
+            "/category/nintendo-switch",
+            (200, f"<html><body>{pookie_card('Zelda TotK', '/product-page/zelda', '₹4,299')}</body></html>", {}),  # noqa: E501
+            (200, f"<html><body>{pookie_card('Metroid Dread', '/product-page/metroid', '₹3,499')}</body></html>", {}),  # noqa: E501
+            (200, "<html><body></body></html>", {}),
+        )
+        result = await adapter.fetch(
+            local_store("gamepookie", base, "/category/nintendo-switch?page={p}"), NullSink()
+        )
+
+        assert isinstance(result, Ok)
+        assert {listing.title for listing in result.listings} == {"Zelda TotK", "Metroid Dread"}
+        pages_fetched = [hit for hit in recorder.hits if "/category/nintendo-switch" in hit]
+        assert [hit for hit in pages_fetched if "page=1" in hit]
+        assert [hit for hit in pages_fetched if "page=2" in hit]
+        assert not [hit for hit in pages_fetched if "page=4" in hit]
+
+    async def test_an_unlabelled_import_is_not_asserted_to_be_indian_stock(
+        self, provider: BrowserProvider, server
+    ) -> None:
+        """Region is a different PRODUCT here, not a tag on one.
+
+        GamePookie sells US, Asian and Japanese pressings out of the same
+        category and most listings do not say which. Defaulting to IN would
+        merge editions that are genuinely not interchangeable.
+        """
+        base, recorder = server
+        adapter = BrowserAdapter(
+            provider,
+            profile_for=lambda _: real_profile("gamepookie", ready=None),
+            settle_ms=(0, 0),
+            render_ms=0,
+        )
+        body = pookie_card("Zelda TotK", "/product-page/zelda", "₹4,299") + pookie_card(
+            "Metroid Dread (Japan)", "/product-page/metroid-jp", "₹3,499"
+        )
+        recorder.plan_pages(
+            "/category/nintendo-switch",
+            (200, f"<html><body>{body}</body></html>", {}),
+            (200, "<html><body></body></html>", {}),
+        )
+        result = await adapter.fetch(
+            local_store("gamepookie", base, "/category/nintendo-switch?page={p}"), NullSink()
+        )
+
+        assert isinstance(result, Ok)
+        by_title = {listing.title: listing.region for listing in result.listings}
+        assert by_title["Zelda TotK"] is Region.UNKNOWN
+        # A title that DOES say still wins -- the default is a floor, not a cap.
+        assert by_title["Metroid Dread (Japan)"] is Region.JP
+
+
+class TestCexIndia:
+    async def test_a_plainly_titled_listing_is_still_stored_as_pre_owned(
+        self, provider: BrowserProvider, server
+    ) -> None:
+        """CeX's whole catalogue is second-hand and none of it says so.
+
+        Driven through the simple card fixture carrying the REAL profile's
+        ``default_condition`` rather than through cex_in's own selectors: those
+        are unverified guesses awaiting a live diagnostic, and this test is
+        about the condition mechanism, which must keep passing when they are
+        replaced.
+        """
+        from switch_tracker.adapters.browser.profiles import PROFILES
+
+        assert PROFILES["cex_in"].default_condition is Condition.PRE_OWNED
+
+        base, recorder = server
+        adapter = BrowserAdapter(
+            provider,
+            profile_for=lambda store_id: replace(
+                _test_profile(store_id), default_condition=PROFILES["cex_in"].default_condition
+            ),
+            settle_ms=(0, 0),
+            render_ms=0,
+        )
+        body = card("Mario Kart World", "₹4,499", "/product-detail/mario-kart-world") + card(
+            "Zelda TotK", "₹3,299", "/product-detail/zelda-totk"
+        )
+        recorder.plan_pages(
+            "/search", (200, f"<html><body>{body}</body></html>", {}), (200, "<html></html>", {})
+        )
+        result = await adapter.fetch(local_store("cex_in", base, "/search?page={p}"), NullSink())
+
+        assert isinstance(result, Ok)
+        assert len(result.listings) == 2
+        assert {listing.condition for listing in result.listings} == {Condition.PRE_OWNED}
+
+    async def test_an_asserted_condition_does_not_leak_to_other_stores(
+        self, provider: BrowserProvider, server
+    ) -> None:
+        """The seam is per-profile. A store that asserts nothing still infers."""
+        base, recorder = server
+        adapter = BrowserAdapter(provider, profile_for=_test_profile, settle_ms=(0, 0), render_ms=0)
+        recorder.plan_pages(
+            "/shop",
+            (200, f"<html><body>{card('Mario Kart World', '₹4,499', '/p/1')}</body></html>", {}),
+            (200, "<html></html>", {}),
+        )
+        result = await adapter.fetch(shop_store(base), NullSink())
+
+        assert isinstance(result, Ok)
+        assert result.listings[0].condition is Condition.NEW

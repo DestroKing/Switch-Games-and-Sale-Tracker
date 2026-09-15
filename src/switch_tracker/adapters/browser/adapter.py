@@ -27,6 +27,7 @@ from switch_tracker.adapters.browser.profiles import StoreProfile, WaitUntil, ef
 from switch_tracker.adapters.browser.provider import BrowserProvider
 from switch_tracker.core.models import (
     AdapterKind,
+    Condition,
     Failed,
     FetchOutcome,
     Ok,
@@ -405,8 +406,32 @@ class BrowserAdapter:
             in_stock=row.in_stock,
             platform=result.platform,
             region=region,
-            condition=infer_condition(row.title),
+            condition=_condition_for(profile, row),
         )
+
+
+def _condition_for(profile: StoreProfile, row: Extracted) -> Condition:
+    """New or pre-owned, from the strongest signal the store actually gives.
+
+    Three tiers, narrowest first:
+
+    1. The profile ASSERTS it. A shop whose entire catalogue is one condition
+       (CeX) cannot be read off its own listings, because those listings never
+       say -- a pre-owned-only retailer has no reason to label anything.
+    2. The profile opts into card text. "Pre-owned" lives in a badge or a
+       category strip beside the title on some storefronts, so the title alone
+       reads NEW for a used cartridge.
+    3. The title, which is what every store did before and still the default.
+
+    Tier 2 is opt-in rather than universal on purpose; see
+    ``StoreProfile.condition_from_context`` for the Amazon case that makes
+    turning it on globally a data-corruption bug rather than an improvement.
+    """
+    if profile.default_condition is not None:
+        return profile.default_condition
+    if profile.condition_from_context and row.context:
+        return infer_condition(row.context)
+    return infer_condition(row.title)
 
 
 def uses_click_paging(profile: StoreProfile, template: str) -> bool:

@@ -4,7 +4,7 @@
 any of the rest of it. Every term is explained the first time it appears, and
 **Appendix A is a glossary** you can jump to from anywhere.
 
-**What the program does, in one sentence:** it visits fourteen online shops — thirteen
+**What the program does, in one sentence:** it visits twenty-four online shops — twenty-three
 Indian retailers plus Play-Asia for import comparison — finds every physical Nintendo
 Switch game they sell, records the price, and does that again later so you can see what
 changed.
@@ -123,7 +123,7 @@ uv run python -m switch_tracker      # start the dashboard
 ```
 
 Then open `http://127.0.0.1:4173` and press **Collect prices**. Progress appears live in
-the console panel; the first run takes a few minutes because it visits fourteen real
+the console panel; the first run takes a while because it visits two dozen real
 websites politely, one request at a time per site.
 
 Three things worth noticing while it runs, because each one is a design decision
@@ -152,7 +152,7 @@ src/switch_tracker/
 ├── spike.py            Self-check for the four things that break only after packaging.
 │
 ├── config/             WHICH SHOPS EXIST
-│   ├── stores.py         The fourteen shops, hand-written (§3.1).
+│   ├── stores.py         The twenty-four shops, hand-written (§3.1).
 │   └── overrides.py      Merges in the corrections probe wrote (§3.1).
 │
 ├── core/               THINGS EVERYTHING ELSE USES
@@ -203,7 +203,7 @@ And outside `src/switch_tracker/`:
 
 | Path | What it is |
 |---|---|
-| `tests/` | 414 tests. `conftest.py` holds the shared setup ("fixtures", §1.12). |
+| `tests/` | 494 tests. `conftest.py` holds the shared setup ("fixtures", §1.12). |
 | `scripts/scrape_check.py` | Run **one** store against the **live** site and print what came back. |
 | `packaging/`, `switch_tracker.spec` | Turning it into a Windows `.exe` (§3.17). |
 | `START.bat`, `setup.ps1`, `run.ps1` | What a Windows user double-clicks. |
@@ -466,7 +466,7 @@ If a write is in progress, wait up to 5 seconds rather than failing instantly.
 **Why httpx, and why "async".** Fetching a web page takes maybe a second, almost all of it
 spent *waiting* for the far end. Normal ("synchronous") code sits idle during that wait.
 **Asynchronous** code says "wake me when the reply arrives" and does something else
-meanwhile. Fourteen shops fetched one after another takes fourteen seconds of mostly
+meanwhile. Two dozen shops fetched one after another takes two dozen seconds of mostly
 waiting; fetched concurrently it takes about as long as the slowest one.
 
 You'll see this as `async def` and `await`:
@@ -561,7 +561,7 @@ at startup ahead of everything else.
 
 **Rejected.** Downloading the browser on first run (fails behind a corporate firewall);
 using whatever browser the machine has (three code paths, and Chrome auto-updates out of
-sync with Playwright); dropping Playwright (loses 7 of 14 stores).
+sync with Playwright); dropping Playwright (loses 10 of 24 stores).
 
 ## 1.12 pytest — the test framework
 
@@ -889,7 +889,7 @@ reopen: the browser sends the last id it saw, and the stream resumes there (§3.
 
 **Files:** `config/stores.py`, `config/overrides.py`
 
-`config/stores.py` is a plain Python list of fourteen shops:
+`config/stores.py` is a plain Python list of twenty-four shops:
 
 ```python
 StoreConfig(
@@ -915,6 +915,23 @@ probe edited `stores.py`, one bad write would corrupt the store list permanently
 One detail worth copying: the merge iterates the **shipped list** and looks corrections up
 by id, not the other way round. A stale correction naming a deleted store is ignored
 rather than inventing a phantom shop.
+
+**`tier` is a mechanism, not an opinion.** `tier=2` means "has a public product feed";
+`tier=1` means "needs a real browser". It decides which adapter group a shop belongs to
+and roughly when it runs — nothing else. It is deliberately **not** a trust or reputation
+score, however tempting that reading is on a list that mixes Amazon with two-person
+import shops. One integer answering both questions would make the collection order depend
+on somebody's opinion of a retailer, and the two answers would drift apart the first time
+they disagreed. If shop reputation ever needs recording, it gets its own field.
+
+**Almost every shop is scoped to categories.** `collections` (feeds) and `search_urls`
+(browser) both exist to point at a shop's *games* categories rather than its whole
+catalogue. That is not just politeness about request counts: the classifier (§3.3) is the
+only other thing standing between a camera retailer's 570 categories and your price
+history, and narrowing the input first leaves it a far easier job. Two of the newer
+WooCommerce shops list only a **parent** category on purpose — WooCommerce returns a
+product under its parent *and* each of its child terms, so listing the children beside it
+fetches the same products two or three times and throws the duplicates away at dedupe.
 
 ## 3.2 Three ways to read a shop
 
@@ -1112,21 +1129,26 @@ shop, not just this one.
 
 **File:** `adapters/browser/profiles.py`
 
-Seven shops, each needing something different — and **zero** `if store_id == ...` branches
+Ten shops, each needing something different — and **zero** `if store_id == ...` branches
 in the adapter. Everything is data on a `StoreProfile`:
 
 | Field | What it controls | Set by |
 |---|---|---|
-| `card` / `title` / `price` / `link` | CSS recipes | all 7 |
-| `ready` | wait for this before reading | all 7 |
-| `next_page` | click-to-paginate controls | 3 |
+| `card` / `title` / `price` / `link` | CSS recipes | all 10 |
+| `ready` | wait for this before reading | all 10 |
+| `next_page` | click-to-paginate controls | 4 |
+| `platform_hint` | assume Switch on a terse title | all 10 |
+| `default_region` | which regional edition, absent a marker | Play-Asia, GamePookie |
+| `default_condition` | assert new/pre-owned for the whole shop | CeX India |
+| `condition_from_context` | read condition from the whole card, not the title | GameLand |
 | `cookies` / `cookie_domain` | session settings | Play-Asia |
 | `wait_until` | how long to wait for the page | Play-Asia |
 | `scroll_passes` / `scroll_settle_ms` | lazy-loading behaviour | Play-Asia |
 | `reject_url_parts` / `require_digit_in_url` | drop non-product links | Play-Asia |
-| `max_pages` | page cap | Play-Asia |
+| `max_pages` / `time_budget_s` | page cap, and the shop's own deadline | Play-Asia |
+| `sku_includes_region` | keep regional editions as separate listings | Play-Asia |
 
-**Two of these are correctness, not convenience.**
+**Several of these are correctness, not convenience.**
 
 *Cookies.* Play-Asia prices per session. The config says `currency="INR"` — and that was
 **a lie** until recently: the cookies existed only in a hand-run test script, so the real
@@ -1137,6 +1159,34 @@ now ship on the profile, which is what makes the config's claim true.
 *cannot* reject them — a nav link titled "Nintendo Switch" plus a SWITCH hint is a textbook
 game. The filter **fails open**: a row is dropped only on a positive match, so a wrong rule
 leaves junk (recoverable) rather than deleting the whole shop (not).
+
+*The region default.* Most shops sell Indian stock, so `Region.IN` is the sensible
+assumption — but GamePookie is an importer, and US, Asian and Japanese pressings sit in
+the same category as domestic ones with nothing in the title to say which. Region is
+modelled here as a genuinely **different product** (§3.2, `core/models.py`), not a tag on
+one, so asserting IN would not be a mislabel — it would merge editions that are not
+interchangeable. `Region.UNKNOWN` is the honest answer, and a title that *does* say still
+upgrades the row.
+
+*Condition, and its two escape hatches.* By default a listing is new or pre-owned
+according to what its **title** says, because a shop's own wording is the only source of
+truth that works everywhere (§3.3). Two shops break that:
+
+- **CeX India** deals exclusively in second-hand stock and, precisely because that is its
+  entire business, never labels anything — its titles read "Mario Kart World". So the
+  fact lives with the retailer: `default_condition=Condition.PRE_OWNED` overrides whatever
+  the page says. It is the only shop that asserts one, and a test fails if a second
+  quietly acquires it.
+- **GameLand** puts "Pre-owned" in a **badge** next to the product name rather than in it,
+  so a title-only read files its whole used shelf as new. `condition_from_context=True`
+  widens the read to the entire card's text.
+
+The second one is opt-in, and that is the load-bearing part. `PRE_OWNED` matches "used" on
+a bare word boundary, and an Amazon search card routinely carries *"6 used & new offers"*
+under the price — so switching every shop to card text at once would relabel a large slice
+of Amazon's catalogue as second-hand. Silently, permanently, and in exactly the
+fail-*closed* direction the URL filter above argues against. The wider signal is available
+to any shop somebody has actually looked at; no shop acquires it by accident.
 
 ### Where declarative stops working
 
@@ -1336,7 +1386,7 @@ The writer swallows its own errors on purpose:
 **Files:** `services/collect.py`, `services/collect_worker.py`, `selection.py`,
 `web/routers/actions.py`
 
-Testing one shop shouldn't mean scraping fourteen. You tick boxes on the dashboard and
+Testing one shop shouldn't mean scraping two dozen. You tick boxes on the dashboard and
 press **Collect selected**.
 
 **The design decision:** pass a *set* of shop ids, not one id.
@@ -1583,7 +1633,7 @@ land here from anywhere.
 Nothing is "done" until all four are green. Run them from the project root.
 
 ```bash
-uv run pytest                           # 414 tests, a few seconds
+uv run pytest                           # 494 tests, a couple of minutes
 uv run ruff check src tests scripts     # lint
 uv run ruff format src tests scripts    # formatting (rewrites files)
 uv run mypy                             # types, strict mode
@@ -1723,6 +1773,15 @@ writes to `stores.local.json` — and note that your guess in `stores.py` was ne
   `.gitignore`. `pyproject.toml` bounds every version; each machine resolves its own.
 - **The `src/` tree contains a whole second implementation** in TypeScript. It is the
   behavioural reference for the port. Nothing in it runs.
+- **Browser-store profiles are allowed to ship unverified.** `cex_in`'s selectors are
+  explicit guesses, marked as such in `profiles.py`. That is a deliberate choice, not an
+  oversight: when nothing extracts, the adapter already dumps the rendered HTML and tells
+  you which tool to run, so a guess fails no worse than an empty profile while producing a
+  better dump to fix it from. Replace them from that dump before trusting a run.
+- **A store's `platform_hint` never beats an explicit marker.** Every shop in the list
+  hints `SWITCH`, including the ones scoped to a Switch 2 category. `platform_of` checks
+  the Switch 2 patterns *first* for exactly that reason — otherwise a whole Switch 2
+  catalogue would file itself under the wrong console (§3.3).
 
 ---
 
@@ -1733,6 +1792,7 @@ writes to `stores.local.json` — and note that your guess in `stores.py` was ne
 | Dashboard opens, everything empty | The app auto-collects **once**, only to bootstrap an empty database (§3.15). After that it never starts a run by itself. | Press **Collect prices**. |
 | **Moved since last run** is always empty | It needs two runs to compare. | Collect again later. |
 | One store tile says 0 listings | Expected failure mode, and the reason is on the tile. Screenshots and HTML land in `<data dir>/diagnostics/`. | `scripts/scrape_check.py <store>`, then **Fix a broken store** (§3.16). |
+| **CeX India** says 0 listings | Known and expected, not a regression. Its four selector lists ship as **unverified guesses**: CeX is a client-rendered Nuxt/Algolia app whose real DOM has never been captured, so the profile was written to fail loudly into a diagnostics dump rather than to be trusted. | `scripts/scrape_check.py cex_in --headful`, read `<data dir>/diagnostics/cex_in.html`, then **Fix a broken store** (§3.16). |
 | `A run is already going` (409) | One run at a time, enforced in the database, not the UI (§3.12). | Wait for it, or restart the app — a dead worker's run is reaped on startup. |
 | `'collect' is started by the dashboard, not run directly` | You ran a worker by hand without `--run-id`. Workers report into an existing run. | Use the dashboard, or `scripts/scrape_check.py` for one store. |
 | `Address already in use` on startup | Something else has port 4173 — often an earlier copy still running. | `PORT=4174 uv run python -m switch_tracker`, or close the other copy. |
