@@ -154,6 +154,17 @@ uv run python scripts/scrape_check.py playasia --pages 3
 uv run python scripts/scrape_check.py e2zstore --headful
 ```
 
+`scripts/category_check.py` does the same job for the feed-based stores: it asks
+each store's own API how many products are really in each configured category,
+so a wrong slug is a visible number rather than a silent zero folded into a total.
+
+`scripts/diagnose_extraction.py <store_id>` answers "why did this store extract
+12 rows when the page shows 24?" — it reports which of the four extraction
+layers won, how many rows each one offers, where the survivors are lost, and
+whether page 2 actually differs from page 1. It prints everything to the
+console rather than dumping a file, so its output can be pasted somewhere.
+
+
 Design documents are in `docs/`:
 
 - **`walkthrough.md`** — start here. Orientation (what runs, where every file lives,

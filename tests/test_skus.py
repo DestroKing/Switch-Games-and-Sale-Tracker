@@ -78,3 +78,52 @@ class TestStability:
     def test_never_returns_empty(self) -> None:
         """An empty SKU would collide with every other empty SKU at the unique index."""
         assert sku_from_url("https://example.in/") != ""
+
+
+class TestQueryParameterIds:
+    """Stores that identify a product ONLY by a query parameter.
+
+    Found on CeX by a live run: 69 products scraped, 1 listing kept, outcome
+    reported Ok. The whole catalogue lives at one path.
+    """
+
+    def test_without_the_opt_in_every_product_collapses_to_one_sku(self) -> None:
+        """The defect, pinned so the fix cannot be quietly reverted."""
+        a = sku_from_url("https://in.webuy.com/product-detail?id=847362")
+        b = sku_from_url("https://in.webuy.com/product-detail?id=551200")
+        assert a == b == "product-detail"
+
+    def test_the_opt_in_separates_them(self) -> None:
+        a = sku_from_url("https://in.webuy.com/product-detail?id=847362", ("id",))
+        b = sku_from_url("https://in.webuy.com/product-detail?id=551200", ("id",))
+        assert (a, b) == ("847362", "551200")
+
+    def test_an_absent_parameter_falls_back_to_the_path_tail(self) -> None:
+        """A store may route some links without the id; those must still work."""
+        assert sku_from_url("https://in.webuy.com/product/mario-kart", ("id",)) == "mario-kart"
+
+    def test_an_empty_parameter_is_not_treated_as_an_id(self) -> None:
+        assert sku_from_url("https://in.webuy.com/product-detail?id=", ("id",)) == "product-detail"
+
+    def test_the_first_named_parameter_wins(self) -> None:
+        url = "https://x.test/p?sku=&id=99"
+        assert sku_from_url(url, ("sku", "id")) == "99"
+
+    def test_flipkarts_pid_still_takes_precedence(self) -> None:
+        """The pre-existing special case must not be displaced by the general one."""
+        url = "https://www.flipkart.com/x/p/itm123?pid=ABC123&id=999"
+        assert sku_from_url(url, ("id",)) == "ABC123"
+
+    def test_an_asin_still_takes_precedence(self) -> None:
+        url = "https://www.amazon.in/some-slug/dp/B08H93ZRK9?id=999"
+        assert sku_from_url(url, ("id",)) == "B08H93ZRK9"
+
+    def test_other_query_parameters_are_still_ignored(self) -> None:
+        """A whitelist, not "keep the query string".
+
+        Tracking parameters churn between runs; letting them in would mint a
+        new listing every run and restart every price series at one point.
+        """
+        a = sku_from_url("https://x.test/p/zelda?utm_source=a&sid=1", ("id",))
+        b = sku_from_url("https://x.test/p/zelda?utm_source=b&sid=2", ("id",))
+        assert a == b == "zelda"

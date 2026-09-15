@@ -924,12 +924,13 @@ class TestGameLand:
             settle_ms=(0, 0),
             render_ms=0,
         )
-        # The trailing newline is not decoration. textContent concatenates with
-        # NO separator, so a badge sitting flush against the title yields
-        # "Pre-OwnedZelda TotK" -- and PRE_OWNED's trailing \\b then fails to
-        # match. Real markup carries the whitespace; minified markup would not.
+        # NO whitespace between the badge and the title, deliberately. This is
+        # the minified shape, and the one that breaks a naive read: textContent
+        # glues its text nodes together with nothing between them, so the card
+        # reads "Pre-OwnedZelda TotK" and PRE_OWNED's trailing word boundary
+        # never matches. extract.py restores the separators.
         card_html = gameland_card("Zelda TotK", "/product/zelda-totk-used/", None, "₹2,999").replace(
-            '<ul class="meta">', '<span class="badge">Pre-Owned</span>\n<ul class="meta">'
+            '<ul class="meta">', '<span class="badge">Pre-Owned</span><ul class="meta">'
         )
         recorder.plan_pages("/shop", (200, gameland_page(card_html), {}), (200, gameland_page(), {}))
         result = await adapter.fetch(local_store("gameland", base, "/shop?page={p}"), NullSink())
@@ -938,6 +939,40 @@ class TestGameLand:
         assert result.listings[0].condition is Condition.PRE_OWNED
         # And the title genuinely never said so -- otherwise this proves nothing.
         assert "owned" not in result.listings[0].title.lower()
+
+    async def test_the_card_context_carries_separators_between_elements(
+        self, provider: BrowserProvider, server
+    ) -> None:
+        """The property the test above depends on, asserted directly.
+
+        Worth its own test because the failure is invisible from outside: a
+        glued-together context is still a full, plausible-looking string, and
+        every regex in core/parse that anchors on a word boundary silently
+        stops matching against it.
+        """
+        base, recorder = server
+        captured: list[str] = []
+
+        class Spy(BrowserAdapter):
+            def _to_listing(self, store, profile, row):  # type: ignore[no-untyped-def]
+                captured.append(row.context)
+                return super()._to_listing(store, profile, row)
+
+        adapter = Spy(
+            provider,
+            profile_for=lambda _: real_profile("gameland", ready=None),
+            settle_ms=(0, 0),
+            render_ms=0,
+        )
+        card_html = gameland_card("Zelda TotK", "/product/zelda-totk/", None, "₹4,299").replace(
+            '<ul class="meta">', '<span class="badge">Pre-Owned</span><ul class="meta">'
+        )
+        recorder.plan_pages("/shop", (200, gameland_page(card_html), {}), (200, gameland_page(), {}))
+        await adapter.fetch(local_store("gameland", base, "/shop?page={p}"), NullSink())
+
+        assert captured, "no rows reached _to_listing"
+        assert "Pre-Owned Zelda TotK" in captured[0]
+        assert "Pre-OwnedZelda" not in captured[0]
 
 
 def pookie_card(name: str, href: str, price: str) -> str:
@@ -951,14 +986,30 @@ def pookie_card(name: str, href: str, price: str) -> str:
 
 
 class TestGamePookie:
-    async def test_pages_by_url_and_stops_on_the_first_empty_page(
+    async def test_it_is_routed_onto_the_click_path_not_the_url_path(self) -> None:
+        """This store has no pagination -- only a "Load more" button.
+
+        Its original ?page= parameter was INERT: it produced a valid-looking
+        URL that returned page 1's products every time, so a --pages 3 run
+        reported three pages and five unique products. That reads as a working
+        walk right up until the count meets the category's own ~88.
+        """
+        from switch_tracker.adapters.browser.adapter import uses_click_paging
+        from switch_tracker.adapters.browser.profiles import PROFILES
+        from switch_tracker.config.stores import STORES
+
+        store = next(s for s in STORES if s.id == "gamepookie")
+        assert uses_click_paging(PROFILES["gamepookie"], store.search_urls[0]) is True
+
+    async def test_a_grid_with_no_load_more_button_left_ends_the_walk(
         self, provider: BrowserProvider, server
     ) -> None:
-        """Wix pages by a real ``?page=`` parameter, unlike gamenation/mcubegames.
+        """The real "no more products" signal for a load-more store.
 
-        Both halves matter. Paging by URL means the walk must actually advance
-        the parameter; stopping means a store with ~88 products must not run to
-        MAX_PAGES_SAFETY re-reading an empty grid 297 more times.
+        There is no empty page to run into here -- the grid only ever grows.
+        The walk ends when the button is gone, and it must end promptly: a
+        store of ~88 products must not spend MAX_PAGES_SAFETY clicks looking
+        for a control that is not there.
         """
         base, recorder = server
         adapter = BrowserAdapter(
@@ -967,22 +1018,66 @@ class TestGamePookie:
             settle_ms=(0, 0),
             render_ms=0,
         )
-        recorder.plan_pages(
-            "/category/nintendo-switch",
-            (200, f"<html><body>{pookie_card('Zelda TotK', '/product-page/zelda', '₹4,299')}</body></html>", {}),  # noqa: E501
-            (200, f"<html><body>{pookie_card('Metroid Dread', '/product-page/metroid', '₹3,499')}</body></html>", {}),  # noqa: E501
-            (200, "<html><body></body></html>", {}),
+        body = pookie_card("Zelda TotK", "/product-page/zelda", "₹4,299") + pookie_card(
+            "Metroid Dread", "/product-page/metroid", "₹3,499"
         )
+        recorder.plan("/category/nintendo-switch", (200, f"<html><body>{body}</body></html>", {}))
         result = await adapter.fetch(
-            local_store("gamepookie", base, "/category/nintendo-switch?page={p}"), NullSink()
+            local_store("gamepookie", base, "/category/nintendo-switch"), NullSink()
         )
 
         assert isinstance(result, Ok)
         assert {listing.title for listing in result.listings} == {"Zelda TotK", "Metroid Dread"}
-        pages_fetched = [hit for hit in recorder.hits if "/category/nintendo-switch" in hit]
-        assert [hit for hit in pages_fetched if "page=1" in hit]
-        assert [hit for hit in pages_fetched if "page=2" in hit]
-        assert not [hit for hit in pages_fetched if "page=4" in hit]
+        # One fetch, not 300: page 1 by goto, then the missing button stops it.
+        fetched = [hit for hit in recorder.hits if "/category/nintendo-switch" in hit]
+        assert len(fetched) == 1, fetched
+
+    async def test_a_load_more_button_that_grows_the_grid_counts_as_advancing(
+        self, provider: BrowserProvider, server
+    ) -> None:
+        """Load-more APPENDS; every other click-paged store here replaces.
+
+        That distinction matters because _advanced() confirms a page turn by
+        fingerprinting the results, and the leading cards never move when a
+        grid is appended to. The fingerprint includes the card COUNT for
+        exactly this reason, so 2 -> 4 registers as a real advance.
+        """
+        base, recorder = server
+        adapter = BrowserAdapter(
+            provider,
+            profile_for=lambda _: real_profile("gamepookie", ready=None),
+            settle_ms=(0, 0),
+            render_ms=0,
+        )
+        first = pookie_card("Zelda TotK", "/product-page/zelda", "₹4,299") + pookie_card(
+            "Metroid Dread", "/product-page/metroid", "₹3,499"
+        )
+        more = pookie_card("Hades", "/product-page/hades", "₹3,299") + pookie_card(
+            "Hollow Knight", "/product-page/hollow", "₹1,499"
+        )
+        # The button appends to the grid and then removes itself, which is what
+        # the real control does once the catalogue is exhausted.
+        page = (
+            f"<html><body><div id='grid'>{first}</div>"
+            "<button data-hook='load-more-button'>Load More</button>"
+            "<script>document.querySelector(\"[data-hook='load-more-button']\")"
+            ".addEventListener('click', function () {"
+            f"  document.getElementById('grid').insertAdjacentHTML('beforeend', `{more}`);"
+            "  this.remove();"
+            "});</script></body></html>"
+        )
+        recorder.plan("/category/nintendo-switch", (200, page, {}))
+        result = await adapter.fetch(
+            local_store("gamepookie", base, "/category/nintendo-switch"), NullSink()
+        )
+
+        assert isinstance(result, Ok)
+        assert {listing.title for listing in result.listings} == {
+            "Zelda TotK",
+            "Metroid Dread",
+            "Hades",
+            "Hollow Knight",
+        }
 
     async def test_an_unlabelled_import_is_not_asserted_to_be_indian_stock(
         self, provider: BrowserProvider, server
@@ -1055,6 +1150,89 @@ class TestCexIndia:
         assert isinstance(result, Ok)
         assert len(result.listings) == 2
         assert {listing.condition for listing in result.listings} == {Condition.PRE_OWNED}
+
+    async def test_products_differing_only_by_query_id_stay_separate_listings(
+        self, provider: BrowserProvider, server
+    ) -> None:
+        """The defect a live --pages 3 run exposed: 69 scraped, 1 kept.
+
+        CeX routes its whole catalogue through /product-detail and identifies
+        products only by ?id=. sku_from_url drops the query for every other
+        store -- correctly, since tracking parameters churn -- so every row
+        derived the SKU "product-detail", _dedupe kept the last one, and the
+        run reported Ok with a single listing. Nothing raised.
+
+        Both halves are asserted here, because either alone is useless: the
+        SKUs must differ, AND the stored URL must keep the id or it points at
+        a page that does not exist.
+        """
+        from switch_tracker.adapters.browser.profiles import PROFILES
+
+        base, recorder = server
+        adapter = BrowserAdapter(
+            provider,
+            profile_for=lambda store_id: replace(
+                _test_profile(store_id), sku_url_params=PROFILES["cex_in"].sku_url_params
+            ),
+            settle_ms=(0, 0),
+            render_ms=0,
+        )
+        body = card("Mario Kart World", "₹4,499", "/product-detail?id=847362") + card(
+            "Zelda TotK", "₹3,299", "/product-detail?id=551200"
+        )
+        recorder.plan_pages(
+            "/search", (200, f"<html><body>{body}</body></html>", {}), (200, "<html></html>", {})
+        )
+        result = await adapter.fetch(local_store("cex_in", base, "/search?page={p}"), NullSink())
+
+        assert isinstance(result, Ok)
+        assert {listing.sku for listing in result.listings} == {"847362", "551200"}
+        assert all("id=" in listing.url for listing in result.listings)
+
+    async def test_tracking_parameters_are_still_stripped_from_the_url(
+        self, provider: BrowserProvider, server
+    ) -> None:
+        """A whitelist, not "keep the query string".
+
+        If churning parameters survived into the URL or the SKU, the same
+        product would mint a brand-new listing every run and every price
+        series would restart at one point, with nothing reporting an error.
+        """
+        base, recorder = server
+        adapter = BrowserAdapter(
+            provider,
+            profile_for=lambda store_id: replace(_test_profile(store_id), sku_url_params=("id",)),
+            settle_ms=(0, 0),
+            render_ms=0,
+        )
+        body = card("Mario Kart World", "₹4,499", "/product-detail?id=847362&utm_source=x&sid=99")
+        recorder.plan_pages(
+            "/search", (200, f"<html><body>{body}</body></html>", {}), (200, "<html></html>", {})
+        )
+        result = await adapter.fetch(local_store("cex_in", base, "/search?page={p}"), NullSink())
+
+        assert isinstance(result, Ok)
+        url = result.listings[0].url
+        assert url.endswith("/product-detail?id=847362")
+        assert "utm_source" not in url and "sid=" not in url
+        assert result.listings[0].sku == "847362"
+
+    async def test_a_store_without_the_opt_in_still_drops_the_whole_query(
+        self, provider: BrowserProvider, server
+    ) -> None:
+        """The default for the other nine browser stores is unchanged."""
+        base, recorder = server
+        adapter = BrowserAdapter(provider, profile_for=_test_profile, settle_ms=(0, 0), render_ms=0)
+        recorder.plan_pages(
+            "/shop",
+            (200, f"<html><body>{card('Zelda TotK', '₹4,299', '/p/zelda?ref=abc')}</body></html>", {}),
+            (200, "<html></html>", {}),
+        )
+        result = await adapter.fetch(shop_store(base), NullSink())
+
+        assert isinstance(result, Ok)
+        assert "?" not in result.listings[0].url
+        assert result.listings[0].sku == "zelda"
 
     async def test_an_asserted_condition_does_not_leak_to_other_stores(
         self, provider: BrowserProvider, server
