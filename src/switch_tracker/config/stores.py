@@ -389,13 +389,20 @@ STORES: tuple[StoreConfig, ...] = (
         tier=1,
         enabled=True,
         platform_hint=Platform.SWITCH,
+        # No {p}, deliberately. This store has no pagination at all -- a
+        # "Load more" button at the end of the grid is the only way forward,
+        # confirmed live. The parameter WAS here and was inert: it produced a
+        # valid-looking URL that returned page 1's products every time, which
+        # reads as a working walk right up until the row count is compared
+        # against the category's own.
         search_urls=(
-            "https://www.gamepookie.com/category/nintendo-switch?page={p}",
-            "https://www.gamepookie.com/category/nintendo-switch-2?page={p}",
+            "https://www.gamepookie.com/category/nintendo-switch",
+            "https://www.gamepookie.com/category/nintendo-switch-2",
         ),
         note=(
-            "Wix storefront: no product API, but stable data-hook attributes. Its categories "
-            "report roughly 88 Switch and 36 Switch 2 products, so the walk is short."
+            "Wix storefront: no product API, but stable data-hook attributes. Paged by a "
+            "'Load more' button, so pages 2+ are reached by clicking; its categories report "
+            "roughly 88 Switch and 36 Switch 2 products."
         ),
     ),
     StoreConfig(

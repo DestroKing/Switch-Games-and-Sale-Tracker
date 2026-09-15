@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from pathlib import Path
+from typing import ClassVar
 
 import pytest
 
@@ -58,6 +59,44 @@ class TestProfiles:
                 assert isinstance(value, tuple), f"{store_id}.{field}"
                 assert value, f"{store_id}.{field} is empty"
 
+    def test_gamepookie_pages_by_a_load_more_button(self) -> None:
+        """It has no pagination at all -- confirmed on the live site.
+
+        The ?page= parameter it originally shipped with was INERT: it built a
+        valid-looking URL that returned page 1's products every time, so a
+        --pages 3 run reported three pages and 5 unique products. That reads as
+        a working walk right up until the count is compared against the
+        category's own ~88.
+
+        Load-more paging appends rather than replaces, so page N holds pages
+        1..N. _advanced() fingerprints card COUNT alongside the first few
+        hrefs, so a grid growing 24 -> 48 registers as a real advance even
+        though the leading cards never move, and _dedupe drops the repeats.
+        """
+        assert PROFILES["gamepookie"].next_page[0] == "[data-hook='load-more-button']"
+
+    def test_gamepookie_scrolls_far_enough_to_reach_that_button(self) -> None:
+        """The scroll is required BY the button, not a general nicety.
+
+        It sits below the grid, so there is nothing to click until the page has
+        been scrolled to the bottom -- and the grid gets longer every time it
+        is pressed.
+        """
+        assert PROFILES["gamepookie"].scroll_passes > 1
+
+    def test_a_store_paged_by_clicking_declares_no_inert_page_parameter(self) -> None:
+        """A {p} that does nothing is worse than no {p}.
+
+        uses_click_paging() already routes past it, so the parameter changes no
+        behaviour -- it just asserts in the config that a mechanism exists when
+        it does not, which is what sent this store's diagnosis down the
+        pagination path instead of the load-more one.
+        """
+        from switch_tracker.config.stores import STORES
+
+        store = next(s for s in STORES if s.id == "gamepookie")
+        assert all("{p}" not in url for url in store.search_urls)
+
     @pytest.mark.parametrize("store_id", ["gamenation", "mcubegames"])
     def test_click_paginated_stores_declare_a_next_control(self, store_id: str) -> None:
         """Confirmed by diagnostics: pages 1/2/3 came back byte-identical.
@@ -89,13 +128,35 @@ class TestProfiles:
         assert [k for k, v in PROFILES.items() if v.cookies] == ["playasia"]
 
 
-    def test_every_store_but_play_asia_keeps_the_default_page_mechanics(self) -> None:
+    #: field -> the stores allowed to depart from its default, and nothing else.
+    #:
+    #: This replaces a blanket "every store except playasia" exemption. The
+    #: guard's purpose is unchanged and is NOT "only one store may differ" --
+    #: it is that a departure must be a decision somebody made and can point at
+    #: evidence for. Listing them per field keeps that true while allowing a
+    #: second store to opt into ONE mechanic without silently unlocking four
+    #: others for itself.
+    PAGE_MECHANIC_OPT_INS: ClassVar[dict[str, set[str]]] = {
+        "wait_until": {"playasia"},
+        "scroll_passes": {"playasia", "gamepookie"},
+        "scroll_settle_ms": {"playasia", "gamepookie"},
+        "reject_url_parts": {"playasia"},
+        "require_digit_in_url": {"playasia"},
+    }
+
+    def test_only_the_listed_stores_depart_from_the_default_page_mechanics(self) -> None:
         """The regression contract for the per-store page-mechanics fields.
 
-        They exist so ONE store can differ. If a second profile starts setting
-        them this test fails, which is the point: it forces a deliberate
-        decision instead of a quiet drift where six stores each acquire a
-        slightly different wait strategy nobody chose as a whole.
+        If a profile starts setting one of these without being named above,
+        this fails -- which is the point. It forces a deliberate decision
+        instead of a quiet drift where six stores each acquire a slightly
+        different wait strategy nobody chose as a whole.
+
+        GamePookie's entry is evidence-backed, not a preference: a live
+        --pages 3 run extracted exactly FIVE products from every page of a
+        category reporting ~88. Wix extends the grid as you scroll, and the
+        default single proportional jump lands at 60% of a document only five
+        cards tall, so it never reaches far enough to pull the next batch.
         """
         defaults = {
             "wait_until": "domcontentloaded",
@@ -105,10 +166,110 @@ class TestProfiles:
             "require_digit_in_url": False,
         }
         for store_id, profile in PROFILES.items():
-            if store_id == "playasia":
-                continue
             for field, expected in defaults.items():
+                if store_id in self.PAGE_MECHANIC_OPT_INS[field]:
+                    continue
                 assert getattr(profile, field) == expected, f"{store_id}.{field}"
+
+    def test_a_listed_store_actually_uses_the_opt_in_it_claims(self) -> None:
+        """The other half, or the list above rots into a permission slip.
+
+        An entry that no longer corresponds to a real departure should be
+        deleted, not left granting a store the right to drift later.
+        """
+        defaults = {
+            "wait_until": "domcontentloaded",
+            "scroll_passes": 1,
+            "scroll_settle_ms": 0,
+            "reject_url_parts": (),
+            "require_digit_in_url": False,
+        }
+        for field, store_ids in self.PAGE_MECHANIC_OPT_INS.items():
+            for store_id in store_ids:
+                assert getattr(PROFILES[store_id], field) != defaults[field], (
+                    f"{store_id} is listed as opting out of {field} but still uses the default"
+                )
+
+    def test_cex_derives_its_sku_from_the_query_parameter(self) -> None:
+        """The bug a live run found: 69 products scraped, ONE kept.
+
+        Every CeX URL is /product-detail?id=NNNN. The path tail is therefore
+        the same string for the entire catalogue, and UNIQUE(store_id, sku)
+        folded the whole shop into a single listing -- while the run still
+        reported Ok, because nothing in the pipeline treats "everything
+        deduped into one row" as an error.
+        """
+        assert PROFILES["cex_in"].sku_url_params == ("id",)
+
+    def test_no_other_store_keeps_query_parameters(self) -> None:
+        """Opt-in, because this function's job is a STABLE answer across runs.
+
+        A store whose URLs carry an unrelated ?id= tracking parameter would
+        have every SKU change the moment a global rule started reading it --
+        every price series restarting at one point, with no error anywhere.
+        """
+        assert [k for k, v in PROFILES.items() if v.sku_url_params] == ["cex_in"]
+
+    def test_cex_leads_with_the_selector_confirmed_against_the_live_page(self) -> None:
+        """A --diagnose-pager run scored the profile's own candidates.
+
+        "[data-testid='search-product-card']" -> 0, "article.product-card" -> 0,
+        "div.search-product-card" -> 17. The dead guesses are kept as trailing
+        fallbacks, because a site can revert, but a selector that matches
+        nothing must never sit ahead of one that works: from_selectors takes
+        the FIRST candidate that yields rows, and Play-Asia is this file's
+        standing record of what a wrong winner costs.
+        """
+        assert PROFILES["cex_in"].card[0] == "div.search-product-card"
+
+    #: store -> the results CONTAINER it waits on instead of one of its cards.
+    #:
+    #: A legitimate and sometimes better choice: Amazon's div.s-main-slot is
+    #: the results region, so it appears before any individual card does and
+    #: the wait ends sooner. Listed explicitly rather than allowed generally,
+    #: because "not a card selector" is also exactly what a ready that matches
+    #: NOTHING looks like from here -- and that costs the full timeout on
+    #: every page, silently.
+    READY_CONTAINERS: ClassVar[dict[str, str]] = {"amazon_in": "div.s-main-slot"}
+
+    def test_every_profiles_ready_selector_is_a_card_or_a_declared_container(self) -> None:
+        """A `ready` that matches nothing is a silent per-page tax.
+
+        wait_for_selector is wrapped in contextlib.suppress, so a container
+        that never appears does not fail -- it burns the full 15s timeout and
+        carries on. CeX shipped with a `ready` naming its two zero-matching
+        selector guesses and paid 15s of every 18.1s page for it, which is the
+        kind of cost that hides behind "browser stores are just slow".
+
+        Offline this cannot check what a selector MATCHES, only that it is one
+        the profile has some reason to believe in. Tying it to the card list
+        is what makes that meaningful: the cards are the part of a profile
+        that gets corrected when a store breaks, so a repair fixes both.
+        """
+        for store_id, profile in PROFILES.items():
+            if profile.ready is None:
+                continue
+            parts = {part.strip() for part in profile.ready.split(",")}
+            if profile.ready == self.READY_CONTAINERS.get(store_id):
+                continue
+            assert parts & set(profile.card), (
+                f"{store_id}.ready={profile.ready!r} is neither a declared card selector "
+                "nor its listed results container"
+            )
+
+    def test_a_declared_container_is_not_just_a_card_selector_in_disguise(self) -> None:
+        """Keeps the exemption list honest.
+
+        If a store's container becomes one of its card selectors, the entry
+        should be deleted rather than left standing as a blanket exemption
+        from the check above.
+        """
+        for store_id, container in self.READY_CONTAINERS.items():
+            profile = PROFILES[store_id]
+            assert profile.ready == container, f"{store_id}: stale container entry"
+            assert container not in profile.card, (
+                f"{store_id}: {container!r} is a card selector now -- drop the exemption"
+            )
 
 
 class TestConditionResolution:
@@ -424,7 +585,7 @@ class TestPagingPathSelection:
             # carries a real {p} and none declares a next-page control, which
             # is the combination that keeps them off the click path.
             "gameland": "url",
-            "gamepookie": "url",
+            "gamepookie": "click",
             "cex_in": "url",
         }
 

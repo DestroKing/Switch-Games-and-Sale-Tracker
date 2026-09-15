@@ -1651,11 +1651,27 @@ month — only the live site can:
 ```bash
 uv run python scripts/scrape_check.py playasia --pages 3
 uv run python scripts/scrape_check.py e2zstore --headful    # watch it happen
+uv run python scripts/category_check.py                     # feed stores' category slugs
+uv run python scripts/diagnose_extraction.py gamepookie     # why did N rows become M?
 ```
 
-This drives the **shipped** adapter and the **shipped** profile on purpose. A checker
+All three drive the **shipped** adapter and the **shipped** profile on purpose. A checker
 carrying its own private copy of a store profile can pass while the collector fails on
 the same page.
+
+They answer different questions. `scrape_check` walks a browser store the way a real run
+does. `category_check` asks a feed store's own API for a real product count per configured
+slug — the number that otherwise vanishes into `woocommerce.py`'s per-category total, so a
+wrong slug in three contributes zero to both sides of the completeness check and reports
+nothing. `diagnose_extraction` explains a *gap*: which of the four layers (§3.6) actually
+won, how many rows each one offers, where the survivors are lost, and whether page 2
+differs from page 1 at all.
+
+That last one exists because of a real trap. `extract()` returns the moment JSON-LD
+succeeds, so a page carrying five products in a schema.org block and twenty-four in the
+DOM yields **five** — and nothing anywhere says the CSS selectors were never consulted.
+It also prints only to the console, never to a file, because the machine that can reach a
+store is often not the machine that can share a dump.
 
 Prefer a disposable database while experimenting:
 

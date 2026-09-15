@@ -141,6 +141,24 @@ class StoreProfile:
     #: so silently merging them is data loss, not a cosmetic duplicate.
     sku_includes_region: bool = False
 
+    #: Query parameters that ARE the product id on this store. Two effects,
+    #: and both are needed or neither helps: the SKU is derived from them
+    #: (see core/skus.sku_from_url), and they are the ONLY query parameters
+    #: kept on the stored URL.
+    #:
+    #: CeX routes its whole catalogue through ``/product-detail?id=NNNN``.
+    #: Stripping the query, which is right for every other store, leaves every
+    #: product with the path tail "product-detail" -- so UNIQUE(store_id, sku)
+    #: folds the entire shop into ONE listing and the stored URL points at a
+    #: page that does not exist. A live run scraped 69 products and kept 1,
+    #: reporting Ok.
+    #:
+    #: A WHITELIST rather than "keep the query string": session ids and
+    #: tracking parameters churn between runs, and letting those into either
+    #: the SKU or the URL mints a brand-new listing every run, restarting every
+    #: price series at one point with nothing reporting an error.
+    sku_url_params: tuple[str, ...] = ()
+
 
 PROFILES: dict[str, StoreProfile] = {
     "amazon_in": StoreProfile(
@@ -390,6 +408,28 @@ PROFILES: dict[str, StoreProfile] = {
         out_of_stock=(":has-text('Out of Stock')",),
         ready="[data-hook='product-item-root']",
         platform_hint=Platform.SWITCH,
+        # This store has NO pagination. It has a "Load more" button at the end
+        # of the grid, confirmed by eye on the live site -- which is why
+        # ?page=2 existed as a link and still returned the same products, and
+        # why every page of a --pages 3 run came back identical.
+        #
+        # Load-more paging differs from every other click-paged store here in
+        # one way worth knowing: it APPENDS rather than replaces, so page N
+        # contains pages 1..N. That is already handled -- _advanced()
+        # fingerprints card COUNT as well as the first few hrefs, so a grid
+        # growing 24 -> 48 reads as a real advance even though the leading
+        # cards never change, and _dedupe collapses the repeats.
+        next_page=(
+            "[data-hook='load-more-button']",
+            "button[data-hook='load-more-button']",
+            "button:has-text('Load More')",
+        ),
+        # Required BY the button, not merely helpful: it sits below the grid,
+        # so the page has to be scrolled to the bottom before there is anything
+        # to click. A single proportional jump lands mid-document on a grid
+        # that grows every time the button is pressed.
+        scroll_passes=4,
+        scroll_settle_ms=600,
         # NOT Region.IN, and this is the load-bearing setting for this store.
         # GamePookie is an importer: US, Asian and Japanese pressings sit in the
         # same category as domestic stock, and most listings never say which.
@@ -412,12 +452,23 @@ PROFILES: dict[str, StoreProfile] = {
         # "Fix a broken store". An empty profile would fail identically while
         # producing a worse dump. Replace these from that dump before treating
         # a cex_in run as trustworthy.
-        card=("[data-testid='search-product-card']", "article.product-card", "div.search-product-card"),
+        # CONFIRMED live, narrowest-first. A --diagnose-pager run reported
+        # "[data-testid='search-product-card']" -> 0 and "article.product-card"
+        # -> 0, with "div.search-product-card" -> 17. The two guesses stay as
+        # trailing fallbacks (a site can change back) but must not sit AHEAD of
+        # the one that works: from_selectors takes the first selector that
+        # yields rows, and Play-Asia is the standing lesson in what a wrong
+        # winner costs -- see this file's playasia card= comment.
+        card=("div.search-product-card", "[data-testid='search-product-card']", "article.product-card"),
         title=("[data-testid='product-title']", "h2.card-title", ".product-main-title"),
         price=("[data-testid='sell-price']", ".product-main-price", ".price"),
         link=("a[href*='/product-detail']", "a[href*='/product/']"),
         out_of_stock=(":has-text('Out of Stock')", ":has-text('Sold Out')"),
-        ready="[data-testid='search-product-card'], article.product-card",
+        # Was the two zero-matching guesses above, which cost the FULL 15s
+        # wait_for_selector timeout on every page for a container that was
+        # already there. Measured: 18.1s per page, near-identical across six
+        # pages -- 15s of that was this.
+        ready="div.search-product-card",
         platform_hint=Platform.SWITCH,
         # ASSERTED, not inferred, and the only store that does this. CeX deals
         # exclusively in pre-owned stock, and precisely because that is its
@@ -426,6 +477,10 @@ PROFILES: dict[str, StoreProfile] = {
         # catalogue. Card text does not rescue it either; there is no badge to
         # find. The fact lives with the retailer, so it is configured here.
         default_condition=Condition.PRE_OWNED,
+        # Confirmed live: a --pages 3 run scraped 69 products and kept ONE.
+        # Every CeX URL is /product-detail?id=NNNN, so the path tail is the
+        # same string for the whole catalogue and dedupe collapsed all of it.
+        sku_url_params=("id",),
     ),
 }
 
