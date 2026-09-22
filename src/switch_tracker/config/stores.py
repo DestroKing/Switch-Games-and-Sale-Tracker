@@ -76,15 +76,15 @@ STORES: tuple[StoreConfig, ...] = (
         id="hgworld",
         name="HG World",
         base_url="https://hgworld.in",
-        kind=AdapterKind.SHOPIFY,
+        kind=AdapterKind.WOOCOMMERCE,
         currency="INR",
         tier=2,
         enabled=True,
         platform_hint=Platform.SWITCH,
-        collections=("nintendo-games",),
+        collections=("gaming-tittle/nintendo-games",),
         note=(
-            "Probe's category listing missed this at first: the store has 100+ categories and "
-            "the fetch was not paginated deep enough to reach it."
+            "The games category shares its slug with a Nintendo accessories category; "
+            "resolve its full WooCommerce category path."
         ),
     ),
     StoreConfig(
@@ -289,7 +289,7 @@ STORES: tuple[StoreConfig, ...] = (
         enabled=True,
         platform_hint=Platform.SWITCH,
         search_urls=(
-            "https://www.flipkart.com/gaming/games/physical-game/pr?sid=4rr%2Cfa6%2C32v"
+            "https://www.flipkart.com/gaming-products/games/physical-game/pr?sid=4rr%2Cfa6%2C32v"
             "&marketplace=FLIPKART&p%5B%5D=facets.platform%255B%255D%3DSwitch"
             "&p%5B%5D=facets.platform%255B%255D%3DSwitch%2B2&page={p}",
         ),

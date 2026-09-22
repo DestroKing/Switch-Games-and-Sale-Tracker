@@ -53,6 +53,8 @@ class WooAdapter:
             if store.collections
             else [None]
         )
+        if any(category == "" for category in category_values):
+            return Failed("configured product category path could not be resolved")
 
         listings: list[RawListing] = []
         raw_fetched = 0
@@ -133,9 +135,32 @@ class WooAdapter:
         the numeric id first is what works everywhere; the slug remains the
         fallback for installs that do not expose product_cat.
         """
+        parts = slug.strip("/").split("/")
         terms = await self._client.get_json(
-            f"{store.base_url}/wp-json/wp/v2/product_cat?slug={quote(slug)}"
+            f"{store.base_url}/wp-json/wp/v2/product_cat?slug={quote(parts[-1])}&per_page=100"
         )
+        if len(parts) > 1 and isinstance(terms, list):
+            for term in terms:
+                if not isinstance(term, dict):
+                    continue
+                parent_id = term.get("parent")
+                matched = True
+                for parent_slug in reversed(parts[:-1]):
+                    if not isinstance(parent_id, int) or parent_id <= 0:
+                        matched = False
+                        break
+                    parent = await self._client.get_json(
+                        f"{store.base_url}/wp-json/wp/v2/product_cat/{parent_id}"
+                    )
+                    if not isinstance(parent, dict) or parent.get("slug") != parent_slug:
+                        matched = False
+                        break
+                    parent_id = parent.get("parent")
+                if matched and term.get("id") is not None:
+                    return str(term["id"])
+            # A path is explicitly disambiguating duplicate slugs. Never query
+            # the unscoped slug here: it can silently collect accessories.
+            return ""
         if isinstance(terms, list) and terms and isinstance(terms[0], dict):
             term_id = terms[0].get("id")
             if term_id is not None:

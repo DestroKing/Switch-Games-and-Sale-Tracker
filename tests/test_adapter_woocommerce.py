@@ -81,6 +81,32 @@ class TestPathDiscovery:
 
 
 class TestCategoryResolution:
+    async def test_full_path_disambiguates_duplicate_category_slugs(self, adapter, server) -> None:
+        base, recorder = server
+        recorder.plan(TERMS, (200, json.dumps([
+            {"id": 11, "slug": "nintendo-games", "parent": 90},
+            {"id": 42, "slug": "nintendo-games", "parent": 80},
+        ]), {"content-type": "application/json"}))
+        recorder.plan(f"{TERMS}/90", (200, json.dumps({"slug": "nintendo-accessories", "parent": 0}), {}))
+        recorder.plan(f"{TERMS}/80", (200, json.dumps({"slug": "gaming-tittle", "parent": 0}), {}))
+        recorder.plan(V1, page(product(1, "Zelda Nintendo Switch Game")))
+        result = await adapter.fetch(
+            store_at(base, collections=("gaming-tittle/nintendo-games",)), NullSink()
+        )
+        assert isinstance(result, Ok)
+        assert any("category=42" in hit for hit in recorder.hits)
+        assert not any("category=11" in hit for hit in recorder.hits)
+
+    async def test_unresolved_full_path_does_not_collect_unrelated_products(self, adapter, server) -> None:
+        base, recorder = server
+        recorder.plan(TERMS, (200, "[]", {"content-type": "application/json"}))
+        recorder.plan(V1, page(product(1, "Zelda Nintendo Switch Game")))
+        result = await adapter.fetch(
+            store_at(base, collections=("gaming-tittle/nintendo-games",)), NullSink()
+        )
+        assert isinstance(result, Failed)
+        assert not any("&page=1" in hit for hit in recorder.hits)
+
     async def test_resolves_a_slug_to_its_numeric_term_id(self, adapter, server) -> None:
         """Filtering by raw slug silently returns zero on some installs.
 
