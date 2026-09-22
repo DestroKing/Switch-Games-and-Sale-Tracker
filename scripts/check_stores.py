@@ -34,8 +34,13 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import pathlib
+import re
+import sqlite3
+import textwrap
 import time
 
+from switch_tracker import paths
 from switch_tracker.adapters.registry import build_registry
 from switch_tracker.config import overrides
 from switch_tracker.core.http import PoliteClient
@@ -98,6 +103,86 @@ def audit(store: StoreConfig, listings: tuple[RawListing, ...], raw: int) -> lis
     return warnings
 
 
+def _echo_diagnostics(store_id: str, since: float) -> None:
+    """Print what the adapter wrote to disk, instead of leaving it in a file.
+
+    The redirect trace and the HTML dump are the only evidence that explains a
+    navigation failure, and they were written where nobody reading a console
+    would find them -- useless to anyone who cannot open the data directory or
+    attach a file. Everything here goes to stdout so the whole diagnosis can be
+    copied out of a terminal.
+
+    Filtered by mtime rather than by deleting the directory first: a stale trace
+    from an earlier run is worse than no trace, but destroying a store's history
+    to guarantee freshness is not this script's business.
+    """
+    directory = paths.diagnostics_dir()
+    written = [
+        path
+        for path in sorted(directory.glob(f"{store_id}*"))
+        if path.is_file() and path.stat().st_mtime >= since
+    ]
+    if not written:
+        return
+
+    print(f"\n    -- diagnostics this run wrote ({directory}) --")
+    for path in written:
+        if path.suffix == ".json":
+            print(f"      {path.name}")
+            try:
+                trace = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, ValueError) as exc:
+                print(f"        unreadable: {exc}")
+                continue
+            print(f"        requested: {trace.get('requested_url')}")
+            print(f"        ended at : {trace.get('final_url')}")
+            print(f"        error    : {trace.get('error')}")
+            hops = trace.get("redirects") or []
+            print(f"        {len(hops)} navigation response(s):")
+            for hop in hops:
+                location = hop.get("location") or ""
+                arrow = f"  -> {location}" if location else ""
+                print(f"          {hop.get('status')}  {hop.get('url')}{arrow}")
+        elif path.suffix in (".html", ".htm"):
+            _echo_html(path)
+
+
+#: Markers that say WHY a page is not the catalogue, in the order worth reporting.
+_PAGE_MARKERS = (
+    ("Just a moment", "Cloudflare interstitial"),
+    ("cf-browser-verification", "Cloudflare challenge"),
+    ("captcha", "CAPTCHA"),
+    ("Access Denied", "access denied"),
+    ("Please enable JavaScript", "JS-gate"),
+    ("window.location", "client-side redirect"),
+    ("<meta http-equiv=\"refresh\"", "meta-refresh redirect"),
+    ("Login", "login wall"),
+)
+
+
+def _echo_html(path: pathlib.Path) -> None:
+    """A summary of a dumped page, never the page itself.
+
+    A Flipkart results dump is a few hundred KB of generated markup. What
+    identifies it is the title, the size, and which interstitial markers appear
+    -- pasting the document would bury all three.
+    """
+    try:
+        html = path.read_text(encoding="utf-8", errors="replace")
+    except OSError as exc:
+        print(f"      {path.name}: unreadable: {exc}")
+        return
+    title = re.search(r"<title[^>]*>(.*?)</title>", html, re.IGNORECASE | re.DOTALL)
+    print(f"      {path.name}  {len(html)} chars")
+    print(f"        title: {(title.group(1).strip()[:120] if title else '(none)')!r}")
+    found = [name for marker, name in _PAGE_MARKERS if marker.lower() in html.lower()]
+    print(f"        markers: {', '.join(found) if found else '(none of the known interstitials)'}")
+    # Visible text is what distinguishes an error document from a real page.
+    text = re.sub(r"<(script|style)[^>]*>.*?</\1>", " ", html, flags=re.IGNORECASE | re.DOTALL)
+    text = " ".join(re.sub(r"<[^>]+>", " ", text).split())
+    print(f"        text starts: {text[:300]!r}")
+
+
 async def run_store(store: StoreConfig, *, pages: int, headful: bool) -> bool:
     """Collect one store for real. True when it came back usable."""
     client = PoliteClient()
@@ -123,9 +208,36 @@ async def run_store(store: StoreConfig, *, pages: int, headful: bool) -> bool:
 
                 profile_module.PROFILES[store.id] = replace(profile, max_pages=pages)
 
+        restore: tuple[object, str] | None = None
+        if store.id == "flipkart":
+            # Which URL each page actually used, and whether it came from the
+            # store's own pager or from the {p} template. The template carries
+            # double-encoded filter params, so "fell back" vs "pager href" is
+            # the difference between two different navigations -- and only one
+            # of them is what a browser would really request.
+            from switch_tracker.adapters.browser import adapter as browser_module
+
+            original = browser_module._flipkart_page_url
+
+            async def traced(page: object, template: str, number: int) -> str:
+                chosen: str = await original(page, template, number)  # type: ignore[operator]
+                fallback = template.replace("{p}", str(number))
+                how = "template fallback" if chosen == fallback else "store's own pager href"
+                print(f"      p{number} navigating via {how}")
+                print(f"        {chosen}")
+                return chosen
+
+            browser_module._flipkart_page_url = traced  # type: ignore[assignment]
+            restore = (browser_module, "_flipkart_page_url")
+
         sink = PrintSink()
         started = time.perf_counter()
-        outcome = await adapter.fetch(store, sink)
+        wall_start = time.time()
+        try:
+            outcome = await adapter.fetch(store, sink)
+        finally:
+            if restore is not None:
+                setattr(restore[0], restore[1], original)
         took = time.perf_counter() - started
     finally:
         await client.aclose()
@@ -145,6 +257,7 @@ async def run_store(store: StoreConfig, *, pages: int, headful: bool) -> bool:
             f"      e.g. {sample.title[:60]!r} {sample.native_currency} {sample.native_price} "
             f"stock={sample.in_stock} cond={sample.condition} {sample.url[:60]}"
         )
+    _echo_diagnostics(store.id, wall_start)
     return isinstance(outcome, (Ok, Partial)) and bool(listings)
 
 
@@ -228,6 +341,36 @@ async def _alternates(store: StoreConfig, slug: str, cat: object) -> None:
             if not result.ok:
                 print(f"                    {seen}")
 
+        # The OTHER adapter family. HG World ran as SHOPIFY for a month and was
+        # switched to WOOCOMMERCE in one commit that also changed its
+        # categories; the WooCommerce route then turned out to be blocked at
+        # Cloudflare. So "which platform does this host actually serve" is a
+        # live question for any store whose kind has been changed by hand, and
+        # answering it costs three requests.
+        print("\n    -- the other adapter family: Shopify product feed --")
+        for label, url in (
+            ("whole catalogue /products.json", f"{base}/products.json?limit=1"),
+            (f"collection {slug!r}", f"{base}/collections/{slug}/products.json?limit=1"),
+        ):
+            result = await client.get(url, {"accept": "application/json"})
+            shape = ""
+            if result.ok:
+                try:
+                    body = json.loads(result.body)
+                except ValueError:
+                    shape = "  200 but NOT JSON (a WordPress 404 page answers 200 like this)"
+                else:
+                    if isinstance(body, dict):
+                        products = body.get("products")
+                        shape = (
+                            f"  JSON dict, products={len(products)}"
+                            if isinstance(products, list)
+                            else f"  JSON dict, keys={sorted(body)[:8]}"
+                        )
+                    else:
+                        shape = f"  JSON {type(body).__name__}, not the expected dict"
+            print(f"      {result.status or 'NO RESPONSE':>12}  {label}{shape}")
+
         # The payload shape local filtering would have to match on.
         sample = await client.get_json(f"{base}{v1}?per_page=1")
         if isinstance(sample, list) and sample and isinstance(sample[0], dict):
@@ -240,6 +383,61 @@ async def _alternates(store: StoreConfig, slug: str, cat: object) -> None:
         await client.aclose()
 
 
+def history(store_id: str, limit: int) -> None:
+    """Where this store's settings REALLY come from, and every outcome on record.
+
+    Written because a diagnosis went wrong on exactly this point. The repo also
+    contains a ``stores.local.json`` at its root, left over from the TypeScript
+    version's bare relative path -- and the application never reads it.
+    :func:`paths.overrides_path` resolves under the DATA directory
+    (``%LOCALAPPDATA%/switch-tracker`` on Windows), so reading the checked-in
+    copy and reasoning about it gives a confidently wrong answer about which
+    adapter a store has been using. Print the resolved path, not the tracked one.
+
+    ``kind`` is overridable and ``collections`` is not (see overrides._FIELDS),
+    which is why the effective pair is printed together: a store's configured
+    categories can come from stores.py while its adapter comes from a probe
+    correction written months ago.
+    """
+    print(f"    data_dir   {paths.data_dir()}")
+    override_path = paths.overrides_path()
+    print(f"    overrides  {override_path}  exists={override_path.exists()}")
+    if override_path.exists():
+        print(textwrap.indent(override_path.read_text(encoding="utf-8").strip(), "      "))
+    else:
+        print("      (absent -- every store's kind comes from stores.py as shipped)")
+
+    store = next((s for s in overrides.active_stores() if s.id == store_id), None)
+    if store is not None:
+        print(f"    EFFECTIVE  kind={store.kind.value} collections={store.collections}")
+
+    db = paths.db_path()
+    print(f"    db         {db}  exists={db.exists()}")
+    if not db.exists():
+        return
+    # Read-only URI: this is a live database and a hand-run diagnostic has no
+    # business taking a write lock on it.
+    connection = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+    try:
+        rows = connection.execute(
+            "SELECT r.started_at, rs.status, rs.listings_found, rs.detail "
+            "FROM run_store rs JOIN run r ON r.id = rs.run_id "
+            "WHERE rs.store_id = ? ORDER BY r.started_at DESC LIMIT ?",
+            (store_id, limit),
+        ).fetchall()
+    finally:
+        connection.close()
+
+    if not rows:
+        print(f"    no run_store rows for {store_id} -- it has never been collected here")
+        return
+    print(f"    last {len(rows)} run(s), newest first:")
+    for started, status, found, detail in rows:
+        print(f"      {started}  {status:<8} {found:>5} listings")
+        if detail:
+            print(f"                 {' '.join(str(detail).split())[:180]}")
+
+
 async def main() -> int:
     parser = argparse.ArgumentParser(description="Check live stores before a release.")
     parser.add_argument("store_ids", nargs="*", help="store ids; default is every enabled store")
@@ -249,6 +447,12 @@ async def main() -> int:
     parser.add_argument("--probe", action="store_true", help="isolate an HTTP refusal instead of running")
     parser.add_argument("--slug", help="category slug for --probe; defaults to the first collection")
     parser.add_argument("--include-disabled", action="store_true")
+    parser.add_argument(
+        "--history",
+        action="store_true",
+        help="print where this store's settings resolve from, plus its recorded run outcomes",
+    )
+    parser.add_argument("--limit", type=int, default=15, help="how many runs --history shows")
     args = parser.parse_args()
 
     stores = [
@@ -269,11 +473,16 @@ async def main() -> int:
     failures: list[str] = []
     for store in stores:
         print(f"\n== {store.id} ({store.kind.value}) {store.base_url}")
+        if args.history:
+            history(store.id, args.limit)
+            continue
         if args.probe:
-            if store.kind is AdapterKind.WOOCOMMERCE:
+            # Both feed kinds, not just the configured one: the point of a probe
+            # is often to find out that the configured kind is wrong.
+            if store.kind in (AdapterKind.WOOCOMMERCE, AdapterKind.SHOPIFY):
                 await probe(store, args.slug)
             else:
-                print(f"    --probe covers WOOCOMMERCE stores; {store.id} is {store.kind.value}")
+                print(f"    --probe covers feed stores; {store.id} is {store.kind.value}")
             continue
         try:
             if not await run_store(store, pages=args.pages, headful=args.headful):
@@ -282,7 +491,7 @@ async def main() -> int:
             print(f"    RAISED {type(exc).__name__}: {exc}")
             failures.append(store.id)
 
-    if args.probe:
+    if args.probe or args.history:
         return 0
     print(f"\n{len(stores) - len(failures)}/{len(stores)} stores usable")
     if failures:
