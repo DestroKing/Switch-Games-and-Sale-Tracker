@@ -609,7 +609,7 @@ async function search(append = false) {
 
   const head = COLS.map(headerCell).join("");
 
-  const body = rows.map((r) => {
+  const rowHtml = (r) => {
     const moved = movementById.get(r.id);
     const isDeal = moved && moved.pct < 0 && !moved.fx_suspect;
     return `<tr class="${isDeal ? "is-deal" : ""}">
@@ -625,28 +625,51 @@ async function search(append = false) {
       <td class="num price">${inr(r.inr_price)}</td>
       ${deltaCell(r)}
     </tr>`;
-  }).join("");
+  };
+
+  // Appending paints ONLY the new rows, into the <tbody> that is already on
+  // screen. Reassigning innerHTML rebuilds every row including the ones you
+  // were reading, and the browser has no anchor left to hold, so the viewport
+  // snaps to the top -- which made "Load 100 more" cost you the scroll back.
+  const tbody = append ? $("list").querySelector("tbody") : null;
+  const body = (tbody ? data.rows : rows).map(rowHtml).join("");
 
   const more = rows.length < data.total
     ? `<button class="more" id="more">Load ${Math.min(100, data.total - rows.length)} more</button>`
     : "";
 
-  $("list").innerHTML = rows.length
-    ? `<div class="tablewrap"><table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>${more}`
-    : `<div class="empty"><b>Nothing matches those filters</b>
-       Try clearing one — the chips above show what is currently narrowing the list.</div>`;
+  if (tbody) {
+    // Read focus BEFORE the old button is removed: someone who reached it by
+    // keyboard must not be dropped onto <body>. preventScroll, because
+    // restoring focus would otherwise scroll past the rows just loaded.
+    const refocus = document.activeElement && document.activeElement.id === "more";
+    tbody.insertAdjacentHTML("beforeend", body);
+    const stale = $("more");
+    if (stale) stale.remove();
+    if (more) $("list").insertAdjacentHTML("beforeend", more);
+    if (refocus && $("more")) $("more").focus({ preventScroll: true });
+  } else {
+    $("list").innerHTML = rows.length
+      ? `<div class="tablewrap"><table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>${more}`
+      : `<div class="empty"><b>Nothing matches those filters</b>
+         Try clearing one — the chips above show what is currently narrowing the list.</div>`;
 
-  $("list").querySelectorAll("button.sort").forEach((button) => {
-    button.addEventListener("click", () => {
-      const key = button.dataset.sort;
-      // Re-query the SERVER. Re-sorting the rows already on screen would sort
-      // a subset and present it as the whole answer.
-      state.dir = state.sort === key && state.dir === "asc" ? "desc" : "asc";
-      state.sort = key;
-      state.offset = 0;
-      search();
+    // Bound on a full paint only. On append these buttons keep the DOM nodes
+    // they already have, so binding again would fire one sort click twice.
+    $("list").querySelectorAll("button.sort").forEach((button) => {
+      button.addEventListener("click", () => {
+        const key = button.dataset.sort;
+        // Re-query the SERVER. Re-sorting the rows already on screen would sort
+        // a subset and present it as the whole answer.
+        state.dir = state.sort === key && state.dir === "asc" ? "desc" : "asc";
+        state.sort = key;
+        state.offset = 0;
+        search();
+      });
     });
-  });
+  }
+
+  // Always rebound: this button is recreated on every paint, appended or not.
   const moreButton = $("more");
   if (moreButton) moreButton.addEventListener("click", () => {
     state.offset += 100;
