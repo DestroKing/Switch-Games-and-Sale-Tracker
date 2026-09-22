@@ -71,6 +71,24 @@ DEFAULT_TIME_BUDGET_S = 540.0
 _DEFAULT_WAIT_UNTIL: WaitUntil = "domcontentloaded"
 _GOTO_TIMEOUT_MS = 45_000
 
+#: Flipkart answers a perfectly valid page URL with a 301 to ITSELF once it
+#: decides to throttle a session -- observed as 19 byte-identical hops ending in
+#: ERR_TOO_MANY_REDIRECTS. It is a session verdict and not a malformed URL: the
+#: page it strikes MOVES between runs (p3 in one, p4 in the next with p5-p8
+#: collecting normally afterwards), and pages 1-2 of the identical shape always
+#: load. So the retry has to WAIT. Re-issuing instantly from a fresh tab, which
+#: is what this did before, meets exactly the same verdict.
+_REDIRECT_LOOP_BACKOFF_S = 8.0
+
+#: Consecutive pages that failed to NAVIGATE before the walk is abandoned.
+#:
+#: Bounded, because the two failure shapes need opposite responses and only a
+#: streak tells them apart. One struck page is transient -- skipping it recovers
+#: the rest of the catalogue, and ending the walk there is what threw away most
+#: of Flipkart's. A session blocked outright fails every page, and must stop
+#: rather than spend the whole time budget proving it.
+_MAX_NAV_FAILURES = 3
+
 
 async def _flipkart_page_url(page: Page, template: str, number: int) -> str:
     """Prefer the store's own pager URL without losing either platform filter."""
@@ -110,10 +128,15 @@ class BrowserAdapter:
         settle_ms: tuple[int, int] = (800, 1600),
         render_ms: int = 1200,
         time_budget_s: float = DEFAULT_TIME_BUDGET_S,
+        redirect_backoff_s: float = _REDIRECT_LOOP_BACKOFF_S,
     ) -> None:
         self._provider = provider
         self._profile_for = profile_for
         self._time_budget_s = time_budget_s
+        # Injected for the same reason as settle_ms below: a real shop needs
+        # the pause, a local test server does not, and paying it there buys no
+        # coverage.
+        self._redirect_backoff_s = redirect_backoff_s
         # Courtesy gap between pages. Was 2.5-5s, tuned for tiny independent
         # shops where that cost is free. A real 40-page category listing pays
         # it on every page, and for a headless browser session on a major site
@@ -182,6 +205,7 @@ class BrowserAdapter:
                 # look like "this one ran dry" the moment the second starts.
                 seen_skus: set[str] = set()
                 tracker = ProductivityTracker()
+                nav_failures = 0
                 for page_number in range(1, page_cap + 1):
                     try:
                         # The store's own pager href, when it has one. Kept
@@ -198,9 +222,12 @@ class BrowserAdapter:
                         except Exception:
                             if store.id != "flipkart":
                                 raise
-                            # Retry the SAME page once, with cookies retained but
-                            # no pending chrome-error navigation from the old tab.
+                            # WAIT, then retry on a fresh tab. The pause is the
+                            # load-bearing half: a redirect loop here is a
+                            # session verdict, so an instant re-issue -- fresh
+                            # tab or not -- collects the same one.
                             await page.close()
+                            await asyncio.sleep(self._redirect_backoff_s)
                             page = await context.new_page()
                             rows, method = await self._load_page(
                                 page, store, profile, template, page_number, resolved_url=target
@@ -211,13 +238,27 @@ class BrowserAdapter:
                         problems.append(f"p{page_number}: {type(exc).__name__}: {exc}")
                         if store.id == "flipkart":
                             problems.append(
-                                "same page failed after a fresh-tab retry; "
-                                f"redirect trace: diagnostics/flipkart-p{page_number}-navigation.json"
+                                f"p{page_number} failed after a backoff retry; trace: "
+                                f"diagnostics/flipkart-p{page_number}-navigation.json"
+                            )
+                        # SKIP the page; do NOT end the walk. This branch used
+                        # to break for Flipkart, on the assumption that a page
+                        # which failed twice would keep failing. A real run
+                        # disproved it: p4 was struck and p5 through p8 then
+                        # collected normally, so breaking here reported one bad
+                        # page by discarding two thirds of the catalogue.
+                        nav_failures += 1
+                        if nav_failures >= _MAX_NAV_FAILURES:
+                            problems.append(
+                                f"gave up after {nav_failures} consecutive navigation failures"
                             )
                             break
                         continue
 
                     methods.add(method)
+                    # Consecutive, so one struck page in the middle of an
+                    # otherwise healthy walk never accumulates toward the cap.
+                    nav_failures = 0
                     if not claimed_total_attempted:
                         claimed_total_attempted = True
                         claimed_total = read_claimed_total(await _body_text(page))

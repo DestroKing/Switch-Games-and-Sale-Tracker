@@ -16,9 +16,63 @@ reproduce in an older packaged build:
 - [ ] **Rebuild the exe** (`BUILD-EXE.bat`) and re-run — expected to clear all three.
 - [ ] Confirm with `scripts/check_stores.py hgworld flipkart` before rebuilding.
 
+## HG World: the real cause, found by `--probe` (resolved)
+
+The stale override was only half of it. Cloudflare **403s the Store API's
+`category=` parameter on this host by every available route** — term id, slug,
+v1 path, legacy path, `per_page` 100 and 10, and `collection-data?category=`.
+
+It is the parameter, not the word: `?note=category` answers 200. It is not rate
+limiting: a bare baseline repeated *after* the refusals still answers 200 with
+`x-wp-total=1596`. Both apparent escapes are dead ends —
+
+| Route | Status | Why it fails |
+|---|---|---|
+| `?category_id=<id>` | 200 | WordPress ignores unknown params — returns the **unfiltered** catalogue (verified: SteamOS PC, DJI mics) |
+| `wp/v2/product?product_cat=<id>` | 200 | Filters correctly (all 10 were Switch games) but carries **no price field** |
+
+- [x] Fetch hgworld **unscoped** (~16 pages, 1596 products) and let the
+      classifier sieve. `WooAdapter.fetch` already does this for
+      `collections=()`; no adapter change was needed.
+- [x] **Drop `platform_hint`** — mandatory companion, not cosmetic. Unscoped,
+      the classifier is the only sieve, and a hint means "assume Switch when
+      the text names no console", which relabels this general retailer's
+      accessories as games. Same reasoning as `designinfo`.
+- [x] Both properties pinned by tests, so re-adding either regresses loudly.
+
+## Flipkart: a moving redirect loop, and a `break` that made it worse
+
+The `--probe`-style redirect trace settled this. Flipkart answers a **valid**
+page URL with a `301` to the byte-identical URL, 19 hops, until Chromium gives
+up with `ERR_TOO_MANY_REDIRECTS`. Hop 1 is a legitimate `%2C`→`,`
+normalisation; every hop after it is the same URL redirecting to itself.
+
+It is a **session verdict, not a bad URL** — the page it strikes moves between
+runs:
+
+| Run | Outcome |
+|---|---|
+| `--pages 3` | p1–p3 all clean |
+| full (older build) | p3 clean, **p4 struck**, p5–p8 collected normally |
+| full (current) | p1–p2 clean, **p3 struck** |
+
+That third run exposed the real bug: the flipkart branch `break`s on a failed
+page, so it stopped at p3 and returned 79 listings where the older
+continue-anyway build got 228.
+
+- [x] Retry now **waits** before re-issuing (`_REDIRECT_LOOP_BACKOFF_S`). A
+      fresh tab alone re-issues instantly and collects the same verdict.
+- [x] A struck page is **skipped, not fatal** — the walk carries on.
+- [x] Bounded at `_MAX_NAV_FAILURES = 3` *consecutive* failures, because only a
+      streak separates "one struck page" from "session blocked outright"; the
+      latter must stop rather than walk to `page_cap`.
+- [x] Both shapes covered by runnable mock tests in `test_flipkart_recovery.py`
+      (no browser needed).
+- [ ] Re-run `check_stores.py flipkart` to confirm it now reaches ~273 raw.
+
 ## Genuinely still open
 
-- [ ] **`probe` can mis-detect Shopify (root cause of the bad hgworld override).**
+- [x] **`probe` can mis-detect Shopify (root cause of the bad hgworld override).**
       `probe.py:176-178` `_contains()` substring-matches the raw body for
       `"products"`. Any WordPress/Woo page whose inline JS contains that literal
       is detected as Shopify, and `run()` then writes `kind=SHOPIFY` into
