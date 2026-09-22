@@ -573,7 +573,7 @@ function deltaCell(row) {
   // a previous observation. Fall back to /api/movers for compatibility.
   const pct = row.change_pct ?? moved?.pct;
 
-  if (pct === null || pct === undefined) {
+  if (pct === null || pct === undefined || pct === 0) {
     return `<td class="num dim">—</td>`;
   }
 
@@ -586,7 +586,7 @@ function deltaCell(row) {
     : "";
 
   return `<td class="num"><span class="delta ${down ? "down" : "up"}"${title}>` +
-         `${Math.abs(pct).toFixed(1)}%</span></td>`;
+         `${Math.abs(pct) < 0.05 ? "<0.1" : Math.abs(pct).toFixed(1)}%</span></td>`;
 }
 
 async function search(append = false) {

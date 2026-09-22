@@ -180,6 +180,12 @@ def listings(conn: sqlite3.Connection, query: ListingQuery) -> dict[str, Any]:
             params.extend(values)
     if query.in_stock_only:
         where.append("latest.in_stock = 1")
+    if query.sort == "change":
+        # Sorting by movement is most useful as a view of actual movers.
+        # Apply this before COUNT and LIMIT so pagination stays consistent.
+        where.append("previous.inr_price IS NOT NULL")
+        where.append("previous.inr_price != 0")
+        where.append("latest.inr_price != previous.inr_price")
 
     clause = f"WHERE {' AND '.join(where)}" if where else ""
     # `latest` is a JOINED ROW, not a projected value. It has to be: in_stock_only

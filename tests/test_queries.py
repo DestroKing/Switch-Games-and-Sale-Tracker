@@ -293,6 +293,7 @@ def _oracle_listings(conn: sqlite3.Connection, q: queries.ListingQuery) -> dict:
         FROM listing l
         JOIN store s ON s.id = l.store_id
         JOIN latest ON latest.listing_id = l.id AND latest.rn = 1
+        LEFT JOIN latest previous ON previous.listing_id = l.id AND previous.rn = 2
         {clause}
     """
     total = conn.execute(
@@ -300,7 +301,11 @@ def _oracle_listings(conn: sqlite3.Connection, q: queries.ListingQuery) -> dict:
     rows = [dict(r) for r in conn.execute(
         f"{_ORACLE_LATEST_CTE} SELECT l.id, l.raw_title, l.url, l.region, l.platform, l.condition, "
         f"s.name AS store, latest.inr_price, latest.native_price, latest.native_currency, "
-        f"latest.in_stock, latest.captured_at {from_clause} "
+        f"latest.in_stock, latest.captured_at, "
+        f"CASE WHEN previous.inr_price IS NOT NULL AND previous.inr_price != 0 "
+        f"AND latest.inr_price IS NOT NULL "
+        f"THEN ((latest.inr_price - previous.inr_price) / previous.inr_price) * 100.0 "
+        f"ELSE NULL END AS change_pct {from_clause} "
         f"ORDER BY {q.sort_column()} {q.sort_direction()}, l.id ASC LIMIT ? OFFSET ?",
         [*params, q.safe_limit(), q.safe_offset()])]
     return {"total": total, "rows": rows, "offset": q.safe_offset(), "limit": q.safe_limit()}
@@ -330,6 +335,12 @@ def populated(conn: sqlite3.Connection) -> sqlite3.Connection:
         "INSERT INTO price_point (listing_id, run_id, captured_at, native_currency, "
         "native_price, inr_price, in_stock) VALUES (6,2,'2026-01-02T00:00:00Z','USD',49.99,NULL,1)")
     return conn
+
+
+def test_change_sort_shows_only_actual_movers(populated: sqlite3.Connection) -> None:
+    result = queries.listings(populated, queries.ListingQuery(sort="change"))
+    assert result["total"] == 2
+    assert {row["id"] for row in result["rows"]} == {1, 3}
 
 
 def _case_id(q: queries.ListingQuery) -> str:
@@ -478,4 +489,3 @@ class TestMultiValueFilters:
         hostile = ("amazon", "'); DROP TABLE listing; --")
         assert self._ids(queries.listings(spread, queries.ListingQuery(stores=hostile))) == {2, 4}
         assert spread.execute("SELECT COUNT(*) c FROM listing").fetchone()["c"] == 4
-

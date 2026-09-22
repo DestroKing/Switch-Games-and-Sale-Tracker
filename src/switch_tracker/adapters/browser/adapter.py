@@ -153,6 +153,7 @@ class BrowserAdapter:
                 # look like "this one ran dry" the moment the second starts.
                 seen_skus: set[str] = set()
                 tracker = ProductivityTracker()
+                flipkart_navigation_failures = 0
 
                 for page_number in range(1, page_cap + 1):
                     try:
@@ -163,8 +164,16 @@ class BrowserAdapter:
                         break
                     except Exception as exc:  # noqa: BLE001 - one bad page is not a dead store
                         problems.append(f"p{page_number}: {type(exc).__name__}: {exc}")
+                        if store.id == "flipkart":
+                            # A redirect/error document can leave this page in
+                            # a broken navigation state. Repeatedly asking it
+                            # for later pages only burns the store budget.
+                            flipkart_navigation_failures += 1
+                            if flipkart_navigation_failures >= 2:
+                                break
                         continue
 
+                    flipkart_navigation_failures = 0
                     methods.add(method)
                     if not claimed_total_attempted:
                         claimed_total_attempted = True
