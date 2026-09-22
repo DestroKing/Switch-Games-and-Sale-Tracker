@@ -81,10 +81,10 @@ STORES: tuple[StoreConfig, ...] = (
         tier=2,
         enabled=True,
         platform_hint=Platform.SWITCH,
-        collections=("gaming-tittle/nintendo-games",),
+        collections=("nintendo-games-gaming-titles", "nintendo-switch-2-games"),
         note=(
-            "The games category shares its slug with a Nintendo accessories category; "
-            "resolve its full WooCommerce category path."
+            "Verified WooCommerce games categories: Nintendo Games (4874) and Switch 2 (5105). "
+            "The separate nintendo-games slug (235) belongs under accessories."
         ),
     ),
     StoreConfig(

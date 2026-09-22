@@ -81,31 +81,21 @@ class TestPathDiscovery:
 
 
 class TestCategoryResolution:
-    async def test_full_path_disambiguates_duplicate_category_slugs(self, adapter, server) -> None:
-        base, recorder = server
-        recorder.plan(TERMS, (200, json.dumps([
-            {"id": 11, "slug": "nintendo-games", "parent": 90},
-            {"id": 42, "slug": "nintendo-games", "parent": 80},
-        ]), {"content-type": "application/json"}))
-        recorder.plan(f"{TERMS}/90", (200, json.dumps({"slug": "nintendo-accessories", "parent": 0}), {}))
-        recorder.plan(f"{TERMS}/80", (200, json.dumps({"slug": "gaming-tittle", "parent": 0}), {}))
-        recorder.plan(V1, page(product(1, "Zelda Nintendo Switch Game")))
-        result = await adapter.fetch(
-            store_at(base, collections=("gaming-tittle/nintendo-games",)), NullSink()
-        )
-        assert isinstance(result, Ok)
-        assert any("category=42" in hit for hit in recorder.hits)
-        assert not any("category=11" in hit for hit in recorder.hits)
+    async def test_hgworld_uses_verified_game_categories(self, adapter, server) -> None:
+        from switch_tracker.config.stores import STORES
 
-    async def test_unresolved_full_path_does_not_collect_unrelated_products(self, adapter, server) -> None:
         base, recorder = server
-        recorder.plan(TERMS, (200, "[]", {"content-type": "application/json"}))
-        recorder.plan(V1, page(product(1, "Zelda Nintendo Switch Game")))
-        result = await adapter.fetch(
-            store_at(base, collections=("gaming-tittle/nintendo-games",)), NullSink()
+        store = replace(next(s for s in STORES if s.id == "hgworld"), base_url=base)
+        assert store.collections == ("nintendo-games-gaming-titles", "nintendo-switch-2-games")
+        recorder.plan(TERMS,
+            (200, json.dumps([{"id": 4874, "slug": "nintendo-games-gaming-titles", "parent": 1101}]), {}),
+            (200, json.dumps([{"id": 5105, "slug": "nintendo-switch-2-games", "parent": 1101}]), {}),
         )
-        assert isinstance(result, Failed)
-        assert not any("&page=1" in hit for hit in recorder.hits)
+        recorder.plan(V1, page(product(1, "Zelda")))
+        result = await adapter.fetch(store, NullSink())
+        assert isinstance(result, Ok)
+        assert any("category=4874" in hit for hit in recorder.hits)
+        assert any("category=5105" in hit for hit in recorder.hits)
 
     async def test_resolves_a_slug_to_its_numeric_term_id(self, adapter, server) -> None:
         """Filtering by raw slug silently returns zero on some installs.
@@ -210,6 +200,25 @@ class TestCompleteness:
 
 
 class TestFailures:
+    async def test_product_http_failure_is_not_reported_as_empty_catalogue(self, adapter, server) -> None:
+        base, recorder = server
+        recorder.plan(V1, page(product(1, "Zelda")), (403, "Forbidden", {}))
+        result = await adapter.fetch(store_at(base), NullSink())
+        assert isinstance(result, Failed)
+        assert "HTTP 403" in result.reason
+        assert "no Switch products" not in result.reason
+
+    async def test_later_http_failure_keeps_collected_products(self, adapter, server) -> None:
+        base, recorder = server
+        recorder.plan_pages(V1,
+            page(*(product(i, f"Game {i} Switch") for i in range(100))),
+            (403, "Forbidden", {}),
+        )
+        result = await adapter.fetch(store_at(base), NullSink())
+        assert isinstance(result, Partial)
+        assert len(result.listings) == 100
+        assert "HTTP 403" in result.reason
+
     async def test_a_reachable_api_with_no_switch_products_is_a_failure(
         self, adapter, server
     ) -> None:
