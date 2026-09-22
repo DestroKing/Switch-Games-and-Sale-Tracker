@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 import time
 
 from switch_tracker.adapters.registry import build_registry
@@ -188,6 +189,55 @@ async def probe(store: StoreConfig, slug: str | None) -> None:
         "    per_page=100 refused but 10 fine => lower WooAdapter.PER_PAGE.\n"
         "    category refused but bare fine => the filter is what is blocked."
     )
+    await _alternates(store, slug, cat)
+
+
+async def _alternates(store: StoreConfig, slug: str, cat: object) -> None:
+    """Once ``category=`` is known to be refused, what is left?
+
+    Two questions, and they have very different costs. Is the block specific to
+    that ONE parameter -- in which case another route to the same filtered
+    query is cheap -- or does the edge refuse category filtering by any name,
+    leaving only "fetch the whole catalogue and filter it here"? Fetching
+    HG World's 1595 products to keep two categories is sixteen pages per run,
+    so it is worth one probe to find out it is unavoidable.
+
+    Also dumps a product's own ``categories`` block, because local filtering
+    can only be written against the fields the payload actually carries.
+    """
+    client = PoliteClient()
+    base, v1 = store.base_url, "/wp-json/wc/store/v1/products"
+    try:
+        print("\n    -- alternate routes to the same filtered query --")
+        for label, url in (
+            # Is the WAF matching the literal word, or this parameter's use?
+            ("harmless param merely CONTAINING 'category'", f"{base}{v1}?per_page=1&note=category"),
+            ("category= alone, no per_page/page", f"{base}{v1}?category={cat}"),
+            # Different parameter name, same intent.
+            ("Store API category_id=", f"{base}{v1}?per_page=10&category_id={cat}"),
+            # A different endpoint family entirely.
+            ("WP REST product?product_cat=", f"{base}/wp-json/wp/v2/product?product_cat={cat}&per_page=10"),
+            (
+                "WC Store products/collection-data",
+                f"{base}{v1}/collection-data?category={cat}",
+            ),
+        ):
+            result = await client.get(url, {"accept": "application/json"})
+            seen = {k: v for k, v in result.headers.items() if k in _TELLTALE}
+            print(f"      {result.status or 'NO RESPONSE':>12}  {label}")
+            if not result.ok:
+                print(f"                    {seen}")
+
+        # The payload shape local filtering would have to match on.
+        sample = await client.get_json(f"{base}{v1}?per_page=1")
+        if isinstance(sample, list) and sample and isinstance(sample[0], dict):
+            product = sample[0]
+            print("\n    -- one product, as the unfiltered endpoint returns it --")
+            print(f"      name={str(product.get('name'))[:70]!r}")
+            print(f"      categories={json.dumps(product.get('categories'), indent=8)[:900]}")
+            print(f"      top-level keys={sorted(product)}")
+    finally:
+        await client.aclose()
 
 
 async def main() -> int:
