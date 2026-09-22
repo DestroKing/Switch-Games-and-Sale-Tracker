@@ -22,7 +22,7 @@ async def test_retries_same_page_on_fresh_tab_and_preserves_rows(monkeypatch, re
     context.new_page.side_effect = [old_page, fresh_page]
     provider = AsyncMock()
     provider.new_context.return_value = context
-    adapter = BrowserAdapter(provider, settle_ms=(0, 0))
+    adapter = BrowserAdapter(provider, settle_ms=(0, 0), redirect_backoff_s=0.0)
     monkeypatch.setattr(module, "_body_text", AsyncMock(return_value=""))
     monkeypatch.setattr(module, "_flipkart_page_url", AsyncMock(return_value=store.search_urls[0]))
     first = Extracted("Mario Switch", 3000, "https://www.flipkart.com/mario/p/one", True)
@@ -30,13 +30,24 @@ async def test_retries_same_page_on_fresh_tab_and_preserves_rows(monkeypatch, re
     outcomes = [([first], "selectors"), RuntimeError("net::ERR_TOO_MANY_REDIRECTS")]
     outcomes += (
         [([second], "selectors"), ([], "selectors")]
-        if retry_succeeds else [RuntimeError("net::ERR_TOO_MANY_REDIRECTS")]
+        if retry_succeeds
+        # The backoff retry fails too, so p2 is SKIPPED -- and the walk has to
+        # carry on to p3, because that is where the rest of the catalogue is.
+        # Flipkart's redirect loop strikes a MOVING page number: a real run
+        # lost p4 and then collected p5 through p8 normally. Ending the walk at
+        # the first loop, which this used to do, reported one bad page by
+        # discarding two thirds of the store.
+        else [
+            RuntimeError("net::ERR_TOO_MANY_REDIRECTS"),
+            ([second], "selectors"),
+            ([], "selectors"),
+        ]
     )
     loader = AsyncMock(side_effect=outcomes)
     monkeypatch.setattr(adapter, "_load_page", loader)
     result = await adapter.fetch(store, NullSink())
     assert isinstance(result, Ok if retry_succeeds else Partial)
-    assert len(result.listings) == (2 if retry_succeeds else 1)
+    assert len(result.listings) == 2
     calls = loader.call_args_list
     assert calls[1].args[0] is old_page
     assert calls[2].args[0] is fresh_page
@@ -44,8 +55,41 @@ async def test_retries_same_page_on_fresh_tab_and_preserves_rows(monkeypatch, re
     old_page.close.assert_awaited_once()
     context.close.assert_awaited_once()
     if not retry_succeeds:
-        assert len(calls) == 3
-        assert "fresh-tab retry" in result.reason
+        # Skipped, not fatal: p3 was still attempted, and its rows kept.
+        assert calls[3].args[-1] == 3
+        assert "backoff retry" in result.reason
+
+
+async def test_gives_up_after_three_consecutive_navigation_failures(monkeypatch):
+    """Why the skip above has to be bounded.
+
+    A session blocked outright fails every page. Skipping each one without a cap
+    walks all the way to page_cap, spending the whole time budget to learn
+    nothing -- so only a STREAK distinguishes "one struck page" from "blocked".
+    """
+    store = next(s for s in STORES if s.id == "flipkart")
+    context = AsyncMock()
+    context.new_page.side_effect = [AsyncMock() for _ in range(12)]
+    provider = AsyncMock()
+    provider.new_context.return_value = context
+    adapter = BrowserAdapter(provider, settle_ms=(0, 0), redirect_backoff_s=0.0)
+    monkeypatch.setattr(module, "_body_text", AsyncMock(return_value=""))
+    monkeypatch.setattr(module, "_flipkart_page_url", AsyncMock(return_value=store.search_urls[0]))
+    first = Extracted("Mario Switch", 3000, "https://www.flipkart.com/mario/p/one", True)
+    loader = AsyncMock(
+        side_effect=[([first], "selectors")]
+        + [RuntimeError("net::ERR_TOO_MANY_REDIRECTS")] * 20
+    )
+    monkeypatch.setattr(adapter, "_load_page", loader)
+
+    result = await adapter.fetch(store, NullSink())
+
+    assert isinstance(result, Partial)
+    assert "3 consecutive navigation failures" in result.reason
+    # p1 + three struck pages, each attempted twice (backoff retry). Bounded,
+    # rather than walking every page to the safety cap.
+    assert loader.await_count == 7
+    assert len(result.listings) == 1
 
 
 async def test_uses_live_pager_only_when_platform_filters_are_preserved():
