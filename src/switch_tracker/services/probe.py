@@ -77,10 +77,23 @@ class ProbeService:
         if store.kind is AdapterKind.BROWSER:
             return None
 
-        if await self._contains(f"{store.base_url}/products.json?limit=1", '"products"'):
+        # Shape, not substring. Both endpoints are matched on the PARSED body:
+        # a WordPress 404 page answers 200, and its inline JS routinely
+        # contains the literal `"products"` -- which read as a Shopify feed and
+        # got written to stores.local.json as kind=SHOPIFY, overriding a
+        # hand-verified WooCommerce config. HG World failed that way for a
+        # month. get_json already returns None for a refusal or for non-JSON.
+        feed = await self._client.get_json(f"{store.base_url}/products.json?limit=1")
+        if isinstance(feed, dict) and isinstance(feed.get("products"), list):
             return Finding.SHOPIFY
         for path in ("/wp-json/wc/store/v1/products", "/wp-json/wc/store/products"):
-            if await self._contains(f"{store.base_url}{path}?per_page=1", '"prices"'):
+            products = await self._client.get_json(f"{store.base_url}{path}?per_page=1")
+            if (
+                isinstance(products, list)
+                and products
+                and isinstance(products[0], dict)
+                and "prices" in products[0]
+            ):
                 return Finding.WOOCOMMERCE
 
         # Neither API answered, but the homepage still says something. A
@@ -172,7 +185,3 @@ class ProbeService:
             if len(collections) < 250:
                 break
         return out
-
-    async def _contains(self, url: str, needle: str) -> bool:
-        result = await self._client.get(url)
-        return result.ok and needle in result.body

@@ -64,6 +64,22 @@ class TestDetection:
         result = await service.detect(store_at(base))
         assert result is Finding.SHOPIFY
 
+    async def test_an_html_page_mentioning_products_is_not_shopify(
+        self, service, server, data_dir
+    ) -> None:
+        """The bug that mis-detected HG World for a month.
+
+        A WordPress 404 answers 200, and its inline JS carries the literal
+        `"products"`. Substring-matching the body read that as a Shopify feed
+        and wrote kind=SHOPIFY over a hand-verified WooCommerce config, so the
+        store fetched /collections/<slug>/products.json forever and found
+        nothing. Detection has to match the PARSED shape.
+        """
+        base, recorder = server
+        recorder.plan(SHOPIFY_PATH, (200, '<html><script>var x={"products":[]}</script></html>', {}))
+        recorder.plan(WOO_V1, ok_json('[{"prices":{"price":"100"}}]'))
+        assert await service.detect(store_at(base)) is Finding.WOOCOMMERCE
+
     async def test_recognises_woocommerce(self, service, server, data_dir) -> None:
         base, recorder = server
         recorder.plan(SHOPIFY_PATH, (404, "no", {}))
