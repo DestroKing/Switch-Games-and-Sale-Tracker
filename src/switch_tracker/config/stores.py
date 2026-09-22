@@ -80,11 +80,38 @@ STORES: tuple[StoreConfig, ...] = (
         currency="INR",
         tier=2,
         enabled=True,
-        platform_hint=Platform.SWITCH,
-        collections=("nintendo-games-gaming-titles", "nintendo-switch-2-games"),
+        # NO platform_hint, and NO collections. Both absences are load-bearing
+        # and neither is an oversight -- see scripts/check_stores.py --probe.
+        #
+        # Cloudflare 403s the Store API's `category=` parameter on this host,
+        # by ANY route: term id or slug, v1 or legacy path, per_page 100 or 10,
+        # and `collection-data?category=` too. It is the PARAMETER, not the
+        # word -- `?note=category` answers 200, and a repeated bare baseline
+        # still answers 200 with x-wp-total=1596, so it is not rate limiting.
+        # `category_id=` answers 200 but WordPress ignores unknown params, so
+        # it returns the unfiltered catalogue; wp/v2/product?product_cat= does
+        # filter correctly but carries no price field. So category scoping is
+        # genuinely unavailable here, and the whole 1596-product catalogue
+        # (~16 pages at PER_PAGE=100) is the only route to this store's games.
+        #
+        # Which is exactly why the hint has to go. This is a general
+        # electronics shop -- its unfiltered head is a SteamOS PC, two DJI
+        # microphones and an Android gamepad -- and an unscoped fetch makes the
+        # classifier the ONLY thing standing between that and the price
+        # history. A hint means "assume Switch when the text names no console",
+        # which on 1596 mixed products quietly relabels every terse-titled
+        # accessory as a Switch game. Same reasoning as `designinfo` below.
+        #
+        # The trade, stated: a Switch game whose title never says "switch" is
+        # now missed. Acceptable -- this store's own titles are verbose
+        # ("FC 27 Nintendo Switch", "Sonic Forces Nintendo Switch Standard
+        # Edition"), and a missed row is recoverable where a poisoned series
+        # is not.
         note=(
-            "Verified WooCommerce games categories: Nintendo Games (4874) and Switch 2 (5105). "
-            "The separate nintendo-games slug (235) belongs under accessories."
+            "Cloudflare blocks the Store API category= filter by every route, so this store is "
+            "fetched unscoped (~16 pages, 1596 products) and sieved by the classifier. "
+            "platform_hint is deliberately unset: it is a general electronics shop, and an "
+            "unscoped fetch plus a hint would relabel accessories as Switch games."
         ),
     ),
     StoreConfig(

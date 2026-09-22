@@ -69,10 +69,27 @@ class TestShippedList:
                 assert store.search_urls, f"{store.id} has no search_urls"
 
     def test_api_stores_that_are_general_retailers_are_scoped(self) -> None:
-        """An unscoped general retailer leaks its whole catalogue through."""
-        for store_id in ("nistore", "nekavo", "gameloot", "emartgames", "hgworld", "designinfo"):
+        """An unscoped general retailer leaks its whole catalogue through.
+
+        hgworld is deliberately absent from this list: Cloudflare 403s its
+        ``category=`` filter by every route, so it cannot be scoped at all.
+        The property that keeps it safe instead is the one asserted below.
+        """
+        for store_id in ("nistore", "nekavo", "gameloot", "emartgames", "designinfo"):
             store = next(s for s in STORES if s.id == store_id)
             assert store.collections, f"{store_id} is not scoped to a category"
+
+    def test_a_retailer_that_cannot_be_scoped_carries_no_hint(self) -> None:
+        """These two have to move together, or the classifier is defeated.
+
+        A hint means "assume Switch when the text names no console". Applied
+        to hgworld's 1596 unscoped mixed electronics -- a SteamOS PC, DJI
+        microphones, an Android gamepad -- it relabels terse-titled
+        accessories as Switch games and writes them to the price history.
+        """
+        store = next(s for s in STORES if s.id == "hgworld")
+        assert store.collections == ()
+        assert store.platform_hint is None
 
     def test_switch_only_shops_carry_a_hint(self) -> None:
         store = next(s for s in STORES if s.id == "nistore")
