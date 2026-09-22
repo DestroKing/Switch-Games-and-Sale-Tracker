@@ -8,13 +8,15 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
 import random
 from collections.abc import Callable
 from urllib.parse import SplitResult, parse_qs, urlencode, urljoin, urlsplit
 
-from playwright.async_api import Page
+from playwright.async_api import Page, Response
 from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 
+from switch_tracker import paths
 from switch_tracker.adapters.base import ProgressSink
 from switch_tracker.adapters.browser.diagnostics import dump
 from switch_tracker.adapters.browser.extract import Extracted, extract
@@ -68,6 +70,33 @@ DEFAULT_TIME_BUDGET_S = 540.0
 #: _goto compares against it to decide whether a fallback is even possible.
 _DEFAULT_WAIT_UNTIL: WaitUntil = "domcontentloaded"
 _GOTO_TIMEOUT_MS = 45_000
+
+
+async def _flipkart_page_url(page: Page, template: str, number: int) -> str:
+    """Prefer the store's own pager URL without losing either platform filter."""
+    fallback = template.replace("{p}", str(number))
+    if number == 1:
+        return fallback
+    expected = urlsplit(fallback)
+    expected_query = parse_qs(expected.query)
+    try:
+        hrefs = await page.locator("a[href*='page=']").evaluate_all(
+            "links => links.map(link => link.href)"
+        )
+    except Exception:  # noqa: BLE001 - the template still works without a pager
+        return fallback
+    for href in hrefs:
+        candidate = urlsplit(urljoin(page.url, href))
+        query = parse_qs(candidate.query)
+        if (
+            candidate.scheme == "https"
+            and candidate.netloc == expected.netloc
+            and query.get("page") == [str(number)]
+            and query.get("sid") == expected_query.get("sid")
+            and sorted(query.get("p[]", [])) == sorted(expected_query.get("p[]", []))
+        ):
+            return candidate.geturl()
+    return fallback
 
 
 class BrowserAdapter:
@@ -153,27 +182,37 @@ class BrowserAdapter:
                 # look like "this one ran dry" the moment the second starts.
                 seen_skus: set[str] = set()
                 tracker = ProductivityTracker()
-                flipkart_navigation_failures = 0
-
                 for page_number in range(1, page_cap + 1):
                     try:
-                        rows, method = await self._load_page(
-                            page, store, profile, template, page_number
-                        )
+                        target = template
+                        if store.id == "flipkart":
+                            target = await _flipkart_page_url(page, template, page_number)
+                        try:
+                            rows, method = await self._load_page(
+                                page, store, profile, target, page_number
+                            )
+                        except Exception:
+                            if store.id != "flipkart":
+                                raise
+                            # Retry the SAME page once, with cookies retained but
+                            # no pending chrome-error navigation from the old tab.
+                            await page.close()
+                            page = await context.new_page()
+                            rows, method = await self._load_page(
+                                page, store, profile, target, page_number
+                            )
                     except _NoMorePages:
                         break
                     except Exception as exc:  # noqa: BLE001 - one bad page is not a dead store
                         problems.append(f"p{page_number}: {type(exc).__name__}: {exc}")
                         if store.id == "flipkart":
-                            # A redirect/error document can leave this page in
-                            # a broken navigation state. Repeatedly asking it
-                            # for later pages only burns the store budget.
-                            flipkart_navigation_failures += 1
-                            if flipkart_navigation_failures >= 2:
-                                break
+                            problems.append(
+                                "same page failed after a fresh-tab retry; "
+                                f"redirect trace: diagnostics/flipkart-p{page_number}-navigation.json"
+                            )
+                            break
                         continue
 
-                    flipkart_navigation_failures = 0
                     methods.add(method)
                     if not claimed_total_attempted:
                         claimed_total_attempted = True
@@ -290,7 +329,11 @@ class BrowserAdapter:
             await self._hydrate(page, profile)
             return await extract(page, store.id, profile)
 
-        await self._goto(page, template.replace("{p}", str(page_number)), profile)
+        url = template.replace("{p}", str(page_number))
+        if store.id == "flipkart":
+            await self._goto_flipkart(page, url, profile, page_number)
+        else:
+            await self._goto(page, url, profile)
         await wait_for_cloudflare(page)
 
         for selector in profile.dismiss:
@@ -311,6 +354,34 @@ class BrowserAdapter:
             suffix = f"-p{page_number}" if page_number > 1 else ""
             await dump(page, f"{store.id}{suffix}")
         return rows, method
+
+    async def _goto_flipkart(self, page: Page, url: str, profile: StoreProfile, number: int) -> None:
+        redirects: list[dict[str, str | int]] = []
+
+        def record(response: Response) -> None:
+            request = response.request
+            if request.is_navigation_request() and request.frame == page.main_frame and len(redirects) < 40:
+                redirects.append({
+                    "url": response.url,
+                    "status": response.status,
+                    "location": response.headers.get("location", ""),
+                })
+
+        page.on("response", record)
+        try:
+            await self._goto(page, url, profile)
+        except Exception as exc:
+            with contextlib.suppress(Exception):
+                output = paths.diagnostics_dir() / f"flipkart-p{number}-navigation.json"
+                output.write_text(json.dumps({
+                    "requested_url": url,
+                    "final_url": page.url,
+                    "error": str(exc),
+                    "redirects": redirects,
+                }, indent=2), encoding="utf-8")
+            raise
+        finally:
+            page.remove_listener("response", record)
 
     async def _goto(self, page: Page, url: str, profile: StoreProfile) -> None:
         """Navigate, degrading the readiness condition rather than losing the store.

@@ -53,10 +53,9 @@ class WooAdapter:
             if store.collections
             else [None]
         )
-        if any(category == "" for category in category_values):
-            return Failed("configured product category path could not be resolved")
 
         listings: list[RawListing] = []
+        problems: list[str] = []
         raw_fetched = 0
         expected_total = 0
 
@@ -74,6 +73,8 @@ class WooAdapter:
                 url = f"{store.base_url}{base_path}?per_page={self.PER_PAGE}&page={page}{suffix}"
                 response = await self._client.get(url, {"accept": "application/json"})
                 if not response.ok:
+                    error = f"HTTP {response.status}" if response.status else response.body[:200]
+                    problems.append(f"category {category or 'all'}, page {page}: {error}")
                     break
 
                 if category_total is None:
@@ -84,8 +85,12 @@ class WooAdapter:
                 try:
                     products = json.loads(response.body)
                 except ValueError:
+                    problems.append(f"category {category or 'all'}, page {page}: invalid JSON")
                     break
-                if not isinstance(products, list) or not products:
+                if not isinstance(products, list):
+                    problems.append(f"category {category or 'all'}, page {page}: expected a product list")
+                    break
+                if not products:
                     break
 
                 raw_fetched += len(products)
@@ -114,7 +119,11 @@ class WooAdapter:
         )
 
         if not listings:
+            if problems:
+                return Failed("; ".join(problems))
             return Failed(f"Store API reachable but returned no Switch products{completeness}")
+        if problems:
+            return Partial(tuple(listings), f"{'; '.join(problems)}{completeness}")
         if expected_total > 0 and raw_fetched < expected_total:
             return Partial(tuple(listings), f"stopped early{completeness}")
         return Ok(tuple(listings))
@@ -135,32 +144,9 @@ class WooAdapter:
         the numeric id first is what works everywhere; the slug remains the
         fallback for installs that do not expose product_cat.
         """
-        parts = slug.strip("/").split("/")
         terms = await self._client.get_json(
-            f"{store.base_url}/wp-json/wp/v2/product_cat?slug={quote(parts[-1])}&per_page=100"
+            f"{store.base_url}/wp-json/wp/v2/product_cat?slug={quote(slug)}"
         )
-        if len(parts) > 1 and isinstance(terms, list):
-            for term in terms:
-                if not isinstance(term, dict):
-                    continue
-                parent_id = term.get("parent")
-                matched = True
-                for parent_slug in reversed(parts[:-1]):
-                    if not isinstance(parent_id, int) or parent_id <= 0:
-                        matched = False
-                        break
-                    parent = await self._client.get_json(
-                        f"{store.base_url}/wp-json/wp/v2/product_cat/{parent_id}"
-                    )
-                    if not isinstance(parent, dict) or parent.get("slug") != parent_slug:
-                        matched = False
-                        break
-                    parent_id = parent.get("parent")
-                if matched and term.get("id") is not None:
-                    return str(term["id"])
-            # A path is explicitly disambiguating duplicate slugs. Never query
-            # the unscoped slug here: it can silently collect accessories.
-            return ""
         if isinstance(terms, list) and terms and isinstance(terms[0], dict):
             term_id = terms[0].get("id")
             if term_id is not None:
