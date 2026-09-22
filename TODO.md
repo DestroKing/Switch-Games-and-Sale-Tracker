@@ -68,7 +68,37 @@ continue-anyway build got 228.
       latter must stop rather than walk to `page_cap`.
 - [x] Both shapes covered by runnable mock tests in `test_flipkart_recovery.py`
       (no browser needed).
-- [ ] Re-run `check_stores.py flipkart` to confirm it now reaches ~273 raw.
+- [x] Confirmed on a live full walk: **79 → 184 listings**, 232 raw rows, p1→p8
+      with p5 struck-and-skipped, ending naturally when p8 extracted nothing.
+
+### Why this cannot be fixed by re-encoding the URL
+
+The p5 and p6 traces from the same run normalise the identical request two
+different ways:
+
+| Page | 301 target | Result |
+|---|---|---|
+| p5 | `sid=4rr,fa6,32v` — `%2C` **decoded** | self-loops 19× |
+| p6 | `sid=4rr%2Cfa6%2C32v` — `sid` **left encoded** | **200** |
+
+Only the comma form loops, but which form comes back is not a property of what
+we sent. There is no encoding to choose — only a page to retry.
+
+### Open, low priority
+
+- [x] **Recover the struck page.** Done. After the walk ends, a second pass
+      re-attempts every page it lost, one attempt each — the elapsed walk is
+      the backoff, and p6's trace proves the edge serves 200 to the identical
+      request once the session verdict expires. Bounded by the same deadline.
+      Failures are now held in `struck` and only folded into `problems` if the
+      second pass does not get them back, so a fully recovered walk reports
+      **Ok** rather than Partial. Expect ~184 → ~223 on a run losing one page.
+- [ ] Confirm the recovery pass on a live Flipkart walk.
+- [ ] `read_claimed_total` now reports **~132** for Flipkart where earlier runs
+      read ~273. Since `raw_seen` (232) exceeds it, the
+      `raw_seen < claimed_total * 0.9` shortfall check is inert for this store.
+      Already documented as best-effort scraped prose, not authoritative — but
+      it is currently not detecting anything.
 
 ## Genuinely still open
 

@@ -74,10 +74,17 @@ _GOTO_TIMEOUT_MS = 45_000
 #: Flipkart answers a perfectly valid page URL with a 301 to ITSELF once it
 #: decides to throttle a session -- observed as 19 byte-identical hops ending in
 #: ERR_TOO_MANY_REDIRECTS. It is a session verdict and not a malformed URL: the
-#: page it strikes MOVES between runs (p3 in one, p4 in the next with p5-p8
-#: collecting normally afterwards), and pages 1-2 of the identical shape always
-#: load. So the retry has to WAIT. Re-issuing instantly from a fresh tab, which
-#: is what this did before, meets exactly the same verdict.
+#: page it strikes MOVES between runs (p3 in one, p4 in the next, p5 in a third,
+#: with the pages after it collecting normally each time). So the retry has to
+#: WAIT. Re-issuing instantly from a fresh tab, which is what this did before,
+#: meets exactly the same verdict.
+#:
+#: Do NOT try to fix this by re-encoding the URL. The redirect traces show the
+#: edge normalising the SAME request two different ways within one run: the hop
+#: that keeps `sid=4rr%2Cfa6%2C32v` percent-encoded answers 200, and the hop
+#: that decodes it to `sid=4rr,fa6,32v` is the one that self-loops. Which form
+#: comes back is not a property of what we sent, so there is no encoding to
+#: pick here -- only a page to retry later.
 _REDIRECT_LOOP_BACKOFF_S = 8.0
 
 #: Consecutive pages that failed to NAVIGATE before the walk is abandoned.
@@ -206,6 +213,12 @@ class BrowserAdapter:
                 seen_skus: set[str] = set()
                 tracker = ProductivityTracker()
                 nav_failures = 0
+                #: page number -> the error it failed with, HELD BACK rather
+                #: than reported at the time. A page the recovery pass below
+                #: gets back is not a problem with the run, and recording it as
+                #: one the moment it failed would report a complete fetch as
+                #: Partial.
+                struck: dict[int, str] = {}
                 for page_number in range(1, page_cap + 1):
                     try:
                         # The store's own pager href, when it has one. Kept
@@ -235,18 +248,13 @@ class BrowserAdapter:
                     except _NoMorePages:
                         break
                     except Exception as exc:  # noqa: BLE001 - one bad page is not a dead store
-                        problems.append(f"p{page_number}: {type(exc).__name__}: {exc}")
-                        if store.id == "flipkart":
-                            problems.append(
-                                f"p{page_number} failed after a backoff retry; trace: "
-                                f"diagnostics/flipkart-p{page_number}-navigation.json"
-                            )
                         # SKIP the page; do NOT end the walk. This branch used
                         # to break for Flipkart, on the assumption that a page
                         # which failed twice would keep failing. A real run
-                        # disproved it: p4 was struck and p5 through p8 then
+                        # disproved it: p5 was struck and p6 through p8 then
                         # collected normally, so breaking here reported one bad
                         # page by discarding two thirds of the catalogue.
+                        struck[page_number] = f"{type(exc).__name__}: {exc}"
                         nav_failures += 1
                         if nav_failures >= _MAX_NAV_FAILURES:
                             problems.append(
@@ -263,18 +271,10 @@ class BrowserAdapter:
                         claimed_total_attempted = True
                         claimed_total = read_claimed_total(await _body_text(page))
 
-                    new_on_page = 0
-                    kept_on_page = 0
-                    for row in rows:
-                        raw_seen += 1
-                        listing = self._to_listing(store, profile, row)
-                        if listing is None:
-                            continue
-                        kept_on_page += 1
-                        listings.append(listing)
-                        if listing.sku not in seen_skus:
-                            seen_skus.add(listing.sku)
-                            new_on_page += 1
+                    raw_seen += len(rows)
+                    new_on_page, kept_on_page = self._absorb(
+                        store, profile, rows, listings, seen_skus
+                    )
 
                     sink.page(store.id, page_number, len(listings))
 
@@ -317,6 +317,58 @@ class BrowserAdapter:
 
                     await page.wait_for_timeout(random.uniform(*self._settle_ms))
 
+                # SECOND PASS -- re-attempt the pages the walk lost.
+                #
+                # Worth a pass precisely BECAUSE the failure is a session
+                # verdict rather than a bad URL: Flipkart's own redirect traces
+                # show its edge answering 200 to the identical request seconds
+                # after refusing it. By the time the walk ends, minutes have
+                # gone by, which is the longest wait available for free.
+                #
+                # One attempt each, with no backoff retry of its own: the walk
+                # WAS the backoff, and a page still failing here has failed
+                # three times over several minutes.
+                recovered: list[int] = []
+                for page_number in sorted(struck):
+                    # Re-checked per page, not once: the pass is bounded by the
+                    # same deadline as the walk, and a store that spent its
+                    # budget must not go over it chasing a lost page.
+                    if asyncio.get_running_loop().time() >= deadline:
+                        out_of_time = True
+                        break
+                    await page.wait_for_timeout(random.uniform(*self._settle_ms))
+                    try:
+                        retarget = None
+                        if store.id == "flipkart":
+                            retarget = await _flipkart_page_url(page, template, page_number)
+                        rows, method = await self._load_page(
+                            page, store, profile, template, page_number, resolved_url=retarget
+                        )
+                    except Exception:  # noqa: BLE001 - stays struck, reported below
+                        continue
+                    methods.add(method)
+                    raw_seen += len(rows)
+                    self._absorb(store, profile, rows, listings, seen_skus)
+                    sink.page(store.id, page_number, len(listings))
+                    recovered.append(page_number)
+
+                for page_number in recovered:
+                    del struck[page_number]
+                for page_number in sorted(struck):
+                    problems.append(f"p{page_number}: {struck[page_number]}")
+                    if store.id == "flipkart":
+                        problems.append(
+                            f"p{page_number} failed the walk, a backoff retry and a second "
+                            f"pass; trace: diagnostics/flipkart-p{page_number}-navigation.json"
+                        )
+                # Only worth saying when something is STILL missing. A pass
+                # that got everything back leaves `problems` empty, so the
+                # store reports Ok -- which is what actually happened.
+                if struck and recovered:
+                    problems.append(
+                        "second pass recovered p" + ", p".join(str(n) for n in recovered)
+                    )
+
                 if out_of_time:
                     break
         finally:
@@ -355,6 +407,33 @@ class BrowserAdapter:
         if claimed_total is not None and raw_seen < claimed_total * 0.9:
             return Partial(tuple(unique), f"stopped early{completeness} ({via})")
         return Ok(tuple(unique))
+
+    def _absorb(
+        self,
+        store: StoreConfig,
+        profile: StoreProfile,
+        rows: list[Extracted],
+        listings: list[RawListing],
+        seen_skus: set[str],
+    ) -> tuple[int, int]:
+        """Fold one page's rows into the result. Returns (new SKUs, rows kept).
+
+        Shared by the walk and the recovery pass below, so both apply the
+        classifier and the dedupe set identically. A second copy of this is
+        exactly how a recovered page would end up carrying SKUs that disagree
+        with the pages either side of it.
+        """
+        new_on_page = kept_on_page = 0
+        for row in rows:
+            listing = self._to_listing(store, profile, row)
+            if listing is None:
+                continue
+            kept_on_page += 1
+            listings.append(listing)
+            if listing.sku not in seen_skus:
+                seen_skus.add(listing.sku)
+                new_on_page += 1
+        return new_on_page, kept_on_page
 
     async def _load_page(
         self,

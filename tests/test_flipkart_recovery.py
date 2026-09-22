@@ -41,6 +41,11 @@ async def test_retries_same_page_on_fresh_tab_and_preserves_rows(monkeypatch, re
             RuntimeError("net::ERR_TOO_MANY_REDIRECTS"),
             ([second], "selectors"),
             ([], "selectors"),
+            # The second pass re-attempts p2 and fails too, so it stays struck
+            # and is reported. Scripted rather than left to side_effect
+            # exhaustion, so the call count is the test's claim, not an
+            # accident of how AsyncMock runs dry.
+            RuntimeError("net::ERR_TOO_MANY_REDIRECTS"),
         ]
     )
     loader = AsyncMock(side_effect=outcomes)
@@ -58,6 +63,52 @@ async def test_retries_same_page_on_fresh_tab_and_preserves_rows(monkeypatch, re
         # Skipped, not fatal: p3 was still attempted, and its rows kept.
         assert calls[3].args[-1] == 3
         assert "backoff retry" in result.reason
+
+
+async def test_a_struck_page_is_recovered_on_a_second_pass(monkeypatch):
+    """The refusal is a session verdict, so it expires -- and the walk outlasts it.
+
+    Flipkart's own redirect traces show its edge answering 200 to the identical
+    request seconds after refusing it, and by the time the walk ends minutes
+    have gone by. A page recovered here is not a problem with the run, so the
+    store must report Ok: folding the recovery into `problems` would report a
+    complete fetch as Partial, which is the failure this test pins.
+    """
+    store = next(s for s in STORES if s.id == "flipkart")
+    old_page, fresh_page = AsyncMock(), AsyncMock()
+    context = AsyncMock()
+    context.new_page.side_effect = [old_page, fresh_page]
+    provider = AsyncMock()
+    provider.new_context.return_value = context
+    adapter = BrowserAdapter(provider, settle_ms=(0, 0), redirect_backoff_s=0.0)
+    monkeypatch.setattr(module, "_body_text", AsyncMock(return_value=""))
+    monkeypatch.setattr(module, "_flipkart_page_url", AsyncMock(return_value=store.search_urls[0]))
+    first = Extracted("Mario Switch", 3000, "https://www.flipkart.com/mario/p/one", True)
+    second = Extracted("Zelda Switch", 4000, "https://www.flipkart.com/zelda/p/two", True)
+    third = Extracted("Metroid Switch", 5000, "https://www.flipkart.com/metroid/p/three", True)
+    loader = AsyncMock(
+        side_effect=[
+            ([first], "selectors"),                       # p1
+            RuntimeError("net::ERR_TOO_MANY_REDIRECTS"),  # p2, struck
+            RuntimeError("net::ERR_TOO_MANY_REDIRECTS"),  # p2, backoff retry
+            ([second], "selectors"),                      # p3, the walk carries on
+            ([], "selectors"),                            # p4, end of the catalogue
+            ([third], "selectors"),                       # p2 again, second pass
+        ]
+    )
+    monkeypatch.setattr(adapter, "_load_page", loader)
+
+    result = await adapter.fetch(store, NullSink())
+
+    assert isinstance(result, Ok)
+    assert {x.title for x in result.listings} == {
+        "Mario Switch",
+        "Zelda Switch",
+        "Metroid Switch",
+    }
+    assert loader.await_count == 6
+    # The second pass re-attempted the struck page, not the next one.
+    assert loader.call_args_list[-1].args[-1] == 2
 
 
 async def test_gives_up_after_three_consecutive_navigation_failures(monkeypatch):
@@ -86,9 +137,10 @@ async def test_gives_up_after_three_consecutive_navigation_failures(monkeypatch)
 
     assert isinstance(result, Partial)
     assert "3 consecutive navigation failures" in result.reason
-    # p1 + three struck pages, each attempted twice (backoff retry). Bounded,
-    # rather than walking every page to the safety cap.
-    assert loader.await_count == 7
+    # p1, then three struck pages each attempted twice (walk + backoff retry),
+    # then one second-pass attempt apiece. Bounded either way, rather than
+    # walking every page to the safety cap.
+    assert loader.await_count == 1 + (3 * 2) + 3
     assert len(result.listings) == 1
 
 
