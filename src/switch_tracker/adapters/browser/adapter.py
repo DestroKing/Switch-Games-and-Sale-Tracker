@@ -80,7 +80,7 @@ async def _flipkart_page_url(page: Page, template: str, number: int) -> str:
     expected = urlsplit(fallback)
     expected_query = parse_qs(expected.query)
     try:
-        hrefs = await page.locator("a[href*='page=']").evaluate_all(
+        hrefs: list[str] = await page.locator("a[href*='page=']").evaluate_all(
             "links => links.map(link => link.href)"
         )
     except Exception:  # noqa: BLE001 - the template still works without a pager
@@ -184,12 +184,16 @@ class BrowserAdapter:
                 tracker = ProductivityTracker()
                 for page_number in range(1, page_cap + 1):
                     try:
-                        target = template
+                        # The store's own pager href, when it has one. Kept
+                        # SEPARATE from the template: the template is what
+                        # decides whether this store pages by URL at all, and
+                        # a resolved URL has no {p} left to reason about.
+                        target = None
                         if store.id == "flipkart":
                             target = await _flipkart_page_url(page, template, page_number)
                         try:
                             rows, method = await self._load_page(
-                                page, store, profile, target, page_number
+                                page, store, profile, template, page_number, resolved_url=target
                             )
                         except Exception:
                             if store.id != "flipkart":
@@ -199,7 +203,7 @@ class BrowserAdapter:
                             await page.close()
                             page = await context.new_page()
                             rows, method = await self._load_page(
-                                page, store, profile, target, page_number
+                                page, store, profile, template, page_number, resolved_url=target
                             )
                     except _NoMorePages:
                         break
@@ -318,7 +322,10 @@ class BrowserAdapter:
         profile: StoreProfile,
         template: str,
         page_number: int,
+        resolved_url: str | None = None,
     ) -> tuple[list[Extracted], str]:
+        # Deliberately the TEMPLATE, never ``resolved_url``: substituting {p}
+        # is precisely what makes a URL-paged store look click-paged here.
         if page_number > 1 and uses_click_paging(profile, template):
             # This store has no URL to go to: page 2+ exists only behind a
             # client-side button click with no navigation at all, confirmed by
@@ -329,7 +336,7 @@ class BrowserAdapter:
             await self._hydrate(page, profile)
             return await extract(page, store.id, profile)
 
-        url = template.replace("{p}", str(page_number))
+        url = resolved_url or template.replace("{p}", str(page_number))
         if store.id == "flipkart":
             await self._goto_flipkart(page, url, profile, page_number)
         else:
