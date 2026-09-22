@@ -81,21 +81,32 @@ class TestPathDiscovery:
 
 
 class TestCategoryResolution:
-    async def test_hgworld_uses_verified_game_categories(self, adapter, server) -> None:
+    async def test_hgworld_is_fetched_unscoped(self, adapter, server) -> None:
+        """Cloudflare 403s this host's ``category=`` by every available route.
+
+        Term id, slug, v1 path, legacy path, per_page 100 and 10, and
+        ``collection-data?category=`` all refuse. It is the PARAMETER and not
+        the word -- ``?note=category`` answers 200 -- and it is not rate
+        limiting, because a bare baseline repeated after the refusals still
+        answers 200 with x-wp-total=1596. ``category_id=`` answers 200 but
+        WordPress ignores unknown params and returns the whole catalogue.
+
+        So this store cannot be scoped, and re-adding ``collections`` here
+        silently returns it to zero listings. That regression is what this
+        test exists to catch; see scripts/check_stores.py --probe.
+        """
         from switch_tracker.config.stores import STORES
 
         base, recorder = server
         store = replace(next(s for s in STORES if s.id == "hgworld"), base_url=base)
-        assert store.collections == ("nintendo-games-gaming-titles", "nintendo-switch-2-games")
-        recorder.plan(TERMS,
-            (200, json.dumps([{"id": 4874, "slug": "nintendo-games-gaming-titles", "parent": 1101}]), {}),
-            (200, json.dumps([{"id": 5105, "slug": "nintendo-switch-2-games", "parent": 1101}]), {}),
-        )
-        recorder.plan(V1, page(product(1, "Zelda")))
+        assert store.collections == ()
+        # Unscoped, the classifier is the ONLY sieve -- so a hint here would
+        # relabel this general retailer's accessories as Switch games.
+        assert store.platform_hint is None
+        recorder.plan(V1, page(product(1, "Zelda Nintendo Switch")))
         result = await adapter.fetch(store, NullSink())
         assert isinstance(result, Ok)
-        assert any("category=4874" in hit for hit in recorder.hits)
-        assert any("category=5105" in hit for hit in recorder.hits)
+        assert not any("category=" in hit for hit in recorder.hits)
 
     async def test_resolves_a_slug_to_its_numeric_term_id(self, adapter, server) -> None:
         """Filtering by raw slug silently returns zero on some installs.
