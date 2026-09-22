@@ -90,3 +90,35 @@ async def test_failed_navigation_records_redirect_chain(tmp_path, monkeypatch):
         page.remove_listener.assert_called_once()
     finally:
         paths.data_dir.cache_clear()
+
+
+async def test_flipkart_page_two_navigates_by_url_rather_than_clicking(monkeypatch):
+    """Page 2+ must still be reached by URL once a pager href has been chosen.
+
+    ``_flipkart_page_url`` hands ``_load_page`` a fully substituted URL, and
+    ``uses_click_paging`` answers "no ``{p}`` left, so this store can only be
+    clicked" -- which is true of Play-Asia and false of Flipkart, whose pages
+    are plain URLs. The store then advanced by clicking its numeric pager and
+    ended the walk the first time that control could not be confirmed, with no
+    problem recorded and no redirect trace written.
+    """
+    store = next(s for s in STORES if s.id == "flipkart")
+    profile = PROFILES["flipkart"]
+    target = store.search_urls[0].replace("{p}", "2")
+    adapter = BrowserAdapter(AsyncMock(), settle_ms=(0, 0))
+
+    click_next = AsyncMock(return_value=False)
+    monkeypatch.setattr(module, "_click_next", click_next)
+    monkeypatch.setattr(module, "wait_for_cloudflare", AsyncMock())
+    monkeypatch.setattr(module, "extract", AsyncMock(return_value=([], "selectors")))
+    monkeypatch.setattr(module, "dump", AsyncMock())
+    monkeypatch.setattr(adapter, "_hydrate", AsyncMock())
+    goto = AsyncMock()
+    monkeypatch.setattr(adapter, "_goto_flipkart", goto)
+
+    await adapter._load_page(
+        AsyncMock(), store, profile, store.search_urls[0], 2, resolved_url=target
+    )
+
+    click_next.assert_not_awaited()
+    assert goto.await_args.args[1] == target

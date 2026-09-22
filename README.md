@@ -143,6 +143,25 @@ uv run mypy                          # types (strict)
 uv run python -m switch_tracker spike   # packaging self-check
 ```
 
+`scripts/check_stores.py` is the pre-release sweep, and the one to reach for
+first. It runs **any** store of **any** kind through the registry the collector
+itself uses, for one store or for all of them, and judges the result rather
+than just counting it — flagging pages that repeat, prices at zero or 100x,
+a currency that disagrees with the store config, and catalogues where nothing
+is in stock.
+
+```bash
+uv run python scripts/check_stores.py                   # every enabled store
+uv run python scripts/check_stores.py hgworld flipkart  # just these two
+uv run python scripts/check_stores.py flipkart --pages 3 --headful
+uv run python scripts/check_stores.py hgworld --probe   # isolate an HTTP 403
+```
+
+`--probe` is for a feed store that answers 403/401: it re-asks the host one
+variable at a time — with and without the category filter, at `per_page` 100
+and 10, by term id and by slug — and then repeats the first known-good request,
+which is what distinguishes a blocked parameter from plain rate limiting.
+
 `scripts/scrape_check.py <store_id>` runs one store's **real** collection path
 against the live site and prints what came back — which engine launched, which
 pager was used, how many listings survived. It drives the shipped adapter and

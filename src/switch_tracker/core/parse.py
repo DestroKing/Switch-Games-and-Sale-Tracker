@@ -75,25 +75,43 @@ def parse_price(raw: str | float | None) -> float | None:
     return _parse_float_prefix(normalised)
 
 
-_RUPEE_FIGURE = re.compile(r"(?:₹|Rs\.?|INR)\s*([\d.,]+)", re.IGNORECASE)
+# The word boundaries on the letter markers are the whole point of this
+# pattern. Without them "Rs" matched the "rs" INSIDE ordinary words, and the
+# figure captured was whatever number happened to follow: "Mario Party
+# Superstars 3 modes" priced at 3, "Warriors 4 player co-op" at 4. Every one of
+# those is a plausible-looking price that is off by three orders of magnitude,
+# written into price history with nothing reporting an error.
+#
+# ``₹`` needs no boundary -- it is not a word character, and it is the only
+# marker that can safely sit flush against a digit.
+#
+# The digit group is deliberately stricter than the old ``[\d.,]+``: comma
+# grouping with at most two decimals is how money is written, and it refuses
+# the malformed runs a looser class would hand to the parser.
+_RUPEE_FIGURE = re.compile(r"(?:₹|\bRs\.?|\bINR)\s*([\d,]+(?:\.\d{1,2})?)", re.IGNORECASE)
 
 
 def first_rupee_price(text: str | None) -> float | None:
+    """The first rupee figure in a blob of card text, or None.
+
+    Layer 4 of the extraction ladder: reached only when a store's price
+    SELECTOR matched nothing, so it is a safety net rather than the main path.
+
+    Known limitation: "first" is literal. A card reading "MRP ₹5,999 ₹3,999"
+    yields 5,999 -- the struck-through original, not what you would pay. Plain
+    text cannot tell the two apart, which is exactly why the selector layer
+    above prefers a sale-price selector where a store offers one (see
+    GameLand's ``ins`` ordering in profiles.py).
+    """
     if not text:
         return None
-
-    match = re.search(
-        r"₹\s*([\d,]+(?:\.\d{1,2})?)",
-        text,
-    )
-
-    if not match:
-        return None
-
-    try:
-        return float(match.group(1).replace(",", ""))
-    except ValueError:
-        return None
+    match = _RUPEE_FIGURE.search(text)
+    # Back through parse_price rather than a local float(): thousands
+    # separators and the "Rs." decimal trap are already solved there, and two
+    # parsers for one job drift apart. Note the capture group above is narrower
+    # than parse_price accepts, so the European "4.499,00" form never reaches
+    # it -- see the test that pins that.
+    return parse_price(match.group(1)) if match else None
 
 
 # ------------------------------------------------------------- classification

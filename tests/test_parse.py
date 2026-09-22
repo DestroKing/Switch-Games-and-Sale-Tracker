@@ -87,6 +87,54 @@ class TestFirstRupeePrice:
     def test_returns_none_when_no_rupee_figure_present(self) -> None:
         assert first_rupee_price("Out of stock") is None
 
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "Mario Party Superstars 3 modes",
+            "Warriors 4 player co-op",
+            "Nintendo Switch Sports 2 players",
+            "Hyrule Warriors 2 sealed",
+        ],
+    )
+    def test_a_word_ending_in_rs_is_not_a_rupee_marker(self, text: str) -> None:
+        """The bug that made this pattern quote 3 and 4 as prices.
+
+        The marker alternation had no word boundary, so "Rs" matched the "rs"
+        INSIDE Superstars and Warriors and captured whatever number followed.
+        Every result was a plausible-looking price three orders of magnitude
+        too small, written into price history with nothing raising.
+
+        Fixing it by matching only the rupee SYMBOL would work and would also
+        throw away "Rs. 3,299" and "INR 2,999", which real Indian storefronts
+        write -- and this function is the fallback that runs exactly when a
+        store's price selector already failed.
+        """
+        assert first_rupee_price(text) is None
+
+    def test_a_bare_number_with_no_marker_is_never_a_price(self) -> None:
+        assert first_rupee_price("Edition 2 of 4") is None
+
+    def test_does_not_attempt_the_european_decimal_form(self) -> None:
+        """parse_price handles "4.499,00"; this pattern will not reach it.
+
+        The digit group here is deliberately narrower than parse_price's input
+        -- comma grouping with at most two decimals -- so a dot inside the
+        integer part stops the match early. That is the right trade for card
+        text scraped off Indian storefronts, which never write money that way,
+        and loosening it would restore the sloppy class this pattern replaced.
+        Pinned so the narrowing stays a decision.
+        """
+        assert first_rupee_price("₹4.499,00") == 4.49
+
+    def test_takes_the_first_figure_even_when_it_is_the_struck_out_price(self) -> None:
+        """A known limitation, pinned so it is a decision and not a surprise.
+
+        Plain text cannot distinguish an MRP from the selling price beside it.
+        The selector layer above handles this properly where a store exposes a
+        sale-price element (GameLand's ``ins`` ordering); this fallback cannot.
+        """
+        assert first_rupee_price("MRP ₹5,999 ₹3,999") == 5999.0
+
 
 class TestClassifyExclusions:
     """Exclusions run BEFORE platform matching. This ordering is load-bearing."""
