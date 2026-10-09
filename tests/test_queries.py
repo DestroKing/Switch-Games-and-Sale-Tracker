@@ -182,6 +182,17 @@ class TestMovers:
         assert movers[0]["now_price"] == 3599
         assert movers[0]["pct"] < 0
 
+    def test_returns_all_movers_without_a_60_row_cap(self, conn) -> None:
+        for listing_id in range(1, 62):
+            add_listing(conn, listing_id, "nistore", f"Game {listing_id}")
+            add_price(conn, listing_id, 1, 1000, at="2026-08-01")
+            add_price(conn, listing_id, 2, 900, at="2026-08-15")
+
+        movers = queries.movers(conn)
+
+        assert len(movers) == 61
+        assert {m["id"] for m in movers} == set(range(1, 62))
+
     def test_ignores_a_listing_whose_price_did_not_move(self, conn) -> None:
         add_listing(conn, 1, "nistore", "Zelda")
         add_price(conn, 1, 1, 4499, at="2026-08-01")
