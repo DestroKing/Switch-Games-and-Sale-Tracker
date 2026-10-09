@@ -238,7 +238,7 @@ def listings(conn: sqlite3.Connection, query: ListingQuery) -> dict[str, Any]:
     return {"total": total, "rows": rows, "offset": query.safe_offset(), "limit": query.safe_limit()}
 
 
-def movers(conn: sqlite3.Connection, limit: int = 60) -> list[dict[str, Any]]:
+def movers(conn: sqlite3.Connection) -> list[dict[str, Any]]:
     """Price changes since each listing's PREVIOUS OBSERVATION.
 
     ``fx_suspect`` is the synchronised-move check the schema was built to
@@ -291,7 +291,7 @@ def movers(conn: sqlite3.Connection, limit: int = 60) -> list[dict[str, Any]]:
         )
 
     enriched.sort(key=lambda r: r["pct"])
-    return enriched[:limit]
+    return enriched
 
 
 def facets(conn: sqlite3.Connection) -> dict[str, list[dict[str, Any]]]:
