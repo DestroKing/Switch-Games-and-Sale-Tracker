@@ -60,7 +60,7 @@ function health() {
  * same ratio, that is the rupee moving, not the shops. Flagging it here keeps
  * a currency wobble from reading as a catalogue-wide sale.
  */
-function movers(limit = 60) {
+function movers() {
   const rows = getDb()
     .query<MoverRow, []>(
       `WITH ranked AS (
@@ -100,7 +100,7 @@ function movers(limit = 60) {
   });
 
   enriched.sort((a, b) => a.pct - b.pct);
-  return enriched.slice(0, limit);
+  return enriched;
 }
 
 /**
