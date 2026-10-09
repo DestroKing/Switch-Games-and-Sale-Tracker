@@ -193,6 +193,23 @@ class TestMovers:
         assert len(movers) == 61
         assert {m["id"] for m in movers} == set(range(1, 62))
 
+    def test_shows_only_changes_above_one_percent(self, conn) -> None:
+        prices = {1: 1010, 2: 1011, 3: 990, 4: 989}
+        for listing_id, current_price in prices.items():
+            add_listing(conn, listing_id, "nistore", f"Game {listing_id}")
+            add_price(conn, listing_id, 1, 1000, at="2026-08-01")
+            add_price(conn, listing_id, 2, current_price, at="2026-08-15")
+
+        movers = queries.movers(conn)
+        assert {m["id"] for m in movers} == {2, 4}
+
+        listings = queries.listings(conn, queries.ListingQuery(limit=10))["rows"]
+        by_id = {row["id"]: row["change_pct"] for row in listings}
+        assert by_id[1] is None
+        assert by_id[2] > 1
+        assert by_id[3] is None
+        assert by_id[4] < -1
+
     def test_ignores_a_listing_whose_price_did_not_move(self, conn) -> None:
         add_listing(conn, 1, "nistore", "Zelda")
         add_price(conn, 1, 1, 4499, at="2026-08-01")

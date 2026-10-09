@@ -80,15 +80,19 @@ function movers() {
     )
     .all();
 
+  const movers = rows.filter(
+    (r) => Math.abs(((r.now_price - r.prev_price) / r.prev_price) * 100) > 1,
+  );
+
   // Cluster by rounded percentage move within a currency.
   const clusters = new Map<string, number>();
-  for (const r of rows) {
+  for (const r of movers) {
     const pct = ((r.now_price - r.prev_price) / r.prev_price) * 100;
     const key = `${r.currency}:${pct.toFixed(1)}`;
     clusters.set(key, (clusters.get(key) ?? 0) + 1);
   }
 
-  const enriched = rows.map((r) => {
+  const enriched = movers.map((r) => {
     const pct = ((r.now_price - r.prev_price) / r.prev_price) * 100;
     const key = `${r.currency}:${pct.toFixed(1)}`;
     return {
