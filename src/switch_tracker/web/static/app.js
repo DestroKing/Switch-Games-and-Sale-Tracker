@@ -290,12 +290,7 @@ if (fixPicker) {
  *  moved -- the single most useful thing a price tracker can say. */
 let movementById = new Map();
 
-/** What /api/movers returns at most. Mirrored here only so the UI can say
- *  "60+" instead of "60" when it is clearly truncated. */
-const MOVERS_CAP = 60;
-/** How many movers to show before the fold. The full set is 60 rows, which
- *  measured 3,176px of a 9,409px page -- a third of the document for a
- *  secondary section, pushing the main listings table far out of sight. */
+/** How many movers to show before the fold; Show all reveals the full result set. */
 const MOVERS_PREVIEW = 6;
 let moversExpanded = false;
 let moversData = [];
@@ -332,9 +327,7 @@ async function boot() {
   // to say which it is rather than letting two different numbers
   // sit side by side unexplained.
   const drops = mv.filter((m) => m.pct < 0 && !m.fx_suspect).length;
-  // /api/movers caps at 60 rows, so this is a floor, not a total. Labelled
-  // "60+" at the cap rather than stating a number that may be short.
-  const dropLabel = mv.length >= MOVERS_CAP ? `${num(drops)}+` : num(drops);
+  const dropLabel = num(drops);
   $("stats").innerHTML =
     statTile("Listings", num(sum.listings)) +
     statTile("Stores with data", num(sum.stores)) +
@@ -399,7 +392,7 @@ function paintMovers() {
   const mv = moversData;
   const shown = moversExpanded ? mv : mv.slice(0, MOVERS_PREVIEW);
   $("moversSub").textContent = mv.length
-    ? `${mv.length}${mv.length >= MOVERS_CAP ? "+" : ""} changed`
+    ? `${mv.length} changed`
     : "";
   $("movers").innerHTML = mv.length ? `
     <div class="tablewrap"><table>
