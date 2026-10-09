@@ -26,6 +26,9 @@ SORT_COLUMNS = {
 #: currency, before it reads as the currency moving rather than the shops.
 FX_CLUSTER_THRESHOLD = 8
 
+#: Show a price movement only when its absolute percentage change exceeds this.
+MIN_CHANGE_PCT = 1.0
+
 
 @dataclass(frozen=True, slots=True)
 class ListingQuery:
@@ -147,6 +150,7 @@ _NTH_LATEST_ID = """(
 
 _LATEST_ID = _NTH_LATEST_ID.format(n=0)
 _PREVIOUS_ID = _NTH_LATEST_ID.format(n=1)
+_CHANGE_PCT = "((latest.inr_price - previous.inr_price) / previous.inr_price) * 100.0"
 
 
 def listings(conn: sqlite3.Connection, query: ListingQuery) -> dict[str, Any]:
@@ -186,6 +190,8 @@ def listings(conn: sqlite3.Connection, query: ListingQuery) -> dict[str, Any]:
         where.append("previous.inr_price IS NOT NULL")
         where.append("previous.inr_price != 0")
         where.append("latest.inr_price != previous.inr_price")
+        where.append(f"ABS({_CHANGE_PCT}) > ?")
+        params.append(MIN_CHANGE_PCT)
 
     clause = f"WHERE {' AND '.join(where)}" if where else ""
     # `latest` is a JOINED ROW, not a projected value. It has to be: in_stock_only
@@ -227,7 +233,8 @@ def listings(conn: sqlite3.Connection, query: ListingQuery) -> dict[str, Any]:
             f"    WHEN previous.inr_price IS NOT NULL "
             f"         AND previous.inr_price != 0 "
             f"         AND latest.inr_price IS NOT NULL "
-            f"    THEN ((latest.inr_price - previous.inr_price) / previous.inr_price) * 100.0 "
+            f"         AND ABS({_CHANGE_PCT}) > {MIN_CHANGE_PCT} "
+            f"    THEN {_CHANGE_PCT} "
             f"    ELSE NULL "
             f"END AS change_pct "
             f"{from_clause} "
@@ -272,6 +279,9 @@ def movers(conn: sqlite3.Connection) -> list[dict[str, Any]]:
 
     def pct_of(row: dict[str, Any]) -> float:
         return float(((row["now_price"] - row["prev_price"]) / row["prev_price"]) * 100)
+
+    # Ignore tiny currency and store changes in the movers panel and its counts.
+    rows = [row for row in rows if abs(pct_of(row)) > MIN_CHANGE_PCT]
 
     # Cluster by rounded percentage within a currency.
     clusters = Counter(f"{r['currency']}:{pct_of(r):.1f}" for r in rows)
