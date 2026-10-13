@@ -294,6 +294,8 @@ let movementById = new Map();
 const MOVERS_PREVIEW = 6;
 let moversExpanded = false;
 let moversData = [];
+let moversStore = "";
+
 
 /** One figure in the summary strip.
  *  The qualifier goes inside the LABEL, not the value: the strip renders the
@@ -379,18 +381,46 @@ async function boot() {
     : "";
 
   moversData = mv;
+  paintMoverStoreFilter();
   paintMovers();
 
   await loadFacets();
   await search();
 }
 
+
+function paintMoverStoreFilter() {
+  const select = $("moversStore");
+  const previous = moversStore;
+
+  const stores = [...new Set(
+    moversData.map((m) => m.store).filter(Boolean)
+  )].sort((a, b) => a.localeCompare(b));
+
+  select.innerHTML =
+    '<option value="">All stores</option>' +
+    stores.map((store) =>
+      `<option value="${esc(store)}">${esc(store)}</option>`
+    ).join("");
+
+  // Keep the selection if that store still has movements.
+  // Otherwise, return to All stores.
+  moversStore = stores.includes(previous) ? previous : "";
+  select.value = moversStore;
+}
+
+
 /** The movers table, capped to a preview with an explicit way to see the rest.
  *  Progressive disclosure rather than truncation: the count is always visible,
  *  so nothing is hidden without saying so. */
 function paintMovers() {
-  const mv = moversData;
-  const shown = moversExpanded ? mv : mv.slice(0, MOVERS_PREVIEW);
+  const mv = moversStore
+    ? moversData.filter((m) => m.store === moversStore)
+    : moversData;
+
+  const shown = moversExpanded
+    ? mv
+    : mv.slice(0, MOVERS_PREVIEW);
   $("moversSub").textContent = mv.length
     ? `${mv.length} changed`
     : "";
@@ -428,6 +458,13 @@ function paintMovers() {
     if (!moversExpanded) $("moversHead").scrollIntoView({ block: "nearest" });
   });
 }
+
+$("moversStore").addEventListener("change", (event) => {
+  moversStore = event.target.value;
+  moversExpanded = false;
+  paintMovers();
+});
+
 
 /* -------------------------------------------------------------- 4. listings */
 
