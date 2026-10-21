@@ -540,7 +540,8 @@ async def main() -> int:
     slots, browser_slots = asyncio.Semaphore(jobs), asyncio.Semaphore(min(jobs, 3))
     if jobs > 1:
         sys.stdout = _PerStoreStdout(sys.stdout)  # type: ignore[assignment]
-        print(f"Checking {len(stores)} stores, up to {jobs} at a time; each prints when it finishes.")
+        if len(stores) > 1:
+            print(f"Checking {len(stores)} stores, up to {jobs} at a time; each prints when it finishes.")
 
     async def check(store: StoreConfig) -> bool:
         browser = store.kind is AdapterKind.BROWSER
