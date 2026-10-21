@@ -155,6 +155,30 @@ class TestGames:
         assert {r["id"] for r in result["rows"]} == {1, 2, 3}
 
 
+class TestLowestEver:
+    def test_reports_the_lowest_price_ever_recorded_across_stores_and_runs(self, shelf) -> None:
+        add_price(shelf, 1, 2, 3499, at="2026-02-01T00:00:00Z")  # NI dipped to 3,499 once...
+        add_price(shelf, 1, 3, 4999, at="2026-03-01T00:00:00Z")  # ...then went back up
+        metroid = queries.games(shelf, queries.ListingQuery(q="metroid"))["rows"][0]
+        assert (metroid["best_price"], metroid["lowest_ever"]) == (4499, 3499)
+        assert metroid["at_lowest"] is False
+
+    def test_at_lowest_needs_history_not_one_observation(self, shelf) -> None:
+        """Seen once, every price is trivially the lowest ever -- not worth a badge."""
+        kirby = queries.games(shelf, queries.ListingQuery(q="kirby"))["rows"][0]
+        assert (kirby["lowest_ever"], kirby["at_lowest"]) == (5999, False)
+        add_price(shelf, 4, 2, 5499, at="2026-02-01T00:00:00Z")  # second run, a new low
+        kirby = queries.games(shelf, queries.ListingQuery(q="kirby"))["rows"][0]
+        assert (kirby["best_price"], kirby["at_lowest"]) == (5499, True)
+
+    def test_respects_the_condition_being_viewed(self, shelf) -> None:
+        add_listing(shelf, 7, "amazon", "Kirby Air Riders - Used", platform="SWITCH2", condition="PRE_OWNED")
+        add_price(shelf, 7, 1, 2999, at="2026-01-01T00:00:00Z")
+        matcher.rematch(shelf)
+        new_only = queries.games(shelf, queries.ListingQuery(q="kirby", condition="NEW"))["rows"][0]
+        assert new_only["lowest_ever"] == 5999  # the used copy's 2,999 does not count
+
+
 class TestOffersWithNoRupeePrice:
     """An offer with no exchange rate yet still counts -- as listings() counts it."""
 
@@ -190,6 +214,16 @@ class TestOffersWithNoRupeePrice:
 
 
 class TestWatchStatus:
+    def test_a_new_only_watch_ignores_a_used_copy_under_target(self, shelf) -> None:
+        add_listing(shelf, 7, "amazon", "Kirby Air Riders - Used", platform="SWITCH2", condition="PRE_OWNED")
+        add_price(shelf, 7, 1, 2999, at="2026-01-01T00:00:00Z")
+        matcher.rematch(shelf)
+        item = {"game": "kirby air riders", "platform": "SWITCH2", "target": 4000}
+        [any_copy] = queries.watch_status(shelf, [{**item, "condition": "ANY"}])
+        [new_only] = queries.watch_status(shelf, [{**item, "condition": "NEW"}])
+        assert (any_copy["hit"], any_copy["best"]["best_price"]) == (True, 2999)
+        assert (new_only["hit"], new_only["best"]["best_price"]) == (False, 5999)
+
     def test_a_watch_follows_its_game_through_an_alias(self, shelf) -> None:
         """Adding the alias that fixes a split must not orphan a watch on the old key."""
         aliases = {"metroid prime 4": "metroid prime 4 beyond"}

@@ -89,7 +89,11 @@ windowless app, so it prints nothing on screen; the confirmation goes to
 "switch-tracker daily collection". The
 scheduled run goes through the same one-run-at-a-time guard as the button, so
 it can never collide with a collection you started by hand. If the PC is off at
-that time, that day is skipped.
+that time, it runs as soon as the PC is next on -- unless a collection has
+already succeeded since that day's scheduled time. When a watched game hits your target during a scheduled
+run, Windows shows a notification even with no dashboard open (once per new
+hit). The dashboard's Collector section shows whether the daily collection is
+set up and when it runs next.
 
 ## When two shops' copies of one game show as two rows
 
@@ -128,7 +132,8 @@ Everything writable is under `%LOCALAPPDATA%\switch-tracker\`:
 
 | File | What |
 |---|---|
-| `tracker.db` | The price history. This is the valuable one — back it up |
+| `tracker.db` | The price history. This is the valuable one |
+| `backups/` | A copy of `tracker.db` after every collection, newest 7 kept. To restore, close the app and copy one over `tracker.db` |
 | `stores.local.json` | Corrections written by "Check stores" |
 | `profiles.local.json` | Selectors saved by "Fix a broken store" |
 | `watchlist.local.json` | Your watched games and targets — survives deleting the database |

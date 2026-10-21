@@ -34,6 +34,11 @@ from switch_tracker import paths
 #: GET reading mid-write could fail a concurrent PUT.
 _LOCK = threading.RLock()
 
+#: Which copies a watch compares against its target. ANY = new or pre-owned
+#: (the default); NEW = ignore pre-owned, for someone who only ever buys new
+#: and would otherwise be alerted by a used copy under target.
+CONDITIONS = ("ANY", "NEW")
+
 
 def _parse(item: Any) -> dict[str, Any] | None:
     # The file is hand-editable, so it is a trust boundary: a target typed as
@@ -47,10 +52,15 @@ def _parse(item: Any) -> dict[str, Any] | None:
     target = item.get("target")
     if isinstance(target, bool) or not isinstance(target, (int, float)) or target <= 0:
         target = None
+    # Absent (every entry written before this existed) or unrecognised means
+    # ANY -- exactly how such an entry already behaved, so nothing changes
+    # for a watch the user never touched.
+    condition = item.get("condition") if item.get("condition") in CONDITIONS else "ANY"
     return {
         "game": item["game"],
         "platform": item["platform"],
         "target": None if target is None else float(target),
+        "condition": condition,
     }
 
 
@@ -99,12 +109,36 @@ class WatchlistFull(Exception):
     """Adding one more would exceed MAX_ITEMS."""
 
 
-def upsert(game: str, platform: str, target: float | None) -> list[dict[str, Any]]:
+#: "Leave this field as it is" -- distinct from None, which for ``target``
+#: is a real value meaning "no target".
+KEEP: Any = object()
+
+
+def upsert(
+    game: str, platform: str, target: float | None = KEEP, condition: str | None = None
+) -> list[dict[str, Any]]:
+    """Add or update one watch. A field passed as KEEP (target) or None
+    (condition) keeps the entry's current value.
+
+    Keep-by-default is what makes the two controls independent. The target box
+    sends no condition, so overwriting would reset "New only" to Any on every
+    price edit; the Any/New toggle sends no target, so it cannot race a target
+    edit still in flight and put the OLD price back.
+    """
     with _LOCK:
-        items = [i for i in read() if (i["game"], i["platform"]) != (game, platform)]
+        current = read()
+        key = (game, platform)
+        existing = next((i for i in current if (i["game"], i["platform"]) == key), None)
+        # Every entry with this key goes, not just the first: a hand-edited
+        # duplicate must not survive the update with stale settings.
+        items = [i for i in current if (i["game"], i["platform"]) != key]
         if len(items) >= MAX_ITEMS:
             raise WatchlistFull(f"The watchlist is limited to {MAX_ITEMS} games.")
-        items.append({"game": game, "platform": platform, "target": target})
+        if target is KEEP:
+            target = existing["target"] if existing else None
+        if condition is None:
+            condition = existing["condition"] if existing else "ANY"
+        items.append({"game": game, "platform": platform, "target": target, "condition": condition})
         _write(items)
         return items
 

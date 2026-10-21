@@ -406,11 +406,36 @@ async function boot() {
   paintMoverStoreFilter();
   paintMovers();
 
+  loadSchedule();  // not awaited: an OS query, and nothing below depends on it
   // Watchlist before the table: the table's ☆ buttons are painted from it.
   await Promise.all([loadWatch(), loadFacets()]);
   await search();
 }
 
+
+/** One line under the Collector heading: whether prices are collected daily
+ *  without anyone pressing a button, and when next. Read-only on purpose --
+ *  setting the schedule up is a command, not something a web page may do. */
+async function loadSchedule() {
+  const note = $("scheduleNote");
+  let s;
+  try {
+    s = await api("/api/schedule");
+  } catch {
+    note.textContent = "";
+    return;
+  }
+  if (!s.supported) {
+    note.textContent = "";
+  } else if (s.registered) {
+    note.innerHTML = `<span class="status ok">Collects daily on its own</span>` +
+      (s.next_run ? `<span class="muted"> · next ${esc(s.next_run)}</span>` : "") +
+      (s.last_run && !/never|N\/A/i.test(s.last_run) ? `<span class="muted"> · last ${esc(s.last_run)}</span>` : "");
+  } else {
+    note.innerHTML = `<span class="status idle">Not collecting automatically</span>` +
+      `<span class="muted"> · to collect every day, run <code>START.bat schedule --at 07:30</code></span>`;
+  }
+}
 
 function paintMoverStoreFilter() {
   const select = $("moversStore");
@@ -714,6 +739,19 @@ const offersLabel = (g) => {
   return g.offers === g.stores ? stores : `${num(g.offers)} offers<span class="dim"> · ${stores}</span>`;
 };
 
+/** The price cell of a Games or Watchlist row: the best price, then its
+ *  history -- "lowest ever" when it IS the all-time low (only with 2+ runs of
+ *  history; see queries.games), otherwise the low it has been, if lower. That
+ *  answers "is this a good price?" without opening the chart. */
+function priceCell(best, lowest, atLowest) {
+  const note = atLowest
+    ? '<span class="tag low">lowest ever</span>'
+    : lowest !== null && lowest !== undefined && best !== null && lowest < best
+      ? `<span class="lowest">lowest ${inr(lowest)}</span>`
+      : "";
+  return `<td class="num price">${inr(best)}${note ? `<span class="price-note">${note}</span>` : ""}</td>`;
+}
+
 function gameRowHtml(g) {
   const watching = watchedKeys().has(watchKey(g.game, g.platform));
   const best = { platform: g.platform, region: g.best_region, condition: g.best_condition,
@@ -724,7 +762,7 @@ function gameRowHtml(g) {
       <td class="title-cell"><div class="clamp">
         <span class="name">${esc(g.title)}</span><span class="meta">${
           g.platform === "SWITCH2" ? '<span class="tag sw2">Switch 2</span>' : ""}</span></div></td>
-      <td class="num price">${inr(g.best_price)}</td>
+      ${priceCell(g.best_price, g.lowest_ever, g.at_lowest)}
       <td><a href="${safeHref(g.best_url)}" target="_blank" rel="noopener">${esc(g.best_store)}</a>` +
       `<span class="meta">${tags({ ...best, platform: "" })}</span></td>
       <td class="num">${offersLabel(g)}</td>
@@ -944,9 +982,12 @@ function paintWatch() {
   // when Tab has just moved focus to the next control in it. Remember which
   // control that was and put focus back, or a keyboard user lands on <body>.
   const active = document.activeElement;
+  // data-cond too: the Any/New pair share classes and game, so without it the
+  // refocus would land on "Any" after pressing "New".
   const refocus = active && $("watch").contains(active) && active.dataset.game
     ? `.${[...active.classList].join(".")}[data-game="${CSS.escape(active.dataset.game)}"]` +
-      `[data-platform="${CSS.escape(active.dataset.platform)}"]`
+      `[data-platform="${CSS.escape(active.dataset.platform)}"]` +
+      (active.dataset.cond ? `[data-cond="${CSS.escape(active.dataset.cond)}"]` : "")
     : null;
 
   if (!watched.length) {
@@ -957,7 +998,9 @@ function paintWatch() {
   $("watch").innerHTML = `<div class="tablewrap"><table>
     <caption class="visually-hidden">Watched games, best current offer and your target</caption>
     <thead><tr><th class="plain" scope="col">Game</th><th class="plain num" scope="col">Best now</th>
-      <th class="plain" scope="col">Where</th><th class="plain num" scope="col">Your target</th>
+      <th class="plain" scope="col">Where</th>
+      <th class="plain" scope="col" title="Which copies count against your target">Copies</th>
+      <th class="plain num" scope="col">Your target</th>
       <th class="plain" scope="col"><span class="visually-hidden">Remove</span></th></tr></thead>
     <tbody>${watched.map((w) => {
       const b = w.best;
@@ -966,11 +1009,12 @@ function paintWatch() {
         <td class="title-cell"><div class="clamp"><span class="name">${esc(title)}</span><span class="meta">${
           w.platform === "SWITCH2" ? '<span class="tag sw2">Switch 2</span>' : ""}${
           w.hit ? '<span class="status ok">at target</span>' : ""}</span></div></td>
-        <td class="num price">${b ? inr(b.best_price) : "—"}</td>
+        ${b ? priceCell(b.best_price, b.lowest_ever, b.at_lowest) : '<td class="num price">—</td>'}
         <td>${b ? `<a href="${safeHref(b.best_url)}" target="_blank" rel="noopener">${esc(b.best_store)}</a>` +
               `<span class="meta">${tags({ region: b.best_region, condition: b.best_condition,
                                            in_stock: b.best_in_stock })}</span>`
             : '<span class="muted">No offers right now</span>'}</td>
+        <td>${conditionToggle(w, title)}</td>
         <td class="num"><input class="target" type="number" inputmode="numeric" min="1" step="1"
              value="${w.target ?? ""}" placeholder="₹ any" data-game="${esc(w.game)}"
              data-platform="${esc(w.platform)}" aria-label="Target price for ${esc(title)}"></td>
@@ -981,11 +1025,29 @@ function paintWatch() {
   if (refocus) $("watch").querySelector(refocus)?.focus({ preventScroll: true });
 }
 
-async function saveWatch(game, platform, target) {
+/** Any / New only, per watched game: whether a pre-owned copy can satisfy the
+ *  target. The same segmented control as the toolbar's console and condition
+ *  filters, so it reads as a choice of two rather than a button. */
+function conditionToggle(w, title) {
+  const button = (value, label) =>
+    `<button type="button" class="cond" data-cond="${value}" data-game="${esc(w.game)}" ` +
+    `data-platform="${esc(w.platform)}" aria-pressed="${w.condition === value}">${label}</button>`;
+  return `<div class="seg mini" role="group" aria-label="Copies that count for ${esc(title)}">` +
+    button("ANY", "Any") + button("NEW", "New only") + `</div>`;
+}
+
+/** A field left ``undefined`` is not sent, and the server then KEEPS it. So
+ *  the target box (no condition) and the Any/New toggle (no target) never
+ *  overwrite each other -- not even when one's request is still in flight
+ *  while the other's is sent. ``null`` target is sent: it means "no target". */
+async function saveWatch(game, platform, target, condition) {
+  const body = { game, platform };
+  if (target !== undefined) body.target = target;
+  if (condition) body.condition = condition;
   watched = await api("/api/watchlist", {
     method: "PUT",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ game, platform, target }),
+    body: JSON.stringify(body),
   });
   paintWatch();
 }
@@ -1007,7 +1069,9 @@ async function dropWatch(game, platform) {
   $("undoWatch").addEventListener("click", async () => {
     watchNote("");
     try {
-      await saveWatch(game, platform, previous.target ?? null);
+      // The condition explicitly: the entry was deleted, so the server has no
+      // setting left to keep, and "New only" would quietly come back as Any.
+      await saveWatch(game, platform, previous.target ?? null, previous.condition);
       syncWatchButtons();
       watchNote(`<span class="status ok">Watching ${esc(name)} again</span>`);
     } catch (err) {
@@ -1073,6 +1137,21 @@ $("watch").addEventListener("change", async (e) => {
   } catch (err) {
     input.setCustomValidity(err.message);
     input.reportValidity();
+  }
+});
+
+$("watch").addEventListener("click", async (e) => {
+  const button = e.target.closest("button.cond");
+  if (!button || button.getAttribute("aria-pressed") === "true") return;
+  const { game, platform, cond } = button.dataset;
+  // No target sent: the server keeps whatever it has. Sending the target from
+  // `watched` raced an unsaved edit -- type a price, click "New only", and the
+  // toggle's request could land second and put the OLD price back.
+  try {
+    await saveWatch(game, platform, undefined, cond);
+    watchNote(`<span class="status ok">${cond === "NEW" ? "Counting new copies only" : "Counting any copy"}</span>`);
+  } catch (err) {
+    watchNote(`<span class="status failed">Could not change it: ${esc(err.message)}</span>`);
   }
 });
 

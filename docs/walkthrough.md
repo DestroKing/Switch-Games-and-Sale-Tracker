@@ -219,7 +219,7 @@ And outside `src/switch_tracker/`:
 
 | Path | What it is |
 |---|---|
-| `tests/` | 627 tests. `conftest.py` holds the shared setup ("fixtures", §1.12). |
+| `tests/` | 653 tests. `conftest.py` holds the shared setup ("fixtures", §1.12). |
 | `scripts/check_stores.py` | **The pre-release sweep.** Run any store, of any kind, against the **live** site and get a verdict, not just a count (Appendix B.2). |
 | `scripts/scrape_check.py`, `category_check.py`, `diagnose_extraction.py` | Narrower live-site tools: one browser store's walk, feed stores' category slugs, and "why did N rows become M" (Appendix B.2). |
 | `packaging/`, `switch_tracker.spec` | Turning it into a Windows `.exe` (§3.17). |
@@ -246,6 +246,7 @@ What you'll find in there:
 |---|---|---|
 | `tracker.db` | **All your price history.** | Only if you mean it — this is the data. |
 | `tracker.db-wal`, `tracker.db-shm` | SQLite's side files (§1.6). Part of the database. | Delete *with* `tracker.db`, never alone. |
+| `backups/` | A copy of the database after **every** collection, newest 7 kept (`core/db.py:backup`). Made with SQLite's `VACUUM INTO`, which copies one consistent snapshot. Copying the file by hand mid-run could tear it, and would miss what's still in the WAL. | Yes, but it's your undo. To restore one, close the app and copy it over `tracker.db`. |
 | `stores.local.json` | Corrections **Check stores** wrote (§3.1). | Yes — rebuilt by pressing **Check stores**. |
 | `profiles.local.json` | Selectors the click-to-pick tool saved (§3.16). | Yes — but you'll have to re-pick them. |
 | `settings.json` | Port, headful, collect-on-launch. | Yes — defaults return. |
@@ -1948,10 +1949,35 @@ start there would be all cost and no gain.
 (`switch_tracker.spec`). From source, the task runs `pythonw.exe` instead of
 `python.exe` when the venv has one.
 
-The known gap, marked with a `ponytail:` comment: a plain DAILY trigger skips the day
-if the PC is off at that time. "Run as soon as possible after a missed start" needs a
-task XML (`StartWhenAvailable`), not `schtasks` flags. It's worth adding if missed days
-turn out to matter.
+**A day the PC was off isn't lost.** A plain `schtasks /SC DAILY` trigger simply skips
+a day the PC was off at that time. So the task is registered from an XML definition
+(`task_xml()`) with `StartWhenAvailable`, the one setting the `schtasks` flags can't
+express: a missed run starts at the next chance. The task runs
+`collect-now --slot 07:30` (its own time), which does nothing if a collection that
+**succeeded** has finished since the most recent 07:30. So a catch-up never re-collects
+a day you already collected by hand.
+
+It's anchored to the slot, not a rolling window, and that matters. The first version
+skipped if anything was collected "in the last 20 hours". A missed 07:30 caught up at
+15:00 then made the *next* morning's run see a collection 16.5 hours old and skip,
+leaving about 40 hours between collections. And only a collection where at least one
+store succeeded counts: a catch-up that ran with no network writes all-failed rows,
+and must not convince tomorrow that today is done. The XML also
+runs as you with least privilege (no administrator rights needed), ignores battery
+restrictions, and refuses a second overlapping instance.
+
+**Alerts reach you with no tab open.** When the scheduled run ends, `notify_new_hits()`
+compares the watchlist's hits *before* and *after* the run and shows a Windows
+notification for each **new** one. That diff needs no stored state, and a game that
+sits under target all week doesn't pop up every morning. The notification goes through
+PowerShell's built-in WinRT API under PowerShell's own app id, so nothing is installed.
+The script is a **constant**: game titles come from shop data, so they arrive XML-escaped
+in an environment variable and are never spliced into PowerShell code.
+
+**The dashboard shows the schedule, read-only.** A line under the Collector heading
+reads `schtasks /Query`: *"Collects daily on its own · next …"*, or how to set it up.
+`/api/schedule` only ever reads. Creating an OS task from a web endpoint is exactly the
+capability a cross-site request must never reach (§1.4), so registering stays a command.
 
 ---
 
@@ -2207,6 +2233,13 @@ nothing new exists. The first version used the cheapest listing's title, and the
 cheapest copy is often used, so rows read "Super Mario Bros. Wonder - Pre-Owned". The
 condition belongs in the badge beside the best offer, not in the game's name.
 
+**Is it a good price?** Under the best price sits its history: a dim *"lowest ₹3,499"*
+when it has been cheaper before, or a green **lowest ever** tag when today's best *is*
+the all-time low. That's the lowest price recorded for the game across every store and
+every collection. It's a plain `MIN` over price history, so it can't produce a false
+"deal" the way trend detection could. The tag needs at least two collections of history:
+seen only once, every price is trivially its own lowest.
+
 *Best price* is the cheapest offer **you can buy**, so in-stock offers rank ahead of
 out-of-stock ones (§3.18). The store name links straight to that offer. In both price
 directions, games you can buy come first, out-of-stock-only games next, and games with
@@ -2282,6 +2315,21 @@ saves when it loses focus, with no button, so a note beside the heading confirms
 back. Now the note offers **Undo** for twelve seconds, which restores the entry *with*
 its target. The repaint after a save also puts keyboard focus back where Tab sent it;
 without that, tabbing out of a target box landed you at the top of the page.
+
+**Any copy, or new only, per game.** Each watched game has an **Any / New only** toggle.
+With *Any*, a pre-owned copy under target is a hit; with *New only*, used copies are
+ignored entirely, for the best price, the stock check and the lowest-ever figure alike.
+It's the same `games()` query with the condition filter set, so all three agree.
+Entries written before the toggle existed read as *Any*, which is how they already
+behaved.
+
+**The two controls never overwrite each other.** A save that leaves a field out keeps
+the stored value: the target box sends no condition, and the toggle sends no target.
+The toggle used to send the target it had on hand. Type a new price, click *New only*
+before leaving the box, and if the toggle's request landed second it put the **old**
+price back. An explicit `null` target still means "no target"; the server tells
+*omitted* from *null* apart. **Undo** re-sends the old target and condition
+explicitly, because the deleted entry had nothing left to keep.
 
 **A hit needs the best offer to be in stock.** "₹2,999, sold out" is not a price anyone
 can act on, and an alert that fires on it teaches you to ignore alerts. A test pins
@@ -2564,7 +2612,7 @@ land here from anywhere.
 Nothing is "done" until all four are green. Run them from the project root.
 
 ```bash
-uv run pytest                           # 627 tests, about four minutes
+uv run pytest                           # 653 tests, about four minutes
 uv run ruff check src tests scripts     # lint
 uv run ruff format src tests scripts    # formatting (rewrites files)
 uv run mypy                             # types, strict mode
@@ -2775,7 +2823,7 @@ writes to `stores.local.json` — and note that your guess in `stores.py` was ne
 | One game shows as two rows in **Games** | A missed merge: the two shops spell it differently enough that the keys differ ("The Legend of Zelda: …" vs "Zelda: …"). Deliberate — the matcher errs towards splitting (§3.18). | Add `{"one title": "the other title"}` to `matches.local.json` in the data dir, then run `switch-tracker match`. |
 | **Games** is empty but **Every listing** is not | The listings were never grouped: nothing has run the matcher since they were collected. | Restart the dashboard (it groups once on startup), or run `switch-tracker match`. |
 | A watched game is under target but not marked **at target** | Its cheapest offer is out of stock. A hit needs an offer you can actually buy (§4.6). | Nothing. Expand the game's row to see the out-of-stock offer. |
-| The daily collection didn't run | A DAILY task skips the day if the PC was off at that time (§3.19). Or the stores were never checked, so `collect-now` exits with code 2. | In *Task Scheduler*, find "switch-tracker daily collection" and read its *Last Run Result* (`0x2` means not checked yet). Press **Check stores** once if needed. |
+| The daily collection didn't run | It catches up the next time the PC is on, but skips if a collection already succeeded since that day's scheduled time (§3.19). Or the stores were never checked, so `collect-now` exits with code 2. A task registered *before* the catch-up change has no catch-up; run `schedule --at` again to replace it. | In *Task Scheduler*, find "switch-tracker daily collection" and read its *Last Run Result* (`0x2` means not checked yet). Press **Check stores** once if needed. |
 | `This dashboard only answers to its own address` or `Changes can only be made from the dashboard page itself` (403) | The cross-site guard (§1.4) refused the request. You opened the dashboard under an address it doesn't recognise, or something other than the dashboard page sent the change. | Open it as `http://127.0.0.1:<port>` or `http://localhost:<port>`, with the port the console printed. |
 | `A run is already going` (409) | One run at a time, enforced in the database, not the UI (§3.12). | Wait for it, or restart the app — a dead worker's run is reaped on startup. |
 | `'collect' is started by the dashboard, not run directly` | You ran a worker by hand without `--run-id`. Workers report into an existing run. | Use the dashboard, or `scripts/scrape_check.py` for one store. |

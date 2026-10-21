@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
-from switch_tracker import settings
+from switch_tracker import paths, settings
 from switch_tracker.adapters.registry import build_registry
 from switch_tracker.config import overrides
 from switch_tracker.core import db, matcher
@@ -55,6 +55,7 @@ async def run(run_id: int, only: tuple[str, ...] = ()) -> int:
             adapters=build_registry(client, provider),
             fx=FxService(conn, client),
             aliases=matcher.load_aliases(),
+            backup_dir=paths.backups_dir(),
         )
         # The FULL store list plus the selection -- see CollectService.run:
         # the store table projects every store's enabled flag, so pre-filtering

@@ -139,6 +139,10 @@ class RunLauncher:
         ).fetchone()
         return int(row["id"]) if row else None
 
+    @property
+    def conn(self) -> sqlite3.Connection:
+        return self._conn
+
     def worker_alive(self) -> bool:
         return self._lock.holder_alive()
 

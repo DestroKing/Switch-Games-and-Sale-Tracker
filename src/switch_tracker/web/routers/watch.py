@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sqlite3
+from typing import Literal
 
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
@@ -19,8 +20,12 @@ router = APIRouter(prefix="/api/watchlist", tags=["watchlist"])
 class WatchItem(BaseModel):
     game: str = Field(min_length=1, max_length=300)
     platform: str = Field(pattern=r"^(SWITCH|SWITCH2)$")
-    #: None = "tell me what it costs", with no alert.
+    #: None = "tell me what it costs", with no alert. OMITTED = keep the current
+    #: target (see watchlist.upsert), which is what the Any/New toggle relies on.
     target: float | None = Field(default=None, gt=0, le=100_000)
+    #: Which copies count: ANY (new or pre-owned) or NEW only. Omitted = keep
+    #: the watch's current setting (see watchlist.upsert).
+    condition: Literal["ANY", "NEW"] | None = None
 
 
 def _status(conn: sqlite3.Connection) -> list[dict[str, object]]:
@@ -37,7 +42,10 @@ def read(conn: Conn) -> list[dict[str, object]]:
 @router.put("", response_model=None)
 def upsert(item: WatchItem, conn: Conn) -> list[dict[str, object]] | JSONResponse:
     try:
-        watchlist.upsert(item.game, item.platform, item.target)
+        # An OMITTED target means "keep it", an explicit null means "clear it".
+        # Pydantic gives both as None; model_fields_set is what tells them apart.
+        target = item.target if "target" in item.model_fields_set else watchlist.KEEP
+        watchlist.upsert(item.game, item.platform, target, item.condition)
     except watchlist.WatchlistFull as exc:
         return problem(400, str(exc))
     return _status(conn)

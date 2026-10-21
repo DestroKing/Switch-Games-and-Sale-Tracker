@@ -55,6 +55,24 @@ Not yet committed (this batch):
   (51 KB, zero uses), and dead functions `settings.save`, `parse.infer_platform`,
   `profiles.SELECTOR_FIELDS`, `errors.error_fragment`.
 
+Done in the batch after that (not yet committed):
+
+- **Watch condition, per game**: Any / New only toggle on each watched game. Retargeting
+  keeps the setting; Undo restores it; entries from before the toggle read as Any.
+- **Lowest-ever price** on Games and Watchlist rows: "lowest ₹X", or a **lowest ever**
+  tag when today's best is the all-time low (needs 2+ collections of history).
+- **Automatic backups**: `VACUUM INTO backups/` after every collection, newest 7 kept;
+  a failed backup is a run warning, never a failed collection.
+- **Missed-day catch-up**: the task is registered from XML with `StartWhenAvailable`;
+  it runs `collect-now --slot HH:MM` (skips only if a SUCCESSFUL collection finished since
+  the latest slot -- a rolling 20 h window was found to skip whole days). Existing tasks need
+  `schedule --at` once more to pick this up.
+- **Notifications from the scheduled run**: one Windows toast per NEW hit (before/after
+  diff, no stored state); shop titles reach PowerShell only as escaped data. Verified:
+  a real test toast was sent successfully on this PC.
+- **Schedule status line** under Collector, read-only (`/api/schedule` <- `schtasks /Query`).
+- Not verified live (by request): registering the XML task and it actually firing.
+
 ---
 
 ## 2. Next up, in order
@@ -66,17 +84,12 @@ calibration: the last feature batch produced about **1 bug per 100 new lines**;
 
 | # | Item | Gain | Size | Risk | Notes |
 |---|---|---|---|---|---|
-| 1 | **Lowest-ever price** on Games + Watchlist rows ("lowest ever ₹X", "at its low") | High | S | Low, loud | Answers "is this a good price?" from history that exists; a MIN, far safer than deal detection |
-| 2 | **Automatic database backups** after each collection (`VACUUM INTO`, keep last N) | High | S | Low | `tracker.db` is the one irreplaceable file and nothing backs it up |
-| 3 | **Missed-day scheduling**: a logon trigger plus "skip if collected < 20 h ago" | Med | S-M | Med | Plain DAILY skips a day the PC was off. Check `schtasks /SC ONLOGON` needs no admin before relying on it |
-| 4 | **Toast from the scheduled run** (Windows notification via built-in PowerShell) | Med | M | Med | Today a 07:30 hit is unseen until a tab opens; stays on-machine, no outside service |
-| 5 | Read-only **schedule status** line ("Daily at 07:30 · last ran …" from `schtasks /query`) | Med | S | Low | Replaces the dropped "schedule control" (a write endpoint that creates OS tasks) |
-| 6 | **Static read-only snapshot** for the internet + scoped phone layout | High | M-L | Med, loud | Export Games + Watchlist only; strip `run_store.detail` and local paths; CSP; http(s) URLs only. Host choice pending (§3) |
-| 7 | **Filters in the URL** (refresh/back/bookmark) | Med | M | Med, loud | Pays off more once the snapshot has shareable links |
-| 8 | Out-of-stock sort hint (separator row or header note) | Low | S | Low | "Best price ▲" lists in-stock first; reads as a bug |
-| 9 | Facet counts that respect the other active filters | Low | M | Med, silent | Store counts ignore the console filter today |
-| 10 | Test hygiene: un-awaited `AsyncMock` warning in `test_flipkart_recovery.py` | Low | S | Low | |
-| 11 | **Detected deals** (drop vs trailing median, FX-suppressed) | Med-High | L | **High, silent** | Only if #1 proves not enough; ship as a flag before it ever alerts |
+| 1 | **Static read-only snapshot** for the internet + scoped phone layout | High | M-L | Med, loud | Export Games + Watchlist only; strip `run_store.detail` and local paths; CSP; http(s) URLs only. Host choice pending (§3) |
+| 2 | **Filters in the URL** (refresh/back/bookmark) | Med | M | Med, loud | Pays off more once the snapshot has shareable links |
+| 3 | Out-of-stock sort hint (separator row or header note) | Low | S | Low | "Best price ▲" lists in-stock first; reads as a bug |
+| 4 | Facet counts that respect the other active filters | Low | M | Med, silent | Store counts ignore the console filter today |
+| 5 | Test hygiene: un-awaited `AsyncMock` warning in `test_flipkart_recovery.py` | Low | S | Low | |
+| 6 | **Detected deals** (drop vs trailing median, FX-suppressed) | Med-High | L | **High, silent** | Only if the lowest-ever signal proves not enough; ship as a flag before it ever alerts |
 
 Verification runs (2026-10-21, on the office network, into a throwaway data dir):
 
@@ -114,11 +127,11 @@ Follow-ups from the live data and the final review:
 
 | Decision | Recommendation | Why it is yours |
 |---|---|---|
-| **Host for the snapshot** (needed only when #6 is built) | A non-GitHub static host, e.g. Cloudflare Pages by direct upload (no git involved) | Needs an account you create. Org policy forbids writes to github.com, which rules out GitHub Pages; `origin` points at github.com, so do not push |
-| **Watchlist per condition** ("new copies only") | Your call | Today a target compares against the cheapest copy of ANY condition, so a used copy under target counts as a hit |
+| **Host for the snapshot** -- DEFERRED: the user will discuss hosting in detail later; do not raise it until then | A non-GitHub static host, e.g. Cloudflare Pages by direct upload (no git involved) | Needs an account you create. Org policy forbids writes to github.com, which rules out GitHub Pages; `origin` points at github.com, so do not push |
 
 Decided: TypeScript tree deleted; `.idea/` untracked; `scrape_check.py` kept
-separate from `check_stores.py` (see Dropped).
+separate from `check_stores.py` (see Dropped); watch condition is a per-game
+Any / New only toggle (built).
 
 ---
 
