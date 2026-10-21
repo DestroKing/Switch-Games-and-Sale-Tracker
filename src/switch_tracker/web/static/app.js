@@ -572,6 +572,43 @@ function filterParams() {
   return p;
 }
 
+/** What the address bar carries: the filters, plus sort and view when they
+ *  are not the defaults. Never offset/limit -- a bookmark is a question, not
+ *  a scroll position. */
+function pageParams() {
+  const p = filterParams();
+  if (state.sort !== BLANK.sort || state.dir !== BLANK.dir) {
+    p.set("sort", state.sort);
+    p.set("dir", state.dir);
+  }
+  if (state.view !== "games") p.set("view", state.view);
+  return p;
+}
+
+/** The reverse, once at load: location.search into `state` and the controls.
+ *  Anything not offered by a control is ignored; unknown stores/regions are
+ *  dropped by loadFacets once it knows what exists. */
+function readUrl() {
+  const p = new URLSearchParams(location.search);
+  const pick = (id, value) =>
+    [...$(id).querySelectorAll("button")].find((b) => b.dataset.v === value);
+  for (const id of ["view", "platform", "condition"]) {
+    const chosen = pick(id, p.get(id) ?? (id === "view" ? state.view : ""));
+    if (!chosen) continue;
+    state[id] = chosen.dataset.v;
+    $(id).querySelectorAll("button").forEach((b) => b.setAttribute("aria-pressed", String(b === chosen)));
+  }
+  state.q = (p.get("q") ?? "").trim();
+  $("q").value = state.q;
+  state.inStock = p.get("in_stock") === "true";
+  $("stock").checked = state.inStock;
+  for (const key of ["store", "region"]) {
+    state[key] = (p.get(key) ?? "").split(",").filter(Boolean);
+  }
+  if (colsFor(state.view).some((c) => c.sortable && c.key === p.get("sort"))) state.sort = p.get("sort");
+  if (p.get("dir") === "asc" || p.get("dir") === "desc") state.dir = p.get("dir");
+}
+
 function queryString() {
   const p = filterParams();
   p.set("sort", state.sort);
@@ -584,6 +621,9 @@ function queryString() {
 /** Build one checkbox per value that actually exists in the data. */
 function fillBoxes(containerId, key, items) {
   const box = $(containerId);
+  // Counts refresh while the popover is open, right after a tick. Put focus
+  // back on that box, or a keyboard user is dropped onto <body> mid-list.
+  const focused = box.contains(document.activeElement) ? document.activeElement.value : null;
   box.innerHTML = "";
   for (const item of items) {
     const label = document.createElement("label");
@@ -593,6 +633,7 @@ function fillBoxes(containerId, key, items) {
       `<span>${esc(item.label)} <span class="muted">(${item.n})</span></span>`;
     box.appendChild(label);
   }
+  if (focused !== null) box.querySelector(`input[value="${CSS.escape(focused)}"]`)?.focus();
 }
 
 function syncChosen(key) {
@@ -626,8 +667,21 @@ function paintChips() {
     : "";
 }
 
+/** The filters the facet counts on screen were computed under; search()
+ *  refetches when they differ. facetSeq is searchSeq's guard, for facets. */
+let facetsKey = null;
+let facetSeq = 0;
+
 async function loadFacets() {
-  facets = await api("/api/facets");
+  const seq = ++facetSeq;
+  facetsKey = filterParams().toString();
+  const data = await api("/api/facets?" + facetsKey);
+  if (seq !== facetSeq) return;
+  facets = data;
+  // A value from a hand-edited or stale URL that is not in the data is dropped,
+  // not kept as a filter that can only ever match nothing.
+  state.store = state.store.filter((v) => facets.stores.some((s) => s.id === v));
+  state.region = state.region.filter((v) => facets.regions.some((r) => r.region === v));
   fillBoxes("storeBoxes", "store",
             facets.stores.map((s) => ({ value: s.id, label: s.name, n: s.n })));
   fillBoxes("regionBoxes", "region",
@@ -791,7 +845,15 @@ let searchSeq = 0;
 
 async function search(append = false) {
   const seq = ++searchSeq;
-  if (!append) $("list").innerHTML = `<div class="tablewrap">${skeleton("skel-row", 12)}</div>`;
+  if (!append) {
+    $("list").innerHTML = `<div class="tablewrap">${skeleton("skel-row", 12)}</div>`;
+    // Every filter, sort and view change ends here, so this one line keeps the
+    // address bar bookmarkable. Replace, not push: back leaves the page rather
+    // than stepping through every tick.
+    const url = pageParams().toString();
+    history.replaceState(null, "", location.pathname + (url ? "?" + url : ""));
+    if (filterParams().toString() !== facetsKey) loadFacets().catch(() => { facetsKey = null; });
+  }
 
   const games = state.view === "games";
   let data;
@@ -820,7 +882,22 @@ async function search(append = false) {
   // were reading, and the browser has no anchor left to hold, so the viewport
   // snaps to the top -- which made "Load 100 more" cost you the scroll back.
   const tbody = append ? $("list").querySelector("tbody") : null;
-  const body = (tbody ? data.rows : rows).map(rowHtml).join("");
+  const first = tbody ? rows.length - data.rows.length : 0;
+  // Sorted by price, games you can buy come first in both directions, so the
+  // out-of-stock tail restarts the price order. Say so with ONE separator,
+  // placed by the first such row's index across everything loaded so far --
+  // so a "Load more" page can never add a second one.
+  // Priced rows only: unpriced games (no exchange rate yet) sort last of all,
+  // in stock or not, so they never start the out-of-stock block.
+  const oosAt = games && state.sort === "price"
+    ? rows.findIndex((r) => r.best_price !== null && !r.best_in_stock) : -1;
+  const body = rows.slice(first).map((r, i) =>
+    (first + i === oosAt
+      // A td, not a th: every th is position:sticky in app.css. Not
+      // tr.detail either: collapsing the row above would delete it.
+      ? `<tr class="oos-sep"><td colspan="${colsFor(state.view).length}" class="muted">` +
+        `<b>Out of stock everywhere</b> — sorted by price again below</td></tr>`
+      : "") + rowHtml(r)).join("");
 
   const more = rows.length < data.total
     ? `<button class="more" id="more">Load ${Math.min(100, data.total - rows.length)} more</button>`
@@ -950,7 +1027,10 @@ $("list").addEventListener("click", async (e) => {
 
 let watched = [];
 const watchKey = (game, platform) => `${platform}|${game}`;
-const watchedKeys = () => new Set(watched.map((w) => watchKey(w.game, w.platform)));
+// Also the key the server resolved it to (best.game): a watch saved before an
+// alias or a matcher change keeps its old key, and its ☆ must still light up.
+const watchedKeys = () => new Set(watched.flatMap((w) =>
+  [watchKey(w.game, w.platform), watchKey(w.best?.game ?? w.game, w.platform)]));
 
 const watchButton = (game, platform, on) =>
   `<button class="watch quiet" type="button" aria-pressed="${on}" data-game="${esc(game)}" ` +
@@ -1055,7 +1135,9 @@ async function saveWatch(game, platform, target, condition) {
 async function dropWatch(game, platform) {
   // Remember the entry first: unwatching used to throw a typed-in target away
   // with no way back, one mis-click on ★ from losing it for good.
-  const previous = watched.find((w) => w.game === game && w.platform === platform);
+  const previous = watched.find((w) => (w.game === game || w.best?.game === game) && w.platform === platform);
+  // Delete by the STORED key: a ☆ in the table carries the game's current key.
+  game = previous?.game ?? game;
   watched = await api(`/api/watchlist?${new URLSearchParams({ game, platform })}`, { method: "DELETE" });
   paintWatch();
   if (!previous) return;
@@ -1303,4 +1385,5 @@ document.addEventListener("keydown", (e) => {
 // A run may already be going -- started on launch, or by a tab that has since
 // been closed. Reattach to it rather than pretending nothing is happening.
 if (ACTIVE_RUN) follow(ACTIVE_RUN);
+readUrl();
 boot();

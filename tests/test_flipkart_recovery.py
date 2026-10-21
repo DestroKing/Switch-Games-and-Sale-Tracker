@@ -211,7 +211,9 @@ async def test_flipkart_page_two_navigates_by_url_rather_than_clicking(monkeypat
     goto = AsyncMock()
     monkeypatch.setattr(adapter, "_goto_flipkart", goto)
 
-    await adapter._load_page(AsyncMock(), store, profile, store.search_urls[0], 2, resolved_url=target)
+    page = AsyncMock()
+    page.locator = MagicMock(return_value=AsyncMock())  # Page.locator is sync in Playwright
+    await adapter._load_page(page, store, profile, store.search_urls[0], 2, resolved_url=target)
 
     click_next.assert_not_awaited()
     assert goto.await_args.args[1] == target

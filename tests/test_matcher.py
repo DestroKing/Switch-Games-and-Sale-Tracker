@@ -52,6 +52,18 @@ class TestMatchKey:
                 "Mario Kart World - Nintendo Switch 2 Game",
             ),
             ("Zelda Tears of the Kingdom - Pre-Owned", "Zelda: Tears of the Kingdom (Nintendo Switch)"),
+            # Amazon India prepends the publisher.
+            ("Warner Bros Interactive Entertainment LEGO City Undercover", "LEGO City Undercover"),
+            (
+                "Warner Bros. Interactive Entertainment UK Harry Potter Quidditch Champions Deluxe",
+                "Harry Potter: Quidditch Champions Deluxe",
+            ),
+            (
+                "Square Enix Final Fantasy VII & VIII Remastered Twin Pack",
+                "Final Fantasy VII VIII Remastered Twin Pack",
+            ),
+            ("U&I Entertainment Hotline Miami Collection", "Hotline Miami Collection"),
+            ("Electronic Arts EA Sports FC 25", "EA Sports FC 25"),
         ],
     )
     def test_merges_spellings_of_one_game(self, a: str, b: str) -> None:
@@ -65,6 +77,12 @@ class TestMatchKey:
             ("Pokemon Legends Z-A", "Pokemon Legends Z"),
             ("Mario Kart 8 Deluxe", "Mario Kart 8"),
             ("Xenoblade Chronicles 2", "Xenoblade Chronicles 3"),
+            ("EA Sports FC 24", "EA Sports FC 25"),
+            # The publisher word IS the title here: never stripped.
+            ("Sega Genesis Classics", "Genesis Classics"),
+            ("Capcom Fighting Collection", "Fighting Collection"),
+            # Only a prefix is stripped, never a word mid-title.
+            ("Mario & Sonic at the Olympic Games", "Mario at the Olympic Games"),
         ],
     )
     def test_keeps_different_games_apart(self, a: str, b: str) -> None:
@@ -72,6 +90,17 @@ class TestMatchKey:
 
     def test_a_title_that_is_all_noise_cannot_match(self) -> None:
         assert match_key("Nintendo Switch Game (Asia)") == ""
+
+    @pytest.mark.parametrize(
+        ("title", "key"),
+        [
+            ("Ubisoft", "ubisoft"),
+            ("Square Enix Collection", "square enix collection"),
+            ("Bandai Namco Museum", "bandai namco museum"),
+        ],
+    )
+    def test_a_publisher_prefix_never_leaves_an_empty_or_stub_key(self, title: str, key: str) -> None:
+        assert match_key(title) == key
 
 
 class TestRematch:

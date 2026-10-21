@@ -34,8 +34,19 @@ def movers(conn: Conn) -> list[dict[str, object]]:
 
 
 @router.get("/facets")
-def facets(conn: Conn) -> dict[str, list[dict[str, object]]]:
-    return queries.facets(conn)
+def facets(
+    conn: Conn,
+    q: str = "",
+    platform: str = "",
+    region: str = "",
+    store: str = "",
+    condition: str = "",
+    in_stock: bool = False,
+) -> dict[str, list[dict[str, object]]]:
+    """Filter options, counted under the same filters /listings takes."""
+    return queries.facets(
+        conn, _query(q, platform, region, store, condition, in_stock, "", "price", "asc", 100, 0)
+    )
 
 
 @router.get("/schedule")

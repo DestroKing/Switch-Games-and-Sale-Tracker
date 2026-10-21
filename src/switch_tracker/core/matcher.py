@@ -54,6 +54,34 @@ _STOPWORDS = frozenset(
     }
 )
 
+# Publisher names Amazon India prepends to the title. Stripped only at the START
+# of the key, longest first, and only if a real title is left behind. Left out on
+# purpose because titles genuinely begin with them: "sega" (Sega Genesis
+# Classics), "capcom" (Capcom Fighting Collection), "konami" (Konami Collection),
+# "namco" (Namco Museum), "ea" (EA Sports FC -- "electronic arts" is stripped,
+# leaving "ea sports fc 25" as other shops write it).
+# ponytail: hand-curated list; extend it from real splits seen in a run, or use
+# matches.local.json aliases for one-offs.
+_PUBLISHER_PREFIXES = sorted(
+    (
+        tuple(p.split())
+        for p in (
+            "warner bros interactive entertainment uk",
+            "warner bros interactive entertainment",
+            "warner bros interactive",
+            "warner bros",
+            "square enix",
+            "bandai namco entertainment",
+            "bandai namco",
+            "u i entertainment",
+            "ubisoft",
+            "electronic arts",
+        )
+    ),
+    key=len,
+    reverse=True,
+)
+
 #: Straight, curly (U+2019, which shops paste from Word) and backtick.
 _APOSTROPHES = str.maketrans("", "", "'\u2019`")
 
@@ -66,7 +94,17 @@ def match_key(title: str) -> str:
     # "Luigi's Mansion" must not become "luigi s mansion" beside "Luigis".
     folded = unicodedata.normalize("NFKD", title).encode("ascii", "ignore").decode()
     words = normalise_title(folded.translate(_APOSTROPHES)).split()
-    return " ".join(w for w in words if w not in _STOPWORDS)
+    words = [w for w in words if w not in _STOPWORDS]
+    for prefix in _PUBLISHER_PREFIXES:
+        if tuple(words[: len(prefix)]) == prefix:
+            rest = words[len(prefix) :]
+            # Two words at least: one left over is a stub ("Ubisoft" -> "") or a
+            # generic word ("Square Enix Collection" -> "collection") that two
+            # different publishers' games would wrongly merge under.
+            if len(rest) >= 2:
+                words = rest
+            break
+    return " ".join(words)
 
 
 def load_aliases() -> dict[str, str]:

@@ -243,3 +243,43 @@ Design documents are in `docs/`:
 - `python-rewrite-plan.md` — the original spec
 - `python-rewrite-hld.md` — architecture, and the options that lost
 - `python-rewrite-lld.md` — the build plan
+
+---
+
+## Validating all stores on your own PC
+
+Shops change their sites without warning, and some networks (offices especially)
+block shopping sites outright. To check that every store really works, run
+these from the project folder, on your own network, in a prompt where `uv` works
+(`START.bat` sets that up the first time). None of them writes to your price
+history.
+
+```bat
+:: 1. The main check: every enabled store, one by one. Judges the result, not
+::    just the count -- repeated pages, prices at zero or 100x, a wrong
+::    currency, everything out of stock.
+uv run python scripts\check_stores.py
+
+:: 2. Include stores that are switched off, to spot one disabled by mistake
+uv run python scripts\check_stores.py --include-disabled
+
+:: 3. One kind of store at a time
+uv run python scripts\check_stores.py --kind BROWSER
+uv run python scripts\check_stores.py --kind WOOCOMMERCE
+```
+
+When one fails, narrow it down:
+
+```bat
+uv run python scripts\check_stores.py flipkart --headful         :: watch it in a visible browser
+uv run python scripts\check_stores.py hgworld --probe            :: why a store answers 403 / refuses
+uv run python scripts\scrape_check.py playasia --diagnose-pager  :: why paging stops early
+uv run python scripts\diagnose_extraction.py gamepookie          :: why N rows became M
+uv run python scripts\category_check.py                          :: are the category settings right?
+```
+
+A full sweep takes a while: it waits between requests to the same shop on purpose.
+
+Afterwards, press **Check stores** once in the dashboard. An older version of it
+switched a store off just because it could not reach it at that moment; the
+current one turns such stores back on as soon as they answer.

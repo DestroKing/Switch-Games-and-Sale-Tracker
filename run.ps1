@@ -13,10 +13,14 @@ $command = if ($args.Count -gt 0) { $args } else { @("serve") }
 # Queue the browser BEFORE starting the server: `uv run` blocks until the
 # server stops, so anything after it would never run.
 if ($command[0] -eq "serve") {
+    # Same PORT / settings.json resolution the server uses, so the page opened
+    # is the one the cross-site guard accepts.
+    $port = uv run python -c "from switch_tracker import settings; print(settings.load().port)"
+    if (-not $port) { $port = 4173 }
     Start-Job -ScriptBlock {
         Start-Sleep -Seconds 4
-        Start-Process "http://127.0.0.1:4173"
-    } | Out-Null
+        Start-Process "http://127.0.0.1:$($args[0])"
+    } -ArgumentList $port | Out-Null
 }
 
 uv run python -m switch_tracker @command

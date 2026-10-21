@@ -219,7 +219,7 @@ And outside `src/switch_tracker/`:
 
 | Path | What it is |
 |---|---|
-| `tests/` | 653 tests. `conftest.py` holds the shared setup ("fixtures", §1.12). |
+| `tests/` | 668 tests. `conftest.py` holds the shared setup ("fixtures", §1.12). |
 | `scripts/check_stores.py` | **The pre-release sweep.** Run any store, of any kind, against the **live** site and get a verdict, not just a count (Appendix B.2). |
 | `scripts/scrape_check.py`, `category_check.py`, `diagnose_extraction.py` | Narrower live-site tools: one browser store's walk, feed stores' category slugs, and "why did N rows become M" (Appendix B.2). |
 | `packaging/`, `switch_tracker.spec` | Turning it into a Windows `.exe` (§3.17). |
@@ -1821,6 +1821,18 @@ real titles:
 | **Fold accents** (`unicodedata` NFKD) before normalising | `normalise_title` drops non-ASCII, so "Pokémon" became "pok mon" and never met "Pokemon" |
 | **Delete apostrophes** (straight, curly and backtick) | "Luigi's" became "luigi s", split from "Luigis" |
 | A short **stop list**: the, of, and, for, nintendo, and region words such as asia, english, version | Play-Asia writes regions *into* the title ("Asia English"), and "Mario Kart World for Nintendo Switch 2" kept a stray "for" |
+| **Publisher prefixes** Amazon prepends (Warner Bros Interactive Entertainment, Square Enix, Bandai Namco, Ubisoft, Electronic Arts, …), stripped from the *start* only, longest first | "Warner Bros Interactive Entertainment Hogwarts Legacy" never met "Hogwarts Legacy". Found in the first live run on real data |
+
+The prefix list is hand-curated, and its exclusions are the point. Sega, Capcom, Konami,
+Namco and EA are left out because real titles begin with them (Capcom Fighting
+Collection, Namco Museum, EA Sports FC). A prefix is also kept unless at least two words
+are left after it. With one word left, "Square Enix Collection" would become
+"collection", and two different publishers' collections would silently share one price
+series.
+
+Re-keying a game would orphan a watch saved under its old key, so `watch_status` falls
+back to running the stored key through `match_key` again when it finds nothing. The ☆ in
+the table checks against the key the server resolved the watch to.
 
 What is **not** on the stop list matters more than what is. "a" and "an" were on it at
 first, and the first real title tried showed the problem: "Pokemon Legends Z-A"
@@ -2246,6 +2258,10 @@ directions, games you can buy come first, out-of-stock-only games next, and game
 no rupee price yet (no exchange rate) come last. An offer with no rupee price still
 counts in *Offers*, because it will appear when you expand the row, but it is never
 chosen as "best".
+When sorted by price, a separator row, *"Out of stock everywhere — sorted by price again
+below"*, marks where the buyable games end. Without it, a ₹2,999 game listed under a
+₹6,499 one under "Best price ▲" looked like a broken sort. It is drawn once per list,
+including across "Load more".
 *Offers* reads "3 stores" when every offer is at a different shop. It says "4 offers · 3
 stores" only when one shop lists the game twice, usually new and pre-owned. The first
 version printed "1 · 1 store" on every single-shop game, which read like a typo.
@@ -2405,6 +2421,20 @@ stores and regions. Two things follow, and the first was a real bug:
 - **Rebuilt boxes are re-ticked from `state`.** Otherwise the summary would still say
   "Store (2)" over a popover with nothing ticked, with the filter still applied and no
   visible way to see which stores it was.
+
+**Counts follow the other filters.** "Amazon India (1)" means one matching item *under
+everything else you've set*, so choosing Switch 2 updates the store counts. A facet ignores
+its *own* filter, though: ticking a store must not zero every other store's count, or you
+could never widen the selection. `queries.facets` takes the same `ListingQuery` as the list,
+and a sequence number drops late replies, the same way `search()` does.
+
+**The filters live in the URL.** `?view=listings&q=mario&platform=SWITCH2&store=amz` works
+on refresh, as a bookmark, or as a link. The URL is rewritten with `history.replaceState`
+on each full repaint, so it doesn't add history entries. It is read once, before `boot()`,
+and only known values are accepted: an unknown view, sort or direction is ignored, and the
+search text only ever reaches the page through `esc()`. Paging (`offset`, `limit`) is never
+put in the URL. Back/forward navigation between filter states was skipped: add
+`pushState` and `popstate` if people ask for it.
 
 **`/` focuses the search box** and Escape clears it — the convention every search-bearing
 app shares. The handler ignores the keypress while you are typing in a field, or the
@@ -2612,7 +2642,7 @@ land here from anywhere.
 Nothing is "done" until all four are green. Run them from the project root.
 
 ```bash
-uv run pytest                           # 653 tests, about four minutes
+uv run pytest                           # 668 tests, about four minutes
 uv run ruff check src tests scripts     # lint
 uv run ruff format src tests scripts    # formatting (rewrites files)
 uv run mypy                             # types, strict mode

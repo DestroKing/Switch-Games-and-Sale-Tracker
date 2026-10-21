@@ -232,6 +232,12 @@ class TestWatchStatus:
         )
         assert (status["game"], status["hit"]) == ("metroid prime 4", True)  # stored key kept for DELETE
 
+    def test_a_watch_survives_a_matcher_rekey(self, shelf) -> None:
+        """Watched before publisher prefixes were stripped; the game's key has since changed."""
+        old_key = "ubisoft metroid prime 4 beyond"
+        [status] = queries.watch_status(shelf, [{"game": old_key, "platform": "SWITCH", "target": 4500}])
+        assert (status["game"], status["hit"]) == (old_key, True)
+
     def test_hits_only_at_or_below_target_and_in_stock(self, shelf) -> None:
         status = queries.watch_status(
             shelf,
@@ -447,6 +453,26 @@ class TestFacets:
         assert {s["id"] for s in facets["stores"]} == {"nistore", "amazon"}
         assert {p["platform"] for p in facets["platforms"]} == {"SWITCH", "SWITCH2"}
         assert {r["region"] for r in facets["regions"]} == {"IN", "JP"}
+
+    def test_counts_respect_other_filters_but_not_their_own(self, conn) -> None:
+        add_listing(conn, 1, "nistore", "Zelda")
+        add_listing(conn, 2, "amazon", "Mario", platform="SWITCH2", region="JP")
+        add_listing(conn, 3, "amazon", "Kirby", platform="SWITCH2")
+        add_price(conn, 1, 1, 100, at="2026-08-01")
+        add_price(conn, 2, 1, 100, at="2026-08-01", in_stock=0)
+        add_price(conn, 3, 1, 100, at="2026-08-01")
+
+        def counts(**kw: object) -> tuple[dict[str, int], dict[str, int]]:
+            f = queries.facets(conn, queries.ListingQuery(**kw))  # type: ignore[arg-type]
+            return {s["id"]: s["n"] for s in f["stores"]}, {r["region"]: r["n"] for r in f["regions"]}
+
+        # Platform narrows both; zero-count entries stay listed.
+        assert counts(platform="SWITCH2") == ({"amazon": 2, "nistore": 0}, {"IN": 1, "JP": 1})
+        # A store filter does not narrow the store counts, but does the regions.
+        assert counts(stores=("nistore",)) == ({"amazon": 2, "nistore": 1}, {"IN": 1, "JP": 0})
+        assert counts(regions=("JP",)) == ({"amazon": 1, "nistore": 0}, {"IN": 2, "JP": 1})
+        # in_stock goes through the `latest` join.
+        assert counts(in_stock_only=True, q="a") == ({"amazon": 0, "nistore": 1}, {"IN": 1, "JP": 0})
 
 
 class TestHistory:
