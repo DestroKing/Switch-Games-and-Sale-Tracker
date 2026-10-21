@@ -10,7 +10,11 @@ permanently empty, and nothing anywhere reports an error.
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable
+from dataclasses import replace
 from urllib.parse import parse_qs, urlparse
+
+from switch_tracker.core.models import RawListing
 
 # Amazon's ASIN is the stable product id; the slug in front of it is not.
 _ASIN = re.compile(r"/dp/([A-Z0-9]{10})", re.IGNORECASE)
@@ -56,3 +60,33 @@ def sku_from_url(url: str, id_params: tuple[str, ...] = ()) -> str:
     segments = [s for s in parsed.path.split("/") if s]
     tail = segments[-1] if segments else parsed.path
     return tail[:_MAX_LENGTH]
+
+
+def one_product_per_sku(rows: Iterable[tuple[RawListing, str]]) -> list[RawListing]:
+    """Feed listings in which every SKU names exactly one product.
+
+    ``rows`` pairs each listing with the shop's own product id. A feed adapter's
+    SKU is the shop's SKU FIELD, typed by hand, and shops reuse it: consolegarage
+    gives seven different games the SKU "CGGM", and UNIQUE(store_id, sku) folded
+    all seven into one listing whose title and price flipped every run -- seven
+    price histories mixed into one, reported as Ok.
+
+    A SKU shared by several product ids is replaced by the product id, for every
+    product sharing it. A SKU naming one product is kept as it is, so every
+    existing price series carries on. The same product listed under two
+    collections arrives twice and is kept once.
+    """
+    rows = list(rows)
+    products: dict[str, set[str]] = {}
+    for listing, product_id in rows:
+        products.setdefault(listing.sku, set()).add(product_id)
+
+    kept: list[RawListing] = []
+    seen: set[str] = set()
+    for listing, product_id in rows:
+        sku = product_id if len(products[listing.sku]) > 1 else listing.sku
+        if sku in seen:
+            continue
+        seen.add(sku)
+        kept.append(listing if sku == listing.sku else replace(listing, sku=sku))
+    return kept

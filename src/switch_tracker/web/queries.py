@@ -152,6 +152,18 @@ _NTH_LATEST_ID = """(
     LIMIT 1 OFFSET {n}
 )"""
 
+#: "You can buy it now": the latest price says in stock AND the shop still
+#: lists it. A product the shop removed keeps its last price point forever, so
+#: without the second half it stayed "in stock" at its old price -- and could
+#: win "best price" -- indefinitely. Still listed means: no fully successful run
+#: of its store came after its latest price point. Only status 'ok' counts: a
+#: partial or failed run can miss a listing that is still for sale.
+#:
+#: CONTRACT: like _LATEST_ID, expects aliases ``l`` and ``latest``.
+_IN_STOCK = """(latest.in_stock = 1 AND latest.run_id >= COALESCE((
+    SELECT MAX(rs.run_id) FROM run_store rs WHERE rs.store_id = l.store_id AND rs.status = 'ok'
+), 0))"""
+
 _LATEST_ID = _NTH_LATEST_ID.format(n=0)
 _PREVIOUS_ID = _NTH_LATEST_ID.format(n=1)
 _CHANGE_PCT = "((latest.inr_price - previous.inr_price) / previous.inr_price) * 100.0"
@@ -189,7 +201,7 @@ def _filters(query: ListingQuery) -> tuple[list[str], list[Any]]:
             where.append(f"{column} IN ({', '.join('?' * len(values))})")
             params.extend(values)
     if query.in_stock_only:
-        where.append("latest.in_stock = 1")
+        where.append(_IN_STOCK)
     if query.game:
         where.append("l.game_id IN (SELECT id FROM game WHERE canonical_title = ?)")
         params.append(query.game)
@@ -235,7 +247,7 @@ def listings(conn: sqlite3.Connection, query: ListingQuery) -> dict[str, Any]:
         conn.execute(
             f"SELECT l.id, l.raw_title, l.url, l.region, l.platform, l.condition, "
             f"s.name AS store, latest.inr_price, latest.native_price, latest.native_currency, "
-            f"latest.in_stock, latest.captured_at, "
+            f"{_IN_STOCK} AS in_stock, latest.captured_at, "
             f"CASE "
             f"    WHEN previous.inr_price IS NOT NULL "
             f"         AND previous.inr_price != 0 "
@@ -274,7 +286,7 @@ _DISPLAY_TITLE = """(
 #: out-of-stock ₹999 is not "the cheapest copy" of anything you can buy; it is
 #: still shown when it is the ONLY offer, which is why this ranks rather than
 #: filters.
-_BEST_RANK = "(1 - latest.in_stock) * 1e9 + latest.inr_price"
+_BEST_RANK = f"(1 - {_IN_STOCK}) * 1e9 + latest.inr_price"
 
 
 def games(conn: sqlite3.Connection, query: ListingQuery) -> dict[str, Any]:
@@ -302,7 +314,7 @@ def games(conn: sqlite3.Connection, query: ListingQuery) -> dict[str, Any]:
     grouped = f"""
         SELECT g.canonical_title AS game, l.platform,
                MIN({_BEST_RANK}) AS best_rank,
-               latest.inr_price AS best_price, latest.in_stock AS best_in_stock,
+               latest.inr_price AS best_price, {_IN_STOCK} AS best_in_stock,
                {_DISPLAY_TITLE} AS title, l.url AS best_url, l.region AS best_region,
                l.condition AS best_condition, s.name AS best_store,
                COUNT(*) AS offers, COUNT(DISTINCT l.store_id) AS stores

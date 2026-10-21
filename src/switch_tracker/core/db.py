@@ -135,6 +135,10 @@ CREATE INDEX IF NOT EXISTS idx_run_event_run_seq ON run_event(run_id, seq);
 -- this; only the first gets a row.
 CREATE UNIQUE INDEX IF NOT EXISTS idx_run_active ON run((1)) WHERE finished_at IS NULL;
 
+-- A store's latest fully successful run, looked up once per listing row by the
+-- dashboard to tell "still listed" from "the shop removed it" (web/queries.py).
+CREATE INDEX IF NOT EXISTS idx_run_store_ok ON run_store(store_id, run_id) WHERE status = 'ok';
+
 -- Where a game's key went when an improved matcher re-keyed it. Watches are
 -- stored by key, so without this every matcher change silently orphans them.
 CREATE TABLE IF NOT EXISTS game_redirect (

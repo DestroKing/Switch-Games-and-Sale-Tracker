@@ -10,7 +10,42 @@ from __future__ import annotations
 
 import pytest
 
-from switch_tracker.core.skus import sku_from_url
+from switch_tracker.core.models import Condition, Platform, RawListing, Region
+from switch_tracker.core.skus import one_product_per_sku, sku_from_url
+
+
+def _row(sku: str, product_id: str, title: str) -> tuple[RawListing, str]:
+    listing = RawListing(
+        store_id="cg",
+        sku=sku,
+        url=f"https://shop.in/products/{product_id}",
+        title=title,
+        native_currency="INR",
+        native_price=1999,
+        in_stock=True,
+        platform=Platform.SWITCH,
+        region=Region.IN,
+        condition=Condition.NEW,
+    )
+    return listing, product_id
+
+
+class TestOneProductPerSku:
+    def test_a_sku_shared_by_different_products_becomes_each_product_id(self) -> None:
+        """consolegarage, live: seven different games all carry the SKU 'CGGM'."""
+        rows = [
+            _row("CGGM", "101", "Persona 5 Royal"),
+            _row("CGGM", "102", "Ben 10"),
+            _row("MK8", "103", "MK8"),
+        ]
+        assert [x.sku for x in one_product_per_sku(rows)] == ["101", "102", "MK8"]
+
+    def test_a_unique_sku_is_kept_so_its_price_history_continues(self) -> None:
+        assert [x.sku for x in one_product_per_sku([_row("ZELDA-1", "7", "Zelda")])] == ["ZELDA-1"]
+
+    def test_one_product_in_two_collections_is_kept_once(self) -> None:
+        rows = [_row("7514", "7514", "Metroid Prime 4"), _row("7514", "7514", "Metroid Prime 4")]
+        assert len(one_product_per_sku(rows)) == 1
 
 
 class TestAmazon:

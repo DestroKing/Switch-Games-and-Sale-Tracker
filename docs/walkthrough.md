@@ -1087,6 +1087,13 @@ for patterns, kind in ((SERVICE, ...), (DIGITAL, ...), (HARDWARE, ...), (ACCESSO
 **Why exclusions run first:** "Nintendo Switch Pro Controller" contains the word "Switch".
 Check the platform first and it sails through as a game.
 
+**Each exclusion word is checked against real titles before it's added.** A "PXN Flight
+Simulator Joystick … Nintendo Switch" came through HG World as a game, so joysticks, fight
+or arcade sticks, flight sticks, HOTAS and racing wheels are now excluded. "Gamepad" was
+tried and taken out again: Flipkart's advertising writes "Gamepad Accessory" into the title
+of a real game (*Sonic x Shadow Generations*). "Throttle" and "mouse" stay out too, because
+of Full Throttle and Mickey Mouse.
+
 ### The store hint, and the rule that saves it
 
 Some shops sell only Switch games, so a bare title like "Hogwarts Legacy" is a Switch game
@@ -1174,6 +1181,14 @@ letting them into the id would mint a brand-new product every run.
 **Why this tiny file is load-bearing**, in the docstring's own words: if the id is
 unstable, *every price series has exactly one point, "moved since last run" is permanently
 empty, and nothing anywhere reports an error.*
+
+**The opposite failure: an id that isn't unique.** The feed stores (Shopify,
+WooCommerce) use the shop's own SKU field, which shopkeepers type by hand. Consolegarage
+gives seven different games the SKU `CGGM`. `UNIQUE(store_id, sku)` folded all seven into
+one listing whose title and price flipped every run: seven price histories mixed into one,
+reported as OK. `one_product_per_sku` now replaces a SKU shared by several products with
+each product's own id. A SKU that names exactly one product is kept, so every existing
+price series carries on. The same product listed in two collections is kept once.
 
 ## 3.6 Scraping a page — the four-layer ladder
 
@@ -2298,6 +2313,11 @@ directions, games you can buy come first, out-of-stock-only games next, and game
 no rupee price yet (no exchange rate) come last. An offer with no rupee price still
 counts in *Offers*, because it will appear when you expand the row, but it is never
 chosen as "best".
+**"In stock" also means "still listed".** A product the shop has removed keeps its last
+price point forever, so it used to stay "in stock" at its old price, and could win "best
+price", indefinitely. Now a listing counts as buyable only if no *fully successful* run of
+its store has happened since its latest price (`_IN_STOCK` in `web/queries.py`). A partial
+or failed run proves nothing, because it may simply not have reached that listing.
 When sorted by price, a separator row, *"Out of stock everywhere — sorted by price again
 below"*, marks where the buyable games end. Without it, a ₹2,999 game listed under a
 ₹6,499 one under "Best price ▲" looked like a broken sort. It is drawn once per list,

@@ -76,38 +76,44 @@ async def _shopify_count(client: PoliteClient, store: StoreConfig, handle: str) 
     return len(products) if isinstance(products, list) else None
 
 
-async def check(store: StoreConfig) -> list[bool]:
-    """Returns which of this store's slugs came back UNREACHABLE.
+async def check(store: StoreConfig) -> tuple[list[bool], str]:
+    """Returns which of this store's slugs came back UNREACHABLE, and its report.
 
     An empty list means no network call was even attempted (no collections
     configured, or a kind this script does not check) -- that must not count
     toward "everything was unreachable" below, or a store with nothing to
     check would falsely look like proof of a proxy problem.
+
+    The report is returned, not printed, so stores can be checked at once
+    without their lines interleaving.
     """
     if not store.collections:
-        print(f"\n{store.name} ({store.id}): no collections configured -- nothing to check")
-        return []
+        return [], f"\n{store.name} ({store.id}): no collections configured -- nothing to check"
     if store.kind not in (AdapterKind.WOOCOMMERCE, AdapterKind.SHOPIFY):
-        print(f"\n{store.name} ({store.id}): kind {store.kind} has no category API to check here")
-        return []
+        return [], f"\n{store.name} ({store.id}): kind {store.kind} has no category API to check here"
 
-    print(f"\n{store.name} ({store.id}, {store.kind})")
+    lines = [f"\n{store.name} ({store.id}, {store.kind})"]
     client = PoliteClient()
     unreachable: list[bool] = []
-    for slug in store.collections:
-        count = (
-            await _woo_count(client, store, slug)
-            if store.kind is AdapterKind.WOOCOMMERCE
-            else await _shopify_count(client, store, slug)
-        )
-        unreachable.append(count is None)
-        if count is None:
-            print(f"    {slug:38}  UNREACHABLE -- store API did not answer")
-        elif count <= _SUSPICIOUS_MAX:
-            print(f"    {slug:38}  {count:>5} products  <-- SUSPICIOUSLY LOW, check this slug live")
-        else:
-            print(f"    {slug:38}  {count:>5} products")
-    return unreachable
+    try:
+        for slug in store.collections:
+            count = (
+                await _woo_count(client, store, slug)
+                if store.kind is AdapterKind.WOOCOMMERCE
+                else await _shopify_count(client, store, slug)
+            )
+            unreachable.append(count is None)
+            if count is None:
+                lines.append(f"    {slug:38}  UNREACHABLE -- store API did not answer")
+            elif count <= _SUSPICIOUS_MAX:
+                lines.append(
+                    f"    {slug:38}  {count:>5} products  <-- SUSPICIOUSLY LOW, check this slug live"
+                )
+            else:
+                lines.append(f"    {slug:38}  {count:>5} products")
+    finally:
+        await client.aclose()
+    return unreachable, "\n".join(lines)
 
 
 def _proxy_env() -> list[str]:
@@ -120,13 +126,15 @@ async def run(store_ids: list[str]) -> int:
     by_id = {s.id: s for s in overrides.active_stores()}
     exit_code = 0
     all_unreachable: list[bool] = []
-    for store_id in store_ids:
-        store = by_id.get(store_id)
-        if store is None:
-            print(f"\n{store_id}: not in the shipped/overridden store list")
-            exit_code = 1
-            continue
-        all_unreachable.extend(await check(store))
+    unknown = [s for s in store_ids if s not in by_id]
+    for store_id in unknown:
+        print(f"\n{store_id}: not in the shipped/overridden store list")
+        exit_code = 1
+    # All stores at once: each is a different host with its own PoliteClient,
+    # so every shop still sees one request at a time with the usual gap.
+    for unreachable, report in await asyncio.gather(*(check(by_id[s]) for s in store_ids if s in by_id)):
+        print(report)
+        all_unreachable.extend(unreachable)
 
     # PoliteClient sets trust_env=False deliberately -- a public shop must
     # never be reached through a corporate proxy, and on a locked-down

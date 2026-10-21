@@ -87,6 +87,31 @@ def shelf(conn: sqlite3.Connection) -> sqlite3.Connection:
     return conn
 
 
+class TestNoLongerListed:
+    """A product the shop removed keeps its last price point forever; it must stop being buyable."""
+
+    def later_amazon_run(self, conn, status: str) -> None:
+        conn.execute("INSERT OR IGNORE INTO run (id, started_at) VALUES (2, '2026-01-02T00:00:00Z')")
+        conn.execute("INSERT INTO run_store VALUES (2, 'amazon', ?, 0, 0, NULL)", (status,))
+
+    def metroid(self, conn) -> dict:
+        rows = queries.games(conn, queries.ListingQuery())["rows"]
+        return next(r for r in rows if r["game"] == "metroid prime 4 beyond")
+
+    def test_a_listing_missing_from_a_later_full_run_is_not_the_best_offer(self, shelf) -> None:
+        """Amazon's ₹4,499 copy was absent from Amazon's next successful run: gone from the shop."""
+        self.later_amazon_run(shelf, "ok")
+        assert (self.metroid(shelf)["best_price"], self.metroid(shelf)["best_store"]) == (4999, "NI Store")
+        listed = queries.listings(shelf, queries.ListingQuery(in_stock_only=True))["rows"]
+        assert 2 not in [r["id"] for r in listed]
+
+    @pytest.mark.parametrize("status", ["partial", "failed"])
+    def test_a_partial_or_failed_run_proves_nothing(self, shelf, status: str) -> None:
+        """A run that did not finish the catalogue may simply not have reached it."""
+        self.later_amazon_run(shelf, status)
+        assert self.metroid(shelf)["best_price"] == 4499
+
+
 class TestGames:
     def test_one_row_per_game_across_stores_and_regions(self, shelf) -> None:
         result = queries.games(shelf, queries.ListingQuery())

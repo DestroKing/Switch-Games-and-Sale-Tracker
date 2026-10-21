@@ -30,6 +30,7 @@ from switch_tracker.core.models import (
     StoreConfig,
 )
 from switch_tracker.core.parse import classify, infer_condition, infer_region, parse_price
+from switch_tracker.core.skus import one_product_per_sku
 
 _PATHS = ("/wp-json/wc/store/v1/products", "/wp-json/wc/store/products")
 
@@ -55,7 +56,7 @@ class WooAdapter:
             else [None]
         )
 
-        listings: list[RawListing] = []
+        rows: list[tuple[RawListing, str]] = []
         problems: list[str] = []
         raw_fetched = 0
         expected_total = 0
@@ -98,9 +99,9 @@ class WooAdapter:
                 for raw in products:
                     listing = self._to_listing(store, raw)
                     if listing is not None:
-                        listings.append(listing)
+                        rows.append((listing, str(raw.get("id"))))
 
-                sink.page(store.id, page, len(listings))
+                sink.page(store.id, page, len(rows))
 
                 if len(products) < self.PER_PAGE:
                     break
@@ -119,6 +120,7 @@ class WooAdapter:
             else ""
         )
 
+        listings = one_product_per_sku(rows)
         if not listings:
             if problems:
                 return Failed("; ".join(problems))
