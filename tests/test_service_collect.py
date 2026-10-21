@@ -246,8 +246,15 @@ class TestDeadlines:
         that a browser store gets materially longer than an HTTP one.
         """
         svc = CollectService(None, adapters={}, fx=None)  # type: ignore[arg-type]
-        assert svc.http_deadline_s == 180.0
         assert svc.browser_deadline_s > svc.http_deadline_s * 4
+
+    async def test_the_http_deadline_clears_the_woocommerce_budget(self) -> None:
+        """Same rule as for browser stores: the adapter stops itself and keeps its
+        rows; the service's deadline cancels it and keeps none."""
+        from switch_tracker.adapters.woocommerce import WooAdapter
+
+        svc = CollectService(None, adapters={}, fx=None)  # type: ignore[arg-type]
+        assert svc.http_deadline_s > WooAdapter.TIME_BUDGET_S
 
     async def test_the_browser_deadline_clears_every_profile_budget(self) -> None:
         """The service must never be the thing that stops a browser store.

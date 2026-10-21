@@ -55,10 +55,12 @@ def select_stores(stores: Sequence[StoreConfig], only: tuple[str, ...]) -> list[
 
 
 class CollectService:
-    #: HTTP stores are bounded tightly regardless of catalogue size: the
-    #: client's own per-request timeout and retry budget caps every page it
-    #: fetches either way.
-    DEFAULT_HTTP_DEADLINE_S = 180.0
+    #: A BACKSTOP for HTTP stores, like the browser one below: hitting it
+    #: cancels the store and discards everything it fetched. The adapters stop
+    #: themselves first (WooAdapter.TIME_BUDGET_S, 300s) and return Partial.
+    #: It was 180s, which an unscoped HG World walk (~137s on a good day) could
+    #: cross with a couple of slow pages -- saving no HG World listings at all.
+    DEFAULT_HTTP_DEADLINE_S = 360.0
     #: A browser store pages for as long as the site's own signal keeps
     #: working, so its budget has to cover a genuinely large catalogue rather
     #: than a guess about any one store's page count.

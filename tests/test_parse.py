@@ -171,6 +171,9 @@ class TestClassifyExclusions:
             "PXN 2119 Pro Flight Simulator Joystick with Separate Throttle for Nintendo Switch",
             "Hori Fighting Stick Mini for Nintendo Switch",
             "Racing Wheel for Nintendo Switch",
+            "M300 Max 2in1 Mini Projector HD 4K With 2.4G 2 Wireless Remote Video Game For TV",
+            "Pokémon GO Plus | Auto-Catch Accessory | Handy for Trainers On-the-Go | Nintendo Switch",
+            "Poke Ball Plus for Nintendo Switch",
         ],
     )
     def test_accessories_are_excluded(self, title: str) -> None:

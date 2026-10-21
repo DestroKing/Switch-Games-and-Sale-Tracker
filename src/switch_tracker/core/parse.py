@@ -156,6 +156,11 @@ ACCESSORY = _patterns(
     r"\b(joy\s*sticks?|hotas)\b",
     r"\b(arcade|fight(ing)?|flight)\s*sticks?\b",
     r"\bracing\s*wheels?\b",
+    # Also HG World, live: a "Mini Projector ... Video Game For TV" and a
+    # "Pokémon GO Plus | Auto-Catch Accessory". Named outright, because
+    # "accessory" itself is in Flipkart's marketing for real games.
+    r"\bprojectors?\b",
+    r"\bpok[eé]\s*(mon\s*go|ball)\s*plus\b",
 )
 
 DIGITAL = _patterns(

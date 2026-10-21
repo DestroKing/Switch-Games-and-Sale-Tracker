@@ -1092,7 +1092,10 @@ Simulator Joystick … Nintendo Switch" came through HG World as a game, so joys
 or arcade sticks, flight sticks, HOTAS and racing wheels are now excluded. "Gamepad" was
 tried and taken out again: Flipkart's advertising writes "Gamepad Accessory" into the title
 of a real game (*Sonic x Shadow Generations*). "Throttle" and "mouse" stay out too, because
-of Full Throttle and Mickey Mouse.
+of Full Throttle and Mickey Mouse. The same HG World list held a "Mini Projector … Video
+Game For TV" and a "Pokémon GO Plus | Auto-Catch Accessory", so projectors and the
+Pokémon GO Plus / Poké Ball Plus are excluded by name. Excluding "accessory" itself would
+drop that Sonic game too.
 
 ### The store hint, and the rule that saves it
 
