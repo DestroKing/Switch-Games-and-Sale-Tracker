@@ -151,6 +151,10 @@ class StoreProfile:
     #: silently capped at 5 regardless of how well paging or scrolling worked.
     skip_json_ld: bool = False
 
+    #: How long a click-paged store's Next gets to replace the results before
+    #: the click counts as a no-op (the end). None keeps the adapter's 4s.
+    advance_timeout_ms: int | None = None
+
 
 PROFILES: dict[str, StoreProfile] = {
     "amazon_in": StoreProfile(
@@ -249,14 +253,19 @@ PROFILES: dict[str, StoreProfile] = {
         # the first few cards, and with furniture at the top of the list the
         # fingerprint never changed, so a successful click read as a failure.
         #
-        # 44 of these exist per page; 36 carry a price. The rest are the
-        # non-product tiles the price check in extract.py already drops.
-        card=(
-            "div.pa-modern-product-item",
-            ".product-item",
-            ".search-item",
-            "[class*='product']",
-        ),
+        # SCOPED TO THE RESULTS GRID, and with no fallbacks. A home run's
+        # diagnose-pager showed the 74 "div.pa-modern-product-item" on page 1
+        # are three things: 36 search results in #pa-modern-products-container,
+        # 30 grey loading placeholders in .pa-loading-state, and 8 "recommended"
+        # cards repeated on every page. _advanced() fingerprints the FIRST card
+        # selector that matches, so clicking Next swapped results for
+        # placeholders, the fingerprint changed at once, and the page counted as
+        # turned before its results arrived. Deep pages load slowest, so from
+        # about p97 only the recommended row was read; four pages of repeats
+        # later the tracker ended the walk at p102 of 139. A fallback selector
+        # would bring this back: while the grid is empty mid-load the
+        # fingerprint would fall through to it and read "turned" again.
+        card=("#pa-modern-products-container div.pa-modern-product-item",),
         title=(".item-name a", ".product-name a", "a.title", "h3 a", ".title", "a[href*='/en/']"),
         price=(".price-value", ".item-price .amount", ".product-price", ".price"),
         # ".product-item a" comes from the hand-verified sweep. It sits before
@@ -280,7 +289,11 @@ PROFILES: dict[str, StoreProfile] = {
         # not a product. It never waited for anything, which is worse than
         # waiting too long: extraction could run against a grid that had not
         # rendered, and nothing would say so.
-        ready="div.pa-modern-product-item",
+        ready="#pa-modern-products-container div.pa-modern-product-item",
+        # Deep pages take longer than the default 4s to replace the results,
+        # and a click that does not change them in time reads as the end of
+        # the catalogue. The real end is a disabled Next, which returns at once.
+        advance_timeout_ms=20_000,
         # Confirmed on the live page: a visible, semantically-named button, with
         # "1" / "139" siblings reporting position and total. Strictly better
         # than the numeric-text fallback this replaces -- it cannot be confused

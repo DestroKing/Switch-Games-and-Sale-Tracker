@@ -669,6 +669,71 @@ class TestNumericPagerMechanism:
         assert len(outcome.listings) == 5
 
 
+class TestScopedCardsWaitForTheRealGrid:
+    """Play-Asia, from a home run's diagnose-pager: one card class is used by the
+    results grid, the grey loading placeholders AND a "recommended" row.
+
+    Clicking Next swapped the results for placeholders at once, so a fingerprint
+    over every card changed instantly and the page counted as turned before its
+    results arrived. Slow deep pages yielded only the recommended row, and the
+    walk ended at p102 of 139. Cards scoped to the grid, with no fallback, make
+    the fingerprint wait for the real page 2.
+    """
+
+    async def test_page_two_is_read_only_once_its_results_have_arrived(
+        self, provider: BrowserProvider, server
+    ) -> None:
+        from switch_tracker.adapters.browser.profiles import StoreProfile
+        from switch_tracker.core.models import Region
+
+        base, recorder = server
+        page1 = "".join(card(f"Switch Game {i}", "Rs. 4499", f"/p/g-{i}") for i in range(3))
+        recommended = "".join(card(f"Recommended {i}", "Rs. 999", f"/p/rec-{i}") for i in range(2))
+        html = (
+            f"<html><body><div id='grid'>{page1}</div>"
+            f"<div class='loading'></div><div class='rec'>{recommended}</div>"
+            "<button class='next'>Next</button>"
+            "<script>document.querySelector('.next').addEventListener('click', (e) => {"
+            "  document.getElementById('grid').innerHTML = '';"
+            "  document.querySelector('.loading').innerHTML = '<div class=\"card\"></div>'.repeat(3);"
+            "  e.target.disabled = true;"
+            "  setTimeout(() => {"
+            "    document.querySelector('.loading').innerHTML = '';"
+            "    document.getElementById('grid').innerHTML = Array.from({length: 2}, (_, i) =>"
+            '      `<div class="card"><h3 class="name">Switch Game p2-${i}</h3>`'
+            '      + `<span class="cost">Rs. 2500</span>`'
+            '      + `<a class="more" href="/p/page2-${i}">buy</a></div>`).join(\'\');'
+            "  }, 1500);"
+            "});</script></body></html>"
+        )
+        recorder.plan("/search", (200, html, {"content-type": "text/html"}))
+
+        def scoped(store_id: str) -> StoreProfile:
+            return StoreProfile(
+                card=("#grid div.card",),
+                title=("h3.name",),
+                price=("span.cost",),
+                link=("a.more",),
+                default_region=Region.IN,
+                platform_hint=Platform.SWITCH,
+                next_page=("button.next",),
+                advance_timeout_ms=5000,
+            )
+
+        adapter = BrowserAdapter(provider, profile_for=scoped, settle_ms=(0, 0), render_ms=0)
+        outcome = await adapter.fetch(shop_store(base, search_urls=(f"{base}/search",)), NullSink())
+
+        assert isinstance(outcome, (Ok, Partial)), outcome
+        titles = sorted(listing.title for listing in outcome.listings)
+        assert titles == [
+            "Switch Game 0",
+            "Switch Game 1",
+            "Switch Game 2",
+            "Switch Game p2-0",
+            "Switch Game p2-1",
+        ]
+
+
 class TestTimeBudget:
     """A long walk must not become a lost walk.
 

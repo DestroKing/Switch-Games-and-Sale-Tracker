@@ -748,7 +748,9 @@ async def _results_fingerprint(page: Page, card_selectors: tuple[str, ...]) -> s
     return ""
 
 
-async def _advanced(page: Page, card_selectors: tuple[str, ...], before: str) -> bool:
+async def _advanced(
+    page: Page, card_selectors: tuple[str, ...], before: str, timeout_ms: int = _ADVANCE_TIMEOUT_MS
+) -> bool:
     """Did the result set actually change?
 
     Deliberately NOT a URL comparison. A click that navigates somewhere without
@@ -757,7 +759,7 @@ async def _advanced(page: Page, card_selectors: tuple[str, ...], before: str) ->
     fingerprint both correctly read as "did not advance".
     """
     waited = 0
-    while waited < _ADVANCE_TIMEOUT_MS:
+    while waited < timeout_ms:
         current = await _results_fingerprint(page, card_selectors)
         if current and current != before:
             return True
@@ -785,6 +787,7 @@ async def _click_next(page: Page, profile: StoreProfile, target_page: int) -> bo
     and the same icon-only control could plausibly appear in a carousel above it.
     """
     before = await _results_fingerprint(page, profile.card)
+    timeout_ms = profile.advance_timeout_ms or _ADVANCE_TIMEOUT_MS
 
     for selector in profile.next_page:
         locator = page.locator(selector).last
@@ -796,7 +799,7 @@ async def _click_next(page: Page, profile: StoreProfile, target_page: int) -> bo
             await locator.click(timeout=5000)
         except Exception:  # noqa: BLE001
             continue
-        if await _advanced(page, profile.card, before):
+        if await _advanced(page, profile.card, before, timeout_ms):
             return True
 
     # No configured control worked. Try the numbered pager the storefront may
@@ -806,7 +809,7 @@ async def _click_next(page: Page, profile: StoreProfile, target_page: int) -> bo
         clicked = bool(await page.evaluate(_CLICK_PAGE_NUMBER, target_page))
     except Exception:  # noqa: BLE001
         return False
-    return bool(clicked) and await _advanced(page, profile.card, before)
+    return bool(clicked) and await _advanced(page, profile.card, before, timeout_ms)
 
 
 def _dedupe(listings: list[RawListing]) -> list[RawListing]:
