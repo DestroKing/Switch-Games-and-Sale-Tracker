@@ -24,12 +24,19 @@ const $ = (id) => document.getElementById(id);
 const inr = (n) => (n === null || n === undefined ? "—" : "₹" + Math.round(n).toLocaleString("en-IN"));
 const num = (n) => Number(n ?? 0).toLocaleString("en-IN");
 
-const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) =>
-  ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) =>
+  ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+
+/** An href that can only ever be a web link. esc() makes a value safe INSIDE
+ *  an attribute, but not as a URL: "javascript:alert(1)" escapes to itself
+ *  and runs when clicked, on this page's origin. Store URLs come from the
+ *  stores' own data, and rows saved before collect.py started refusing other
+ *  schemes are still in the database, so the check lives here too. */
+const safeHref = (url) => (/^https?:\/\//i.test(String(url ?? "")) ? esc(url) : "#");
 
 /** Every fetch goes through here so a backend fault is VISIBLE.
- *  server.ts returned {error} with HTTP 200 and the page dereferenced it,
- *  turning any failure into a JavaScript type error rendered as content. */
+ *  An {error} body with HTTP 200 would be dereferenced as data, turning any
+ *  failure into a JavaScript type error rendered as content. */
 async function api(path, options) {
   const response = await fetch(path, options);
   const body = await response.json().catch(() => null);
@@ -119,7 +126,10 @@ function setButtonsDisabled(disabled) {
   document.querySelectorAll("[data-action], .js-run-control").forEach((el) => {
     el.disabled = disabled;
   });
-  if (!disabled) syncCollectSelected();
+  if (!disabled) {
+    syncCollectSelected();
+    syncFixOpen();  // re-enabled wholesale above; only live with a store picked
+  }
 }
 
 /** Keep the subset button honest: an empty selection posted to /actions/collect
@@ -262,11 +272,23 @@ if (collectSelected) {
 }
 
 const fixPicker = $("fixStore");
-if (fixPicker) {
-  fixPicker.addEventListener("change", async () => {
+const fixOpen = $("fixOpen");
+
+/** Open is live only with a store picked. Choosing used to ACT on `change`,
+ *  and a <select> fires change on every arrow key, so browsing the list with
+ *  the keyboard opened a browser window per keypress. */
+function syncFixOpen() {
+  // Both are absent when no store is fixable (the template renders neither).
+  if (fixOpen && fixPicker) fixOpen.disabled = !fixPicker.value;
+}
+
+if (fixPicker && fixOpen) {
+  fixPicker.addEventListener("change", syncFixOpen);
+  fixOpen.addEventListener("click", async () => {
     const storeId = fixPicker.value;
     if (!storeId) return;
     fixPicker.value = "";
+    syncFixOpen();
     try {
       await api(`/actions/inspect/${storeId}`, { method: "POST" });
       progressPanel.hidden = false;
@@ -435,7 +457,7 @@ function paintMovers() {
       </tr></thead><tbody>
       ${shown.map((m) => `<tr class="${m.pct < 0 && !m.fx_suspect ? "is-deal" : ""}">
         <td class="title-cell"><div class="clamp">
-          <a class="name" href="${esc(m.url)}" target="_blank" rel="noopener">${esc(m.raw_title)}</a><span class="meta">${
+          <a class="name" href="${safeHref(m.url)}" target="_blank" rel="noopener">${esc(m.raw_title)}</a><span class="meta">${
             m.region !== "IN" ? `<span class="tag">${esc(m.region)}</span>` : ""}${
             m.fx_suspect ? `<span class="tag fx">FX suspect</span>` : ""}${
             !m.in_stock ? `<span class="tag oos">out of stock</span>` : ""}</span></div></td>
@@ -675,7 +697,7 @@ function listingRowHtml(r) {
   return `<tr class="${isDeal ? "is-deal" : ""}">
       ${expander("history", `data-id="${r.id}"`, `Price history for ${r.raw_title} at ${r.store}`)}
       <td class="title-cell"><div class="clamp">
-        <a class="name" href="${esc(r.url)}" target="_blank" rel="noopener">${esc(r.raw_title)}</a><span class="meta">${
+        <a class="name" href="${safeHref(r.url)}" target="_blank" rel="noopener">${esc(r.raw_title)}</a><span class="meta">${
           tags(r)}</span></div></td>
       <td>${esc(r.store)}</td>
       <td class="num dim">${r.native_currency !== "INR"
@@ -703,11 +725,24 @@ function gameRowHtml(g) {
         <span class="name">${esc(g.title)}</span><span class="meta">${
           g.platform === "SWITCH2" ? '<span class="tag sw2">Switch 2</span>' : ""}</span></div></td>
       <td class="num price">${inr(g.best_price)}</td>
-      <td><a href="${esc(g.best_url)}" target="_blank" rel="noopener">${esc(g.best_store)}</a>` +
+      <td><a href="${safeHref(g.best_url)}" target="_blank" rel="noopener">${esc(g.best_store)}</a>` +
       `<span class="meta">${tags({ ...best, platform: "" })}</span></td>
       <td class="num">${offersLabel(g)}</td>
       <td>${watchButton(g.game, g.platform, watching)}</td>
     </tr>`;
+}
+
+/** "312 games", or "Showing 100 of 312 games" only while there is more to load.
+ *  Sorting by Change narrows the list to real movers (queries.py), which reads
+ *  like rows vanishing unless the line says why the total dropped. */
+function countLine(shown, total, games) {
+  const noun = games ? (total === 1 ? "game" : "games") : (total === 1 ? "listing" : "listings");
+  const base = shown < total
+    ? `Showing <b>${num(shown)}</b> of <b>${num(total)}</b> ${noun}`
+    : `<b>${num(total)}</b> ${noun}`;
+  return !games && state.sort === "change"
+    ? `${base} that moved more than 1% since the previous run`
+    : base;
 }
 
 /** Bumped by every search(). A reply whose number is no longer current is
@@ -734,10 +769,9 @@ async function search(append = false) {
   }
   rows = append ? rows.concat(data.rows) : data.rows;
 
-  $("listingsHead").textContent = games ? "Games" : "All listings";
-  $("count").innerHTML =
-    `<b>${num(rows.length)}</b> of <b>${num(data.total)}</b> ${games ? "games" : "listings"}` +
-    ` — sorted in the database, not on this page`;
+  // Named exactly as its toggle button, so the heading confirms the choice.
+  $("listingsHead").textContent = games ? "Games" : "Every listing";
+  $("count").innerHTML = countLine(rows.length, data.total, games);
   paintChips();
 
   const head = colsFor(state.view).map(headerCell).join("");
@@ -906,6 +940,15 @@ function paintWatch() {
   // throws in some privacy modes, and that must never leave the panel blank.
   try { notifyNewHits(hits); } catch { /* the panel below still shows every hit */ }
 
+  // Every save repaints this table, and a save fires on BLUR -- i.e. exactly
+  // when Tab has just moved focus to the next control in it. Remember which
+  // control that was and put focus back, or a keyboard user lands on <body>.
+  const active = document.activeElement;
+  const refocus = active && $("watch").contains(active) && active.dataset.game
+    ? `.${[...active.classList].join(".")}[data-game="${CSS.escape(active.dataset.game)}"]` +
+      `[data-platform="${CSS.escape(active.dataset.platform)}"]`
+    : null;
+
   if (!watched.length) {
     $("watch").innerHTML = `<div class="empty compact"><b>Nothing watched yet</b>
       Press ☆ Watch on a game below, then set the price you would pay.</div>`;
@@ -924,7 +967,7 @@ function paintWatch() {
           w.platform === "SWITCH2" ? '<span class="tag sw2">Switch 2</span>' : ""}${
           w.hit ? '<span class="status ok">at target</span>' : ""}</span></div></td>
         <td class="num price">${b ? inr(b.best_price) : "—"}</td>
-        <td>${b ? `<a href="${esc(b.best_url)}" target="_blank" rel="noopener">${esc(b.best_store)}</a>` +
+        <td>${b ? `<a href="${safeHref(b.best_url)}" target="_blank" rel="noopener">${esc(b.best_store)}</a>` +
               `<span class="meta">${tags({ region: b.best_region, condition: b.best_condition,
                                            in_stock: b.best_in_stock })}</span>`
             : '<span class="muted">No offers right now</span>'}</td>
@@ -935,6 +978,7 @@ function paintWatch() {
              data-platform="${esc(w.platform)}" aria-label="Stop watching ${esc(title)}">Remove</button></td>
       </tr>`;
     }).join("")}</tbody></table></div>`;
+  if (refocus) $("watch").querySelector(refocus)?.focus({ preventScroll: true });
 }
 
 async function saveWatch(game, platform, target) {
@@ -947,8 +991,39 @@ async function saveWatch(game, platform, target) {
 }
 
 async function dropWatch(game, platform) {
+  // Remember the entry first: unwatching used to throw a typed-in target away
+  // with no way back, one mis-click on ★ from losing it for good.
+  const previous = watched.find((w) => w.game === game && w.platform === platform);
   watched = await api(`/api/watchlist?${new URLSearchParams({ game, platform })}`, { method: "DELETE" });
   paintWatch();
+  if (!previous) return;
+  const name = previous.best?.title || game;
+  watchNote(`Stopped watching ${esc(name)}. <button type="button" class="linkish" id="undoWatch">Undo</button>`,
+            12000);
+  // "Remove" deletes the very button that had focus, which drops a keyboard
+  // user onto <body>. Undo is the natural next stop, so land there instead.
+  // (Unwatching via ☆ in the table keeps its button, so focus is left alone.)
+  if (!document.activeElement || document.activeElement === document.body) $("undoWatch").focus();
+  $("undoWatch").addEventListener("click", async () => {
+    watchNote("");
+    try {
+      await saveWatch(game, platform, previous.target ?? null);
+      syncWatchButtons();
+      watchNote(`<span class="status ok">Watching ${esc(name)} again</span>`);
+    } catch (err) {
+      watchNote(`<span class="status failed">Could not undo: ${esc(err.message)}</span>`);
+    }
+  });
+}
+
+let watchNoteTimer;
+/** One short-lived message beside the watchlist heading. Replaces any earlier
+ *  one, so a quick second action never leaves a stale "Undo" pointing at the
+ *  wrong game. ``html`` must already be escaped. */
+function watchNote(html, ms = 4000) {
+  clearTimeout(watchNoteTimer);
+  $("watchNote").innerHTML = html;
+  if (html) watchNoteTimer = setTimeout(() => { $("watchNote").innerHTML = ""; }, ms);
 }
 
 /** Re-label every ☆ for one game wherever it appears, without repainting the
@@ -992,6 +1067,9 @@ $("watch").addEventListener("change", async (e) => {
   input.setCustomValidity("");
   try {
     await saveWatch(input.dataset.game, input.dataset.platform, value);
+    // It saves on blur with no button, so say so -- otherwise nothing on
+    // screen tells the user the number they typed was kept.
+    watchNote(`<span class="status ok">${value === null ? "Target cleared" : `Target ${inr(value)} saved`}</span>`);
   } catch (err) {
     input.setCustomValidity(err.message);
     input.reportValidity();

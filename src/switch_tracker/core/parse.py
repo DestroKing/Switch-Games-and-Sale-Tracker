@@ -1,8 +1,8 @@
 """Price parsing, product classification, region and condition inference.
 
-A direct port of src/core/parse.ts.  The regex sets and -- critically -- their
-ORDER are reproduced exactly; several of them encode bugs that were found the
-hard way, and the comments explaining why are as valuable as the patterns.
+The regex sets and -- critically -- their ORDER matter: several of them encode
+bugs that were found the hard way, and the comments explaining why are as
+valuable as the patterns.
 """
 
 from __future__ import annotations
@@ -14,19 +14,18 @@ from switch_tracker.core.models import Classification, Condition, Platform, Prod
 
 # --------------------------------------------------------------------- prices
 
-# Currency markers are removed BEFORE the non-numeric strip. This is a
-# deviation from parse.ts, and it fixes a real defect there: the period in
-# "Rs." is inside the [^\d.,] allow-list, so it survives the strip and is then
-# read as a decimal point. The original turns "Rs. 4499" into 0.4499 and
-# "Rs. 4,499" into 4.499 -- silently, with no error -- even though its own
-# docstring lists "Rs. 4499" as a supported format. Reachable via
-# browser.ts's parsePrice(r.priceText) on any store that writes prices that
-# way, which is common on Indian storefronts.
+# Currency markers are removed BEFORE the non-numeric strip, and the order is
+# the fix for a real defect: the period in "Rs." is inside the [^\d.,]
+# allow-list, so if the non-numeric strip ran first the period would survive
+# it and be read as a decimal point. That turned "Rs. 4499" into 0.4499 and
+# "Rs. 4,499" into 4.499 --
+# silently, with no error -- on any store that writes prices that way, which
+# is common on Indian storefronts.
 _CURRENCY_MARKER = re.compile(r"₹|\brs\.?|\binr\b", re.IGNORECASE)
 _NON_NUMERIC = re.compile(r"[^\d.,]")
 # Mimics JavaScript's Number.parseFloat, which takes the longest valid numeric
 # prefix and ignores the rest. Python's float() raises instead, so a value like
-# "4.4.9" would become an exception where the original quietly produced 4.4.
+# "4.4.9" would become an exception where taking the prefix yields 4.4.
 _FLOAT_PREFIX = re.compile(r"^[+-]?(\d+\.?\d*|\.\d+)")
 
 
@@ -250,11 +249,6 @@ def classify(context: str, store_hint: Platform | None = None) -> Classification
     # Platform is known and nothing excluded it. Treat as a game -- on a page
     # of Switch results that is overwhelmingly what a leftover row is.
     return Classification(platform, ProductKind.GAME)
-
-
-def infer_platform(context: str, hint: Platform | None = None) -> Platform:
-    """Convenience for callers that only want the platform."""
-    return classify(context, hint).platform
 
 
 def price_looks_wrong(inr: float, kind: ProductKind) -> bool:

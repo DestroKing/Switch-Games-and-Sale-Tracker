@@ -238,7 +238,3 @@ Design documents are in `docs/`:
 - `python-rewrite-plan.md` — the original spec
 - `python-rewrite-hld.md` — architecture, and the options that lost
 - `python-rewrite-lld.md` — the build plan
-
-The `src/` tree still contains the original TypeScript implementation. It is
-the behavioural reference for the port and will be removed once the Python
-version has been run against live stores.

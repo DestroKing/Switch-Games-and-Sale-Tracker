@@ -68,8 +68,7 @@ def _free_port() -> int:
 def check_tls() -> Check:
     """1. An outbound HTTPS call. Fails in a frozen build with certifi unbundled."""
     try:
-        # follow_redirects is NOT httpx's default. The TypeScript client sets
-        # redirect:"follow" (http.ts:47); Frankfurter answers 301 via Cloudflare.
+        # follow_redirects is NOT httpx's default, and Frankfurter answers 301 via Cloudflare.
         # Omitting this makes every redirecting store fail with an unparseable body.
         r = httpx.get("https://api.frankfurter.app/latest?from=USD&to=INR", timeout=20, follow_redirects=True)
         rate = r.json()["rates"]["INR"]

@@ -4,10 +4,10 @@ These are small shops.  One concurrent request per host and a real delay
 between them costs us nothing -- the collector runs unattended, not in front
 of a user -- and it keeps us off anyone's block list.
 
-Ported from src/core/http.ts, with two changes:
+Two design points worth knowing:
 
-  * It is a class, not module-level globals.  The TypeScript version kept a
-    module-level map of per-host promise chains that was never evicted; that
+  * It is a class, not module-level globals.  A module-level map of per-host
+    request chains is never evicted; that
     was harmless in a short-lived CLI but this process now serves a dashboard
     for hours.  An instance also lets tests use a real gap of 0.3s instead of
     waiting 1.2s per request.
@@ -56,7 +56,7 @@ class PoliteClient:
         self.min_gap_s = min_gap_s
         self.timeout_s = timeout_s
         self.max_attempts = max_attempts
-        # Quadratic backoff, ported from http.ts. Injectable purely so the
+        # Quadratic backoff. Injectable purely so the
         # retry tests do not have to spend 7.5 real seconds proving that a
         # delay happened between attempts.
         self.backoff_base_s = backoff_base_s

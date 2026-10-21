@@ -15,7 +15,7 @@ from switch_tracker.core.models import AdapterKind, FetchOutcome, StoreConfig
 class ProgressSink(Protocol):
     """The only thing an adapter may say while it works.
 
-    Replaces the TypeScript version's ``console.log``. Structured rather than
+    Structured rather than
     textual, because this has to survive to a durable table that a dashboard
     tails -- a closed browser tab must not lose a running collection's
     progress, and stdout cannot deliver that.

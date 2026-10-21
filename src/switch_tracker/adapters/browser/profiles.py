@@ -6,8 +6,6 @@ from typing import Literal
 from switch_tracker.adapters.browser import overrides as profile_overrides
 from switch_tracker.core.models import Condition, Platform, Region
 
-SELECTOR_FIELDS = ("card", "title", "price", "link")
-
 #: Playwright's own accepted values, mirrored so a typo in a profile is a type
 #: error at check time rather than an exception on a live scrape.
 WaitUntil = Literal["commit", "domcontentloaded", "load", "networkidle"]
@@ -191,8 +189,9 @@ PROFILES: dict[str, StoreProfile] = {
         cookies=(("currency", "INR"), ("country", "IN")),
         cookie_domain=".play-asia.com",
         # The only store that sets any of these. Each value is what the
-        # hand-verified sweep in scripts/scrape_check_playasia.py used and the
-        # collector did not -- which is why the two disagreed on the same site.
+        # hand-verified sweep (then a separate script; now
+        # `scripts/scrape_check.py playasia`) used and the collector did not --
+        # which is why the two disagreed on the same site.
         #
         # networkidle: results arrive by XHR, so domcontentloaded returns before
         # any product exists. Opt-in per store because it is slower and can fail

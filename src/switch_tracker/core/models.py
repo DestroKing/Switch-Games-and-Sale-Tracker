@@ -1,6 +1,6 @@
 """Domain vocabulary.
 
-Two decisions carried from the TypeScript original are load-bearing and must
+Two decisions are load-bearing and must
 not be quietly softened:
 
 1. A listing carries its NATIVE currency and price.  INR is derived, never
@@ -67,9 +67,9 @@ class ProductKind(StrEnum):
 class AdapterKind(StrEnum):
     """JSON_API and MANUAL are deliberately absent.
 
-    The TypeScript original declared both, neither had an adapter, and the
-    registry returned undefined for them -- so collect recorded a 'skipped'
-    row that read like a failure.  A kind with no fetcher is not a kind.
+    Declaring a kind with no adapter makes the registry return nothing for it,
+    so collect records a 'skipped' row that reads like a failure.  A kind with
+    no fetcher is not a kind.
     """
 
     SHOPIFY = "SHOPIFY"

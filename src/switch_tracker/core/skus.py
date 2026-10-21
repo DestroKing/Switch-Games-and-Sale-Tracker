@@ -1,7 +1,5 @@
 """Deriving a stable per-store product id from a URL.
 
-Ported from skuFromUrl in src/adapters/browser.ts.
-
 This is small and load-bearing.  ``listing`` has UNIQUE(store_id, sku), so a
 stable SKU is what makes the second run append a price_point to an existing
 listing instead of creating a new one.  If the derivation is unstable across

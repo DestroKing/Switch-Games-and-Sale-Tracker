@@ -5,10 +5,12 @@ from __future__ import annotations
 import sqlite3
 
 from fastapi import APIRouter
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from switch_tracker.core import matcher
 from switch_tracker.web import queries, watchlist
+from switch_tracker.web.errors import problem
 from switch_tracker.web.routers.data import Conn
 
 router = APIRouter(prefix="/api/watchlist", tags=["watchlist"])
@@ -32,9 +34,12 @@ def read(conn: Conn) -> list[dict[str, object]]:
     return _status(conn)
 
 
-@router.put("")
-def upsert(item: WatchItem, conn: Conn) -> list[dict[str, object]]:
-    watchlist.upsert(item.game, item.platform, item.target)
+@router.put("", response_model=None)
+def upsert(item: WatchItem, conn: Conn) -> list[dict[str, object]] | JSONResponse:
+    try:
+        watchlist.upsert(item.game, item.platform, item.target)
+    except watchlist.WatchlistFull as exc:
+        return problem(400, str(exc))
     return _status(conn)
 
 

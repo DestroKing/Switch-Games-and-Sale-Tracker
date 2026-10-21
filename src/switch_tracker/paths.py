@@ -1,13 +1,13 @@
 """Every mutable path in the application resolves here, and nowhere else.
 
-The TypeScript original stored ``stores.local.json`` as a bare relative path,
-so it resolved against the current working directory.  For a CLI launched from
+A bare relative path such as ``stores.local.json`` resolves against the
+current working directory.  For a CLI launched from
 the project folder that is invisible; for a double-clicked ``.exe`` it lands
 wherever Explorer happened to be.  Centralising the resolution makes that class
 of bug unrepresentable rather than merely fixed.
 
-Read-only resources that ship *inside* the bundle (templates, CSS, the vendored
-htmx) are NOT here — those go through :mod:`importlib.resources`, which works
+Read-only resources that ship *inside* the bundle (templates, CSS, JavaScript)
+are NOT here — those go through :mod:`importlib.resources`, which works
 identically frozen and unfrozen.  ``sys._MEIPASS`` deliberately does not appear
 anywhere in this codebase: it exists only in a frozen build, so any code path
 using it silently diverges between development and the shipped exe.
@@ -39,7 +39,10 @@ def data_dir() -> Path:
 
 
 def db_path() -> Path:
-    return Path(os.environ["TRACKER_DB"]) if "TRACKER_DB" in os.environ else data_dir() / "tracker.db"
+    # Truthiness, not membership: TRACKER_DB="" used to become Path(""), the
+    # CURRENT DIRECTORY, while TRACKER_DATA_DIR="" was already ignored.
+    override = os.environ.get("TRACKER_DB")
+    return Path(override) if override else data_dir() / "tracker.db"
 
 
 def overrides_path() -> Path:

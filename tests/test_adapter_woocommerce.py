@@ -71,6 +71,20 @@ class TestPathDiscovery:
         assert isinstance(result, Ok)
         assert any(h.startswith(LEGACY) for h in recorder.hits)
 
+    async def test_html_encoded_names_are_decoded(self, adapter, server) -> None:
+        """Seen live: the Store API sends "&#8211;" for a dash. Stored raw, it shows as
+        literal text and the matcher reads "8211" as a word, splitting the game."""
+        base, recorder = server
+        recorder.plan(
+            V1,
+            page(product(1, "Batman: Arkham Trilogy &#8211; Nintendo Switch", cats=["Pre-Owned &amp; Used"])),
+        )
+        result = await adapter.fetch(store_at(base), NullSink())
+        assert isinstance(result, Ok)
+        [item] = result.listings
+        assert item.title == "Batman: Arkham Trilogy \u2013 Nintendo Switch"
+        assert item.condition == "PRE_OWNED"  # read from the decoded category name
+
     async def test_fails_readably_when_neither_path_answers(self, adapter, server) -> None:
         base, recorder = server
         recorder.plan(V1, (404, "no", {}))
@@ -176,7 +190,7 @@ class TestCompleteness:
     async def test_x_wp_total_is_counted_once_per_query_not_once_per_page(self, adapter, server) -> None:
         """The bug this port fixes.
 
-        woocommerce.ts does `expectedTotal += total` INSIDE the page loop, so a
+        Doing `expected_total += total` INSIDE the page loop (an earlier bug) made a
         213-item category spread over three pages accumulates 639 and reports
         "fetched 213 of 639 -- stopped early". A complete fetch was being
         labelled partial on every single run.

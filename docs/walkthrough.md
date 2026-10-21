@@ -39,7 +39,7 @@ cross-reference looks like §3.4 — so skipping around is safe.
   - [1.6 SQLite — the database](#16-sqlite--the-database)
   - [1.7 httpx — the HTTP client](#17-httpx--the-http-client)
   - [1.8 Playwright — browser automation](#18-playwright--browser-automation)
-  - [1.9 htmx + plain JavaScript — the front end](#19-htmx--plain-javascript--the-front-end)
+  - [1.9 Plain CSS + plain JavaScript — the front end](#19-plain-css--plain-javascript--the-front-end)
   - [1.10 Server-Sent Events — live progress](#110-server-sent-events--live-progress)
   - [1.11 PyInstaller — packaging](#111-pyinstaller--packaging)
   - [1.12 pytest — the test framework](#112-pytest--the-test-framework)
@@ -212,20 +212,19 @@ src/switch_tracker/
     ├── watchlist.py      Reads/writes watchlist.local.json (§4.6).
     ├── routers/          The URLs: pages, data, actions, events, watch.
     ├── templates/        The HTML, with Jinja placeholders (§1.5).
-    └── static/           app.js, app.css, and a vendored copy of htmx (§1.9).
+    └── static/           app.js and app.css, served as they sit on disk (§1.9).
 ```
 
 And outside `src/switch_tracker/`:
 
 | Path | What it is |
 |---|---|
-| `tests/` | 589 tests. `conftest.py` holds the shared setup ("fixtures", §1.12). |
+| `tests/` | 627 tests. `conftest.py` holds the shared setup ("fixtures", §1.12). |
 | `scripts/check_stores.py` | **The pre-release sweep.** Run any store, of any kind, against the **live** site and get a verdict, not just a count (Appendix B.2). |
-| `scripts/scrape_check.py`, `category_check.py`, `diagnose*.py` | Narrower live-site tools: one browser store's walk, feed stores' category slugs, and "why did N rows become M" (Appendix B.2). |
+| `scripts/scrape_check.py`, `category_check.py`, `diagnose_extraction.py` | Narrower live-site tools: one browser store's walk, feed stores' category slugs, and "why did N rows become M" (Appendix B.2). |
 | `packaging/`, `switch_tracker.spec` | Turning it into a Windows `.exe` (§3.17). |
 | `START.bat`, `setup.ps1`, `run.ps1` | What a Windows user double-clicks. |
 | `docs/` | This file, plus the plan/HLD/LLD written before the code. |
-| `src/adapters/`, `src/core/`, `src/web/*.ts`, `src/*.ts` | **The old TypeScript version.** Kept as a behavioural reference for the port; not shipped, not run. Ignore it. |
 
 > **If you read only three files:** `__main__.py` (what the program *is*),
 > `core/models.py` (the vocabulary), `services/collect.py` (the actual job).
@@ -260,9 +259,6 @@ For experiments, point the whole app somewhere disposable:
 ```bash
 TRACKER_DATA_DIR=/tmp/tracker-scratch uv run python -m switch_tracker
 ```
-
-*(Two `.local.json` files also sit in the repo root. Those belong to the old TypeScript
-version and are not read by the Python app.)*
 
 ## 0.5 The whole system on one page
 
@@ -424,6 +420,36 @@ uvicorn.run(app, host="127.0.0.1", port=config.port, log_level="warning")
 - Passing `app` (the actual object) rather than the string `"module:app"` — the string
   form asks uvicorn to *find* the code by name, which does not work once the app is
   packaged into a single `.exe`. The comment in the file says exactly this.
+
+**Binding to 127.0.0.1 keeps out other machines, but not other websites.** That
+distinction took a security review to surface, and it's worth understanding because it
+catches most local tools. Two attacks pass a loopback bind:
+
+- **Cross-site requests.** Any web page you visit can make *your* browser send a
+  form-style POST to `http://127.0.0.1:4173/actions/collect`, or to `/reset-corrections`.
+  A "simple" cross-site POST needs no permission check from the browser, so it lands
+  and runs, even though the attacking page can never read the reply.
+- **DNS rebinding.** A hostile hostname that later resolves to `127.0.0.1` makes the
+  attacker's page *same-origin* with the dashboard, so it can read every `/api/*`
+  response.
+
+`web/guard.py` closes both with plain middleware that runs before routing:
+
+| Check | Applies to | Stops |
+|---|---|---|
+| `Host` must be exactly `127.0.0.1:<port>` or `localhost:<port>` | every request | DNS rebinding (the rebound page sends *its* hostname) |
+| `Origin` must equal `http://<that Host>`; a **missing** Origin is refused | every POST/PUT/DELETE | cross-site requests (browsers always send Origin on these) |
+| `Sec-Fetch-Site`, when present, must be `same-origin` | every POST/PUT/DELETE | the same, from the browser's own account of where a request came from |
+
+GETs are checked by Host only, because a plain page load sends no Origin. That puts one
+rule on every route instead: **a GET must never change anything.** The app never sends
+CORS headers, and a test asserts it. Another test walks the app's whole route list and
+fires a forged request at every state-changing route, so a route added later is covered
+without anyone remembering to.
+
+The tests act as the real page does, with its own Host and Origin. **There is no switch
+that turns the guard off for tests**, because a switch like that is exactly what ends up
+left on.
 
 ## 1.5 Jinja2 — the templating engine
 
@@ -677,7 +703,7 @@ engine will need to tell "this game went on sale" from "the rupee moved" (§5).
 | DB access | raw SQL | SQLAlchemy ORM | The SQL *is* the logic here |
 | HTTP | httpx | requests | Async; `requests` is sync-only |
 | Browser | Playwright | Selenium, BeautifulSoup | Runs page JS; can call back into Python |
-| Front end | htmx + vanilla JS | React | No build step for five buttons |
+| Front end | Vanilla JS | React | No build step for one page |
 | Live updates | SSE | WebSockets, polling | One-way, auto-reconnect, no library |
 | Packaging | PyInstaller onedir | Docker, onefile | Ships a browser; must be a real folder |
 | Tests | pytest | unittest | Fixtures |
@@ -1033,6 +1059,12 @@ the evidence:
 | Nothing collected, and requests failed | `Failed("category …, page 1: HTTP 403")`, the real cause |
 | Nothing collected, and requests succeeded | `Failed("…returned no Switch products")`, true now |
 | Rows collected, but some pages failed | `Partial`, naming the pages it lost |
+
+**Names arrive HTML-encoded.** The Store API returns "Batman: Arkham Trilogy &#8211;
+Nintendo Switch", not an actual dash. A live run caught it: stored raw, the entity showed
+on the dashboard as literal text, and the matcher read "8211" as a word, which split the
+game from every other shop's copy (§3.18). The adapter now decodes product *and*
+category names, and category names matter too because they feed classification.
 
 ## 3.3 Deciding what's a game — the sieve
 
@@ -1390,7 +1422,7 @@ def to_inr(self, native_price, currency):
     return round(native_price * fx.rate, 2), fx.rate_date
 ```
 
-The TypeScript original returned the **native** price when no rate was available — so
+An earlier version returned the **native** price when no rate was available — so
 `$59.99` landed in the rupee column as if it were ₹59.99. Silently, in the one table the
 project exists to accumulate. The docstring states the principle the whole codebase runs on:
 
@@ -1427,6 +1459,15 @@ ON CONFLICT(store_id, sku) DO UPDATE SET url=excluded.url, last_seen=excluded.la
 
 `first_seen` is deliberately **excluded** from the update — it's a fact about when the
 product appeared, and overwriting it each run would erase it.
+
+**Only web links are saved.** A listing's URL comes from the shop's own data. A
+WooCommerce `permalink` is stored as received, and `urljoin()` keeps a `javascript:`
+scheme intact. Rendered as a link on the dashboard, that's script running on the
+dashboard's own origin, which gets past every other protection it has, including the
+cross-site guard (§1.4). So `_persist` drops any listing whose URL isn't `http`/`https`.
+`app.js` checks again with `safeHref()` before drawing a link, because rows saved
+before this rule existed are still in older databases. `esc()` alone isn't enough:
+`javascript:alert(1)` contains nothing to escape.
 
 ### The performance problem, and why it was invisible
 
@@ -1686,9 +1727,18 @@ writes corrections. Note it compares against the **effective** store list (defau
 existing corrections), not the shipped one. Comparing against shipped meant a shop
 corrected on run 1 reported "will switch" forever, because the baseline never moved.
 
-Probe will only ever write a `kind` this build can actually fetch with. Anything else
-(unreachable, a Shopify shop with its feed switched off) gets the shop *disabled* with a
-readable reason, rather than a config value nothing can use.
+Probe will only ever write a `kind` this build can actually fetch with. When the server
+*answers* with something unusable, such as a Shopify shop with its feed switched off,
+the shop is *disabled* with a readable reason, rather than given a config value nothing
+can use.
+
+**A shop that can't be reached is left alone.** A failed connection is a fact about the
+network, not the shop: a filtered office network, a Wi-Fi drop or a five-minute outage
+all look identical. Probe used to disable on it, and one "Check stores" on a filtered
+network disabled 10 of 23 working shops, which then silently stopped being collected
+until someone pressed **Reset corrections**. Now it reports *"could not be reached just
+now"* and writes nothing. A shop an older probe disabled that way is re-enabled the next
+time it answers.
 
 **Detection checks the shape of the reply, not a substring.** Probe used to decide "this
 is Shopify" if the body of `/products.json` *contained the text* `"products"`. A WordPress
@@ -1750,7 +1800,7 @@ sameness is the whole point.
 **Files:** `core/matcher.py`, `services/collect.py`, `web/queries.py:games`
 
 Until this existed, "Metroid Prime 4" at four shops was four unrelated rows, and
-`listing.game_id` (in the schema from the very first TypeScript version) was always
+`listing.game_id` (in the schema from the very first version) was always
 `NULL`. Matching is what turns *"a list of things shops sell"* into *"where is the
 cheapest copy of X right now"*, which is the question the project exists to answer.
 
@@ -2151,6 +2201,12 @@ shops. Now it is one row that already shows the answer:
 ▸  Metroid Prime 4: Beyond         ₹4,499   Amazon India          3 stores   ☆ Watch
 ```
 
+**A row is named after the game, not its cheapest copy.** The name is the shortest
+title among the game's *new* listings, falling back to a pre-owned title only when
+nothing new exists. The first version used the cheapest listing's title, and the
+cheapest copy is often used, so rows read "Super Mario Bros. Wonder - Pre-Owned". The
+condition belongs in the badge beside the best offer, not in the game's name.
+
 *Best price* is the cheapest offer **you can buy**, so in-stock offers rank ahead of
 out-of-stock ones (§3.18). The store name links straight to that offer. In both price
 directions, games you can buy come first, out-of-stock-only games next, and games with
@@ -2220,6 +2276,13 @@ Metroid Prime 4: Beyond  ✓ at target    ₹4,499   Amazon India   [ 4500 ]   R
 Mario Kart World                        ₹6,299   NI Gaming      [ 5500 ]   Remove
 ```
 
+**Every change answers back, and the destructive one can be undone.** The target box
+saves when it loses focus, with no button, so a note beside the heading confirms
+"Target ₹4,000 saved". Unwatching used to throw a typed-in target away with no way
+back. Now the note offers **Undo** for twelve seconds, which restores the entry *with*
+its target. The repaint after a save also puts keyboard focus back where Tab sent it;
+without that, tabbing out of a target box landed you at the top of the page.
+
 **A hit needs the best offer to be in stock.** "₹2,999, sold out" is not a price anyone
 can act on, and an alert that fires on it teaches you to ignore alerts. A test pins
 exactly that case.
@@ -2259,7 +2322,8 @@ version:
   `os.replace` raises `PermissionError` while another thread has the file open.
 - **Write to a temp file, then rename.** A reader never sees a truncated file, which a
   plain `write_text` (empty the file first, then fill it) would show for a moment.
-- **A file `read()` can't use is renamed to `.json.bad`** before anything is written
+- **A file `read()` can't use is renamed to `.json.bad-<n>`** (a unique number per
+  rename, so two bad edits never overwrite each other) before anything is written
   over it. That covers broken JSON *and* valid JSON that isn't a list, so a hand-edit
   with a typo is set aside rather than destroyed. A non-numeric target such as `"4000"`
   is read as "no target" instead of crashing the panel.
@@ -2456,7 +2520,6 @@ land here from anywhere.
 | **FX** | Foreign exchange — here, the USD→INR rate used to compare Play-Asia with Indian shops (§3.10). |
 | **game** | One title on one platform, grouped across shops by the matcher. The Games view shows one row per game (§3.18, §4.5). |
 | **headful / headless** | Headless = the browser runs invisibly (normal). Headful = you can see the window (debugging, and required by the click-to-pick tool). |
-| **htmx** | A small JavaScript library that lets an HTML element make a request by itself, no custom JavaScript needed (§1.9). |
 | **hydration state** | The raw data a JavaScript page was built from, left embedded in the page (e.g. Flipkart's `__INITIAL_STATE__`). Often more stable than the visible HTML (§3.6). |
 | **index (database)** | A structure that lets SQLite find rows without reading every one. §3.11 is a lesson in *using* one versus *seeking* with one. |
 | **JSON-LD** | Structured product data shops embed for Google. Layer 1 of the extraction ladder, because it exists for search engines and survives redesigns (§3.6). |
@@ -2501,7 +2564,7 @@ land here from anywhere.
 Nothing is "done" until all four are green. Run them from the project root.
 
 ```bash
-uv run pytest                           # 589 tests, about four minutes
+uv run pytest                           # 627 tests, about four minutes
 uv run ruff check src tests scripts     # lint
 uv run ruff format src tests scripts    # formatting (rewrites files)
 uv run mypy                             # types, strict mode
@@ -2684,8 +2747,6 @@ writes to `stores.local.json` — and note that your guess in `stores.py` was ne
   comment next to it (§1.13).
 - **`uv.lock` is not committed** in this repository, on purpose — see the reason in
   `.gitignore`. `pyproject.toml` bounds every version; each machine resolves its own.
-- **The `src/` tree contains a whole second implementation** in TypeScript. It is the
-  behavioural reference for the port. Nothing in it runs.
 - **Browser-store profiles are allowed to ship unverified.** `cex_in`'s selectors are
   explicit guesses, marked as such in `profiles.py`. That is a deliberate choice, not an
   oversight: when nothing extracts, the adapter already dumps the rendered HTML and tells
@@ -2715,6 +2776,7 @@ writes to `stores.local.json` — and note that your guess in `stores.py` was ne
 | **Games** is empty but **Every listing** is not | The listings were never grouped: nothing has run the matcher since they were collected. | Restart the dashboard (it groups once on startup), or run `switch-tracker match`. |
 | A watched game is under target but not marked **at target** | Its cheapest offer is out of stock. A hit needs an offer you can actually buy (§4.6). | Nothing. Expand the game's row to see the out-of-stock offer. |
 | The daily collection didn't run | A DAILY task skips the day if the PC was off at that time (§3.19). Or the stores were never checked, so `collect-now` exits with code 2. | In *Task Scheduler*, find "switch-tracker daily collection" and read its *Last Run Result* (`0x2` means not checked yet). Press **Check stores** once if needed. |
+| `This dashboard only answers to its own address` or `Changes can only be made from the dashboard page itself` (403) | The cross-site guard (§1.4) refused the request. You opened the dashboard under an address it doesn't recognise, or something other than the dashboard page sent the change. | Open it as `http://127.0.0.1:<port>` or `http://localhost:<port>`, with the port the console printed. |
 | `A run is already going` (409) | One run at a time, enforced in the database, not the UI (§3.12). | Wait for it, or restart the app — a dead worker's run is reaped on startup. |
 | `'collect' is started by the dashboard, not run directly` | You ran a worker by hand without `--run-id`. Workers report into an existing run. | Use the dashboard, or `scripts/scrape_check.py` for one store. |
 | `Address already in use` on startup | Something else has port 4173 — often an earlier copy still running. | `PORT=4174 uv run python -m switch_tracker`, or close the other copy. |

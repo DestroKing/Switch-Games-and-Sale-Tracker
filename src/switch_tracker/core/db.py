@@ -1,8 +1,8 @@
 """SQLite schema and connections.
 
-The seven original tables are reproduced byte-identically from src/core/db.ts,
-because the Python build opens the SAME data/tracker.db the TypeScript build
-writes.  That makes migration a non-event -- and makes any accidental column
+The seven original tables are kept byte-identical to the schema every existing
+tracker.db was created with.  That makes upgrades a non-event -- and makes any
+accidental column
 rename a silent loss of the accumulated price history, which is the one thing
 this project exists to accumulate.
 
@@ -31,7 +31,7 @@ from switch_tracker import paths
 #: and sharing a connection between threads would be a genuine data race.
 _REQUIRED_THREADSAFETY = 3
 
-# --- The 7 tables, verbatim from db.ts. Do not "tidy" these.
+# --- The 7 original tables, verbatim. Do not "tidy" these: existing databases depend on them.
 _LEGACY_SCHEMA = """
 CREATE TABLE IF NOT EXISTS store (
   id          TEXT PRIMARY KEY,

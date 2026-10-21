@@ -162,8 +162,8 @@ def _filters(query: ListingQuery) -> tuple[list[str], list[Any]]:
     params: list[Any] = []
 
     if query.q:
-        # ESCAPE rather than strip. server.ts removes % and _ from the term,
-        # which turns a search for "%" into an empty term that matches every
+        # ESCAPE rather than strip. Removing % and _ from the term would turn
+        # a search for "%" into an empty term that matches every
         # row -- the filter appears to have broken. Escaping makes a literal
         # "%" search for a literal "%", which correctly finds nothing.
         where.append(r"l.raw_title LIKE ? ESCAPE '\'")
@@ -256,6 +256,18 @@ def listings(conn: sqlite3.Connection, query: ListingQuery) -> dict[str, Any]:
 #: reader would look. "price" is special-cased in games(); see there.
 GAME_SORT_COLUMNS = {"price": "best_price", "title": "title COLLATE NOCASE", "offers": "offers"}
 
+#: The name a game row shows: the shortest NEW listing title in the group,
+#: pre-owned only when nothing new exists. It used to be the CHEAPEST listing's
+#: title, so a row read "Super Mario Bros. Wonder - Pre-Owned" -- and a
+#: watchlist entry then named itself after a used copy. A scalar subquery, not
+#: an aggregate, so the single-MIN() bare-column rule below still holds.
+_DISPLAY_TITLE = """(
+    SELECT d.raw_title FROM listing d JOIN game dg ON dg.id = d.game_id
+    WHERE dg.canonical_title = g.canonical_title AND d.platform = l.platform
+    ORDER BY d.condition = 'PRE_OWNED', length(d.raw_title), d.raw_title
+    LIMIT 1
+)"""
+
 #: Sorts in-stock offers ahead of every out-of-stock one, then by price. An
 #: out-of-stock ₹999 is not "the cheapest copy" of anything you can buy; it is
 #: still shown when it is the ONLY offer, which is why this ranks rather than
@@ -289,7 +301,7 @@ def games(conn: sqlite3.Connection, query: ListingQuery) -> dict[str, Any]:
         SELECT g.canonical_title AS game, l.platform,
                MIN({_BEST_RANK}) AS best_rank,
                latest.inr_price AS best_price, latest.in_stock AS best_in_stock,
-               l.raw_title AS title, l.url AS best_url, l.region AS best_region,
+               {_DISPLAY_TITLE} AS title, l.url AS best_url, l.region AS best_region,
                l.condition AS best_condition, s.name AS best_store,
                COUNT(*) AS offers, COUNT(DISTINCT l.store_id) AS stores
         FROM listing l

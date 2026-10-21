@@ -1,7 +1,7 @@
-"""The schema must open the database the TypeScript version already writes.
+"""The schema must open every existing tracker.db untouched.
 
-The Python build points at the same data/tracker.db. Migration is therefore a
-non-event -- but only if the 7 tables stay byte-identical. One accidental
+Upgrading is a non-event -- but only if the 7 original tables stay
+byte-identical. One accidental
 column rename and the existing price history becomes unreadable.
 """
 
@@ -14,8 +14,8 @@ import pytest
 
 from switch_tracker.core import db
 
-# Copied verbatim out of src/core/db.ts. A database created by the TypeScript
-# build looks exactly like this; the Python build must accept it untouched.
+# The original schema, frozen here on purpose (an oracle, not an import): every
+# existing database looks exactly like this, and the app must accept it untouched.
 LEGACY_SCHEMA = """
 CREATE TABLE IF NOT EXISTS store (
   id TEXT PRIMARY KEY, name TEXT NOT NULL, base_url TEXT NOT NULL,
@@ -95,7 +95,7 @@ def fresh_ok(conn: sqlite3.Connection) -> bool:
 class TestExistingDatabase:
     """The whole reason migration is a non-event."""
 
-    def test_opens_a_typescript_written_database_without_damaging_it(self, tmp_path: Path) -> None:
+    def test_opens_an_existing_database_without_damaging_it(self, tmp_path: Path) -> None:
         path = tmp_path / "legacy.db"
         legacy = sqlite3.connect(path)
         legacy.executescript(LEGACY_SCHEMA)
@@ -163,8 +163,8 @@ class TestNullableInrPrice:
     def test_a_price_point_may_record_no_inr_conversion(self, fresh: sqlite3.Connection) -> None:
         """When no FX rate is stored, recording NO number beats recording a wrong one.
 
-        The TypeScript to_inr returns the native figure with no rate date, so
-        a USD price lands in inr_price as though it were rupees.
+        Returning the native figure with no rate date (an earlier behaviour)
+        lands a USD price in inr_price as though it were rupees.
         """
         fresh.execute("INSERT INTO store VALUES ('s','S','u','SHOPIFY','USD',1,1)")
         fresh.execute(

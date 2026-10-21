@@ -125,6 +125,19 @@ class ProbeService:
                 if adapter_kind is not store.kind:
                     overrides.set_override(store.id, kind=adapter_kind, note="corrected by probe")
                     report.corrected += 1
+                if not store.enabled and store.note == _DISABLE_REASON[Finding.UNREACHABLE]:
+                    # Undo an earlier probe's "unreachable" verdict now that the
+                    # store answers -- the damage the rule below no longer does.
+                    overrides.set_override(store.id, enabled=True, note="reachable again")
+                    report.lines.append(f"  {store.id}: re-enabled (it answered this time)")
+            elif finding is Finding.UNREACHABLE:
+                # A failed CONNECTION says nothing about the store: a filtered
+                # office network, a Wi-Fi drop or a shop's five-minute outage
+                # all look like this. Disabling here silently stopped working
+                # stores being collected until someone pressed "Reset
+                # corrections" -- one run on a filtered network disabled 10 of
+                # 23 shops that were fine. Report it; change nothing.
+                report.lines.append(f"  {store.id}: could not be reached just now -- left as it was")
             elif store.enabled:
                 # Never write a kind this build cannot fetch with. Disable it
                 # with a readable reason instead.

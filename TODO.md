@@ -1,211 +1,154 @@
 # TODO
 
-## Current batch — 2026-10-21, in order
+What is done, what is next, and what is waiting on a decision. Status as of
+2026-10-21. History of *how* things were found lives in git and in
+`docs/walkthrough.md`; this file is only the current state.
 
-1. [x] **Sync `main`** — fast-forwarded to `origin/main` (`f4bebcb`: uncapped
-       movers, 1% movement floor, store filter on the movers panel).
-2. [x] **Green test suite** — 542 passed. Two real problems fixed, both in tests:
-   - `test_entrypoint.py` built a from-scratch env (`PATH=/usr/bin:/bin`). On
-     Windows that drops `SYSTEMROOT`, and `import asyncio` dies in Winsock
-     (`WinError 10106`) before the test begins. Now inherits `os.environ`.
-   - `test_queries.py` oracle never learned the 1% floor from `cbfc39b`, so an
-     unchanged price was `0.0` in the oracle and `NULL` in production (15
-     failures). Oracle now carries the rule as a literal.
-3. [x] **`ruff format` gate** — 27 files reformatted (whitespace only) plus one
-       stale `# noqa: E501` removed. 542 still pass. Commit it on its own so the
-       churn stays out of real diffs.
-4. [x] **Rewrite `docs/walkthrough.md`** — everything since `5fce210` folded
-       into the sections it belongs to, not appended.
-5. [~] **Improvements** — biggest gains done (below); the rest of the backlog is
-       still to discuss.
-   - [x] **Cross-store matching** — `core/matcher.py`. Re-runnable pass at the end
-         of every collection, once on `serve` for an ungrouped DB, and on demand
-         via `switch-tracker match`. Aliases in `matches.local.json`. Games view
-         is now the default table.
-   - [x] **Scheduled collection** — `switch-tracker collect-now` (through the
-         same RunLauncher guards, waits for the worker) and
-         `schedule --at HH:MM | --off` (Windows Task Scheduler; cron line
-         elsewhere). Known gap: missed days are skipped (`ponytail:` note).
-   - [x] **Watchlist + targets** — `watchlist.local.json`, `/api/watchlist`,
-         panel above the collector, tab-title count, desktop notification
-         while a tab is open. Hit = best IN-STOCK offer ≤ target.
-   - [x] **Price history per row** — ▸ on any listing; SVG sparkline plus a
-         readable summary (now / lowest-ever / highest).
-   - [x] Fixed on the way: facet checkbox listeners stacked one per
-         collection (N runs → N searches per tick); `.movers-toolbar` CSS.
-6. [ ] **Hosting** — see "Putting it on the internet" in the session notes; decide
-       on the shape before building anything.
+**Gate** (all must pass before anything is "done"): `uv run pytest`,
+`uv run ruff check src tests scripts`, `uv run ruff format --check src tests scripts`,
+`uv run mypy`, `node --check src/switch_tracker/web/static/app.js`.
 
-## Improvement backlog (unprioritised until discussed)
+---
 
-Security
-- [ ] Reject cross-site POSTs to `/actions/*` (check `Origin`/`Sec-Fetch-Site`)
-      and pin the `Host` header. Today any web page you visit can POST to
-      `127.0.0.1:4173/actions/reset-corrections` and the server will act on it.
-      Prerequisite for any hosting.
+## 1. Done this cycle
 
-Correctness / data
-- [x] Matcher — done (see item 5).
-- [ ] Detected deals: drop vs. trailing median, suppressed for `fx_suspect`
-      clusters. (Targeted alerts are done via the watchlist.)
-- [ ] Scheduled task: `StartWhenAvailable` via task XML so a PC that was off
-      at the scheduled time still collects that day.
-- [ ] A dashboard control for the schedule — the frozen exe is windowless, so
-      `schedule --at` gives no on-screen feedback (it logs to windowed.log).
-- [ ] Confirm the Flipkart second pass on a live walk (carried over, below).
-- [ ] Flipkart `read_claimed_total` shortfall check is inert (carried over, below).
+Committed:
 
-Performance
-- [ ] `/api/movers` is now uncapped and the page fetches all of it on every
-      boot. Fine at hundreds; at thousands of movers push the store filter and
-      the preview limit into SQL.
-- [ ] `listings()` always LEFT JOINs `previous` (a second seek per row) even
-      when `change_pct` is not being sorted on. Measure before touching.
+- `45d4835` Two test failures fixed (Windows-env subprocess, frozen-oracle 1% floor);
+  walkthrough brought up to date.
+- `1550b14` `ruff format` across the tree (whitespace only).
+- `34e8ef6` Cross-store **game matching** + Games view; **watchlist** with targets and
+  desktop notifications; per-listing **price history**; `collect-now` /
+  `schedule --at HH:MM`. 12 bugs found and fixed before commit (6 by an
+  independent review).
 
-Code health
-- [ ] `store.id == "flipkart"` now appears 4× in `adapter.py` plus once in
-      `extract.py`. Still one *shop*, so the HLD's "second shop" trigger for a
-      strategy seam has not fired — but a `profile.navigation_retry` flag
-      would remove the id checks from the walk.
-- [ ] `test_flipkart_recovery.py` leaks an un-awaited `AsyncMock` coroutine
-      (RuntimeWarning at `adapter.py:468`).
-- [ ] Starlette deprecation: `TestClient` over `httpx` → install `httpx2`
-      before the next Starlette major removes it.
-- [ ] Delete the TypeScript tree (`src/*.ts`, `src/web/`, root `*.local.json`)?
-      It is still being edited (`server.ts` in `cd9af2f`) as a "legacy
-      reference", which is maintenance for code nothing runs.
-- [ ] `.movers-toolbar` (new in `f4bebcb`) has no CSS in `app.css`.
+Not yet committed (this batch):
 
-- [ ] `htmx.min.js` is loaded on every page and has zero `hx-` uses. Delete.
+- **Security** (from a `sharp-edges` review):
+  - `web/guard.py`: Host allowlist on every request (DNS rebinding) and Origin +
+    Sec-Fetch-Site on every POST/PUT/DELETE (cross-site requests). Pure ASGI,
+    runs before routing. Tested by a route walk, so new routes are covered by default.
+  - Stored-XSS: only `http`/`https` listing URLs are saved (`collect._persist`),
+    and `safeHref()` in `app.js` refuses anything else; `esc()` now escapes `'`.
+  - Port validated to 1-65535; settings booleans must be real booleans;
+    `TRACKER_DB=""` no longer means the current folder.
+  - 500 responses no longer echo exception text (local paths); detail goes to the log.
+  - Watchlist capped at 500 entries; set-aside corrupt files get unique names.
+- **UX** (from a `ux-heuristics` review in a real browser):
+  - Game rows named after a NEW copy, not the cheapest (often "- Pre-Owned") listing.
+  - Unwatching offers **Undo** (restores the target); saving a target says "saved";
+    keyboard focus survives the watchlist repaint.
+  - "Fix a broken store" needs an explicit **Open** (arrow keys used to open browsers).
+  - Count line: "312 games" / "Showing 100 of 312"; explains the Change-sort narrowing.
+  - Heading matches its toggle ("Every listing"); ▸ targets 24x24 (WCAG 2.5.8);
+    filter popover fits a 390px phone.
+- **Structure** (Python Packaging Authority src-layout guidance): `src/` now holds
+  only the importable package. The retired TypeScript implementation that sat
+  interleaved inside it (20 files) and its two root `*.local.json` files were
+  **deleted** -- nothing ran them; they remain in git history. Every code comment
+  that cited a TypeScript file was rewritten to keep its reasoning without the
+  reference. `.idea/` is no longer tracked (local copy kept); `.gitignore` covers
+  it and stray root `*.local.json`.
+- **Dead files removed** (each verified unreferenced first): `scripts/diagnose.py`
+  (byte-identical duplicate), `diagnose_playasia_pager.py`, `diagnose_playasia_sort.py`,
+  `scrape_check_playasia.py`, `scrape_check_e2zstore.py`, `static/htmx.min.js`
+  (51 KB, zero uses), and dead functions `settings.save`, `parse.infer_platform`,
+  `profiles.SELECTOR_FIELDS`, `errors.error_fragment`.
 
-Functionality
-- [x] Scheduled collection — done (see item 5).
-- [x] Watchlist + target price — done (see item 5).
-- [ ] Landed cost for imports: Play-Asia INR excludes shipping/customs.
-- [ ] CSV export of the current filtered view.
+---
 
-UI
-- [ ] Filter/sort state in the URL: refresh, back, bookmark all lose it today.
-- [x] Per-listing price history — done (see item 5).
-- [ ] Hint when sorting by Change narrows the list (carried over, below).
+## 2. Next up, in order
 
-## Previous batch — status as of 2026-09-22
+Ranked by value against regression risk, merging four skill-driven reviews
+(`product-designer`, `ponytail-audit`, `ux-heuristics`, `sharp-edges`). Risk
+calibration: the last feature batch produced about **1 bug per 100 new lines**;
+*silent* risk means a bug that yields a plausible wrong answer.
 
-## Root cause for most of this: stale build
+| # | Item | Gain | Size | Risk | Notes |
+|---|---|---|---|---|---|
+| 1 | **Lowest-ever price** on Games + Watchlist rows ("lowest ever ₹X", "at its low") | High | S | Low, loud | Answers "is this a good price?" from history that exists; a MIN, far safer than deal detection |
+| 2 | **Automatic database backups** after each collection (`VACUUM INTO`, keep last N) | High | S | Low | `tracker.db` is the one irreplaceable file and nothing backs it up |
+| 3 | **Missed-day scheduling**: a logon trigger plus "skip if collected < 20 h ago" | Med | S-M | Med | Plain DAILY skips a day the PC was off. Check `schtasks /SC ONLOGON` needs no admin before relying on it |
+| 4 | **Toast from the scheduled run** (Windows notification via built-in PowerShell) | Med | M | Med | Today a 07:30 hit is unseen until a tab opens; stays on-machine, no outside service |
+| 5 | Read-only **schedule status** line ("Daily at 07:30 · last ran …" from `schtasks /query`) | Med | S | Low | Replaces the dropped "schedule control" (a write endpoint that creates OS tasks) |
+| 6 | **Static read-only snapshot** for the internet + scoped phone layout | High | M-L | Med, loud | Export Games + Watchlist only; strip `run_store.detail` and local paths; CSP; http(s) URLs only. Host choice pending (§3) |
+| 7 | **Filters in the URL** (refresh/back/bookmark) | Med | M | Med, loud | Pays off more once the snapshot has shareable links |
+| 8 | Out-of-stock sort hint (separator row or header note) | Low | S | Low | "Best price ▲" lists in-stock first; reads as a bug |
+| 9 | Facet counts that respect the other active filters | Low | M | Med, silent | Store counts ignore the console filter today |
+| 10 | Test hygiene: un-awaited `AsyncMock` warning in `test_flipkart_recovery.py` | Low | S | Low | |
+| 11 | **Detected deals** (drop vs trailing median, FX-suppressed) | Med-High | L | **High, silent** | Only if #1 proves not enough; ship as a flag before it ever alerts |
 
-Three of the four reported problems are **already fixed in this repo** and only
-reproduce in an older packaged build:
+Verification runs (2026-10-21, on the office network, into a throwaway data dir):
 
-| Reported | Fixed by | Evidence it is already fixed |
+- [x] **Live collection + matching on real data.** 6 stores collected (Amazon 762,
+      mcubegames 484, hadiro 294, Flipkart 195, consolegarage 34, sheenu 16):
+      1,774 listings -> 1,383 games, **246 matched across 2+ stores**, no wrong
+      merge found. Splits seen come from titles the shops truncate ("...twin pa"),
+      Amazon publisher prefixes ("Warner Bros Interactive Entertainment ..."), and
+      typos -- alias territory. **Found and fixed a real bug:** the WooCommerce
+      Store API sends HTML-encoded names (`&#8211;`), which showed as literal text
+      and split games ("mario kart world 8211").
+- [~] **Flipkart live walk:** Ok, 195 listings, no struck page -- so the
+      second-pass recovery was not exercised this time. Still open.
+- [x] **Exe rebuilt** (841 MB). Packaged self-check: templates, server, Playwright
+      PASS; TLS FAILS -- identically from source, so it is this network (HTTPS
+      interception by an untrusted corporate CA), not the build.
+- [ ] Scheduled task -- deliberately not exercised.
+- Network caveat: on the office network 7 browser stores were reset
+      (`ERR_CONNECTION_RESET`) and probe found 10 HTTP stores unreachable -- all 23
+      work from the user's own network. That run exposed a real bug, now FIXED:
+      probe used to write `enabled: false` for an unreachable store, so one probe on a
+      bad network silently stopped working stores being collected. It now leaves
+      them alone and re-enables any an older probe disabled that way.
+
+Follow-ups from the live data and the final review:
+
+- [ ] Matcher: strip known publisher prefixes Amazon prepends; consider truncated
+      titles (medium risk, **silent** -- a wrong strip merges different games).
+- [ ] `run.ps1` opens `http://127.0.0.1:4173` regardless of the configured port
+      (now a 403 instead of a connection error if they differ).
+
+---
+
+## 3. Waiting on a decision
+
+| Decision | Recommendation | Why it is yours |
 |---|---|---|
-| `hgworld: 0 listings — /collections/.../products.json: no parseable JSON` | `182a2cb` | That is the **Shopify** adapter's message; `stores.py:79` declares hgworld `WOOCOMMERCE`. Confirmed live: `hgworld.in/products.json` → **403**, `hgworld.in/wp-json/wc/store/products` → valid JSON with `prices`. |
-| `flipkart: p4 ERR_TOO_MANY_REDIRECTS`, walk continued to p8 | `c5c121d` | `adapter.py:192-217` retries the page in a fresh tab, then **breaks**. The reported log continued to p5–p8 and never logged the retry line, so that code did not run. |
-| Change column shows `+0.0` for unchanged prices | `553a8b0` | `queries.py:183-188` filters unchanged rows out when sorting by Change; `app.js:576` renders `—` for zero/null. No `+` sign exists anywhere in current code. |
+| **Host for the snapshot** (needed only when #6 is built) | A non-GitHub static host, e.g. Cloudflare Pages by direct upload (no git involved) | Needs an account you create. Org policy forbids writes to github.com, which rules out GitHub Pages; `origin` points at github.com, so do not push |
+| **Watchlist per condition** ("new copies only") | Your call | Today a target compares against the cheapest copy of ANY condition, so a used copy under target counts as a hit |
 
-- [ ] **Rebuild the exe** (`BUILD-EXE.bat`) and re-run — expected to clear all three.
-- [ ] Confirm with `scripts/check_stores.py hgworld flipkart` before rebuilding.
+Decided: TypeScript tree deleted; `.idea/` untracked; `scrape_check.py` kept
+separate from `check_stores.py` (see Dropped).
 
-## HG World: the real cause, found by `--probe` (resolved)
+---
 
-The stale override was only half of it. Cloudflare **403s the Store API's
-`category=` parameter on this host by every available route** — term id, slug,
-v1 path, legacy path, `per_page` 100 and 10, and `collection-data?category=`.
+## 4. Dropped, with reasons
 
-It is the parameter, not the word: `?note=category` answers 200. It is not rate
-limiting: a bare baseline repeated *after* the refusals still answers 200 with
-`x-wp-total=1596`. Both apparent escapes are dead ends —
+- **Merging `scrape_check.py` into `check_stores.py`** -- ~40% of `scrape_check` is
+  unique (`--diagnose-pager`, per-page timing, paging-mechanism printout), so a merge
+  would MOVE ~120 lines rather than delete them, into a live-only tool the test suite
+  cannot verify. Distinct jobs: `check_stores` = all-store sweep, `scrape_check` =
+  one-store deep dive.
 
-| Route | Status | Why it fails |
-|---|---|---|
-| `?category_id=<id>` | 200 | WordPress ignores unknown params — returns the **unfiltered** catalogue (verified: SteamOS PC, DJI mics) |
-| `wp/v2/product?product_cat=<id>` | 200 | Filters correctly (all 10 were Switch games) but carries **no price field** |
+- **Dashboard control that creates scheduled tasks** -- a web write endpoint that
+  makes OS tasks is a security liability; replaced by #5 (read-only status).
+- **CSV export** -- single user, and the database is plain SQLite.
+- **Skip the `previous` price join when unused** -- unmeasured; revisit if slow.
+- **Movers filtering in SQL** -- only matters at thousands of movers.
+- **Flipkart profile flag replacing `store.id == "flipkart"`** -- the "second shop"
+  trigger in the HLD has not fired.
+- **Flipkart `read_claimed_total` shortfall check** -- inert for Flipkart (claims ~132
+  while 232 rows are seen); remove rather than keep code that detects nothing.
+- **Landed cost for imports** -- a wrong shipping/customs figure looks real; only
+  as a user-set, display-only surcharge if ever.
+- **Store health over time** -- the collector tiles already surface zero-listing stores.
+- **`httpx2`** (Starlette's TestClient deprecation) -- would add a dependency; act
+  when Starlette actually removes httpx support.
 
-- [x] Fetch hgworld **unscoped** (~16 pages, 1596 products) and let the
-      classifier sieve. `WooAdapter.fetch` already does this for
-      `collections=()`; no adapter change was needed.
-- [x] **Drop `platform_hint`** — mandatory companion, not cosmetic. Unscoped,
-      the classifier is the only sieve, and a hint means "assume Switch when
-      the text names no console", which relabels this general retailer's
-      accessories as games. Same reasoning as `designinfo`.
-- [x] Both properties pinned by tests, so re-adding either regresses loudly.
+## 5. Known, accepted
 
-## Flipkart: a moving redirect loop, and a `break` that made it worse
-
-The `--probe`-style redirect trace settled this. Flipkart answers a **valid**
-page URL with a `301` to the byte-identical URL, 19 hops, until Chromium gives
-up with `ERR_TOO_MANY_REDIRECTS`. Hop 1 is a legitimate `%2C`→`,`
-normalisation; every hop after it is the same URL redirecting to itself.
-
-It is a **session verdict, not a bad URL** — the page it strikes moves between
-runs:
-
-| Run | Outcome |
-|---|---|
-| `--pages 3` | p1–p3 all clean |
-| full (older build) | p3 clean, **p4 struck**, p5–p8 collected normally |
-| full (current) | p1–p2 clean, **p3 struck** |
-
-That third run exposed the real bug: the flipkart branch `break`s on a failed
-page, so it stopped at p3 and returned 79 listings where the older
-continue-anyway build got 228.
-
-- [x] Retry now **waits** before re-issuing (`_REDIRECT_LOOP_BACKOFF_S`). A
-      fresh tab alone re-issues instantly and collects the same verdict.
-- [x] A struck page is **skipped, not fatal** — the walk carries on.
-- [x] Bounded at `_MAX_NAV_FAILURES = 3` *consecutive* failures, because only a
-      streak separates "one struck page" from "session blocked outright"; the
-      latter must stop rather than walk to `page_cap`.
-- [x] Both shapes covered by runnable mock tests in `test_flipkart_recovery.py`
-      (no browser needed).
-- [x] Confirmed on a live full walk: **79 → 184 listings**, 232 raw rows, p1→p8
-      with p5 struck-and-skipped, ending naturally when p8 extracted nothing.
-
-### Why this cannot be fixed by re-encoding the URL
-
-The p5 and p6 traces from the same run normalise the identical request two
-different ways:
-
-| Page | 301 target | Result |
-|---|---|---|
-| p5 | `sid=4rr,fa6,32v` — `%2C` **decoded** | self-loops 19× |
-| p6 | `sid=4rr%2Cfa6%2C32v` — `sid` **left encoded** | **200** |
-
-Only the comma form loops, but which form comes back is not a property of what
-we sent. There is no encoding to choose — only a page to retry.
-
-### Open, low priority
-
-- [x] **Recover the struck page.** Done. After the walk ends, a second pass
-      re-attempts every page it lost, one attempt each — the elapsed walk is
-      the backoff, and p6's trace proves the edge serves 200 to the identical
-      request once the session verdict expires. Bounded by the same deadline.
-      Failures are now held in `struck` and only folded into `problems` if the
-      second pass does not get them back, so a fully recovered walk reports
-      **Ok** rather than Partial. Expect ~184 → ~223 on a run losing one page.
-- [ ] Confirm the recovery pass on a live Flipkart walk.
-- [ ] `read_claimed_total` now reports **~132** for Flipkart where earlier runs
-      read ~273. Since `raw_seen` (232) exceeds it, the
-      `raw_seen < claimed_total * 0.9` shortfall check is inert for this store.
-      Already documented as best-effort scraped prose, not authoritative — but
-      it is currently not detecting anything.
-
-## Genuinely still open
-
-- [x] **`probe` can mis-detect Shopify (root cause of the bad hgworld override).**
-      `probe.py:176-178` `_contains()` substring-matches the raw body for
-      `"products"`. Any WordPress/Woo page whose inline JS contains that literal
-      is detected as Shopify, and `run()` then writes `kind=SHOPIFY` into
-      `stores.local.json`, overriding the hand-verified config. Fix: shape-check
-      the parsed JSON instead of substring-matching text.
-
-- [x] **"Load 100 more" scrolls back to top.** Fixed in `340ddab`: append
-      now inserts into the existing `<tbody>` and restores keyboard focus.
-
-## Notes / deferred
-
-- Sorting by **Change** deliberately narrows the list to real movers
-  (`queries.py:183-188`), so `total` drops when that sort is active. Intended,
-  but worth a UI hint if it reads as a bug.
-- Flipkart `p8` yielded 0 new rows; `ProductivityTracker` needs 4 consecutive
-  unproductive pages before stopping, so it walked one page past exhaustion.
-  Harmless (dedupe drops them) — leave unless page cost matters.
+- Desktop notifications fire only while a dashboard tab is open (until #4).
+- The matcher errs towards splitting; missed merges are fixed with aliases.
+- Sorting by Change narrows the list to real movers -- now explained in the count line.
+- The scheduled task refuses to register while `TRACKER_DATA_DIR`/`TRACKER_DB` is set
+  (the task would not see them).

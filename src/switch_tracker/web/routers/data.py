@@ -1,4 +1,4 @@
-"""Read-only JSON endpoints. Ported from server.ts, SQL and all."""
+"""Read-only JSON endpoints."""
 
 from __future__ import annotations
 
