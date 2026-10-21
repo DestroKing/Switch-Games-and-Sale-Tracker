@@ -197,11 +197,9 @@ command, and what to do when something fails — is in
 
 Design documents are in `docs/`:
 
-- **`walkthrough.md`** — start here. Orientation (what runs, where every file lives,
-  where your data goes), the tech stack and why each piece was chosen over its
-  alternatives, a step-by-step trace of one collection run, then a feature-by-feature
-  tour of the code. Ends with a glossary and a first-change exercise. Assumes no
-  prior knowledge of any of the technologies.
+- **`walkthrough.md`** — start here. What runs and where every file lives, the tech
+  stack and why, one collection run step by step, how each feature works, an FAQ, and
+  a glossary.
 - **`troubleshooting.md`** — validating the stores, the collected data and a
   build, and a table of symptoms with their fixes.
 - `python-rewrite-plan.md` — the original spec
