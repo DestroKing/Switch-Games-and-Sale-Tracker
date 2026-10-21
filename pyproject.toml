@@ -1,6 +1,6 @@
 [project]
 name = "switch-tracker"
-version = "0.4.0"
+version = "0.3.0"
 description = "Local price tracker for Nintendo Switch / Switch 2 physical cartridges at Indian retailers"
 requires-python = ">=3.12"
 dependencies = [
