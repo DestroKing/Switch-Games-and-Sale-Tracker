@@ -359,6 +359,19 @@ def games(conn: sqlite3.Connection, query: ListingQuery) -> dict[str, Any]:
     return {"total": total, "rows": rows, "offset": query.safe_offset(), "limit": query.safe_limit()}
 
 
+def _redirected(conn: sqlite3.Connection, key: str, platform: str) -> str:
+    """Follow game_redirect to the key's current spelling; cycles stop where they loop."""
+    seen = {key}
+    while row := conn.execute(
+        "SELECT new_title FROM game_redirect WHERE old_title = ? AND platform = ?", (key, platform)
+    ).fetchone():
+        if row[0] in seen:
+            break
+        key = row[0]
+        seen.add(key)
+    return key
+
+
 def watch_status(
     conn: sqlite3.Connection, items: list[dict[str, Any]], aliases: Mapping[str, str] | None = None
 ) -> list[dict[str, Any]]:
@@ -381,17 +394,29 @@ def watch_status(
         # A "New only" watch is the same games() query with the condition
         # filter set, so best price, stock and lowest-ever all agree with it.
         condition = "NEW" if item.get("condition") == "NEW" else ""
-        found = games(conn, ListingQuery(game=key, platform=item["platform"], condition=condition, limit=1))[
+        # Watched under an older key: a matcher improvement re-keys the game.
+        # Tried in order: the key as stored; the stored key re-run through
+        # today's matcher (covers re-keys made before redirects were recorded);
+        # then wherever rematch recorded that the key went. The first key that
+        # IS a game wins -- even if the condition filter then finds nothing, so
+        # a "New only" watch whose game is all pre-owned today reports nothing
+        # rather than falling through to some other game's price.
+        rekeyed = aliases.get(match_key(item["game"]), match_key(item["game"]))
+        platform = item["platform"]
+        candidates = [key, rekeyed, _redirected(conn, key, platform), _redirected(conn, rekeyed, platform)]
+        resolved = next(
+            (
+                c
+                for c in candidates
+                if conn.execute(
+                    "SELECT 1 FROM game WHERE canonical_title = ? AND platform = ?", (c, platform)
+                ).fetchone()
+            ),
+            key,
+        )
+        found = games(conn, ListingQuery(game=resolved, platform=platform, condition=condition, limit=1))[
             "rows"
         ]
-        if not found:
-            # Watched under an older key: a matcher improvement (e.g. a stripped
-            # publisher prefix) re-keys the game, so re-key the watch the same way.
-            rekeyed = match_key(item["game"])
-            rekeyed = aliases.get(rekeyed, rekeyed)
-            if rekeyed != key:
-                q = ListingQuery(game=rekeyed, platform=item["platform"], condition=condition, limit=1)
-                found = games(conn, q)["rows"]
         best = found[0] if found else None
         target = item.get("target")
         hit = bool(

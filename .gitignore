@@ -12,8 +12,9 @@ check-stores.log
 dist/
 build/
 
-# --- personal editor settings
+# --- personal editor settings and working notes
 .idea/
+/TODO.md
 
 # --- correction/watchlist files belong in the DATA dir, never the repo. A stray
 # --- copy here is never read by the app and only misleads diagnosis.

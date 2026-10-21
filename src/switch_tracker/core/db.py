@@ -6,13 +6,15 @@ accidental column
 rename a silent loss of the accumulated price history, which is the one thing
 this project exists to accumulate.
 
-Two additive changes, both deliberate:
+Three additive changes, all deliberate:
 
   * ``run_event`` -- durable progress, so a closed tab or a restarted
     dashboard loses nothing (HLD option 3).
   * ``idx_run_active`` -- a partial unique index permitting at most one
     unfinished run.  This is the authoritative half of the concurrency guard;
     the disabled button in the UI is cosmetic and must never be relied on.
+  * ``game_redirect`` -- old game key -> new, written by the matcher, so a
+    watch saved under a key the matcher has since improved still finds its game.
 
 One deviation: ``price_point.inr_price`` becomes nullable.  See fx/rates.py --
 when no exchange rate is stored, recording NO number is correct and recording
@@ -132,6 +134,15 @@ CREATE INDEX IF NOT EXISTS idx_run_event_run_seq ON run_event(run_id, seq);
 -- A double-clicked button, a page refresh and a second browser tab all reach
 -- this; only the first gets a row.
 CREATE UNIQUE INDEX IF NOT EXISTS idx_run_active ON run((1)) WHERE finished_at IS NULL;
+
+-- Where a game's key went when an improved matcher re-keyed it. Watches are
+-- stored by key, so without this every matcher change silently orphans them.
+CREATE TABLE IF NOT EXISTS game_redirect (
+  old_title  TEXT NOT NULL,
+  platform   TEXT NOT NULL,
+  new_title  TEXT NOT NULL,
+  PRIMARY KEY (old_title, platform)
+);
 """
 
 
