@@ -216,8 +216,10 @@ class TestOverrides:
         assert overrides.read() == {}
 
     def test_applies_a_corrected_kind(self, data_dir: Path) -> None:
-        overrides.set_override("designinfo", kind=AdapterKind.WOOCOMMERCE, note="corrected by probe")
-        store = next(s for s in overrides.active_stores() if s.id == "designinfo")
+        # A store shipped as SHOPIFY, so the correction is visible.
+        assert next(s for s in overrides.active_stores() if s.id == "hadiro").kind is AdapterKind.SHOPIFY
+        overrides.set_override("hadiro", kind=AdapterKind.WOOCOMMERCE, note="corrected by probe")
+        store = next(s for s in overrides.active_stores() if s.id == "hadiro")
         assert store.kind is AdapterKind.WOOCOMMERCE
 
     def test_applies_a_disable(self, data_dir: Path) -> None:

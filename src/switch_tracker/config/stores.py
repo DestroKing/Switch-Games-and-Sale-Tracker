@@ -34,7 +34,10 @@ STORES: tuple[StoreConfig, ...] = (
         id="gameloot",
         name="GameLoot",
         base_url="https://gameloot.in",
-        kind=AdapterKind.SHOPIFY,
+        # Moved off Shopify: /products.json is 404, and the WooCommerce Store API
+        # answers, with "nintendo-switch" as category term 107 (734 products).
+        # Checked from a home network, 2026-10-21.
+        kind=AdapterKind.WOOCOMMERCE,
         currency="INR",
         tier=2,
         enabled=True,
@@ -63,14 +66,18 @@ STORES: tuple[StoreConfig, ...] = (
     StoreConfig(
         id="emartgames",
         name="Emart Games",
-        base_url="https://emartgames.in",
-        kind=AdapterKind.SHOPIFY,
+        # Moved from emartgames.in (Shopify; the domain no longer resolves) to
+        # emartgames.com on WooCommerce -- /product-category/<slug> pages, the
+        # Switch slug carried over. Its Switch 2 category's new slug is not
+        # confirmed yet, so it is left out rather than guessed.
+        base_url="https://emartgames.com",
+        kind=AdapterKind.WOOCOMMERCE,
         currency="INR",
         tier=2,
         enabled=True,
         platform_hint=Platform.SWITCH,
-        collections=("nintendo-switch-games-cds-online-india", "nintendo-switch-2-games"),
-        note="Multi-console store (also PS3/PS4/PS5), scoped to its two Switch categories.",
+        collections=("nintendo-switch-games-cds-online-india",),
+        note="Multi-console store (also PS3/PS4/PS5), scoped to its Switch games category.",
     ),
     StoreConfig(
         id="hgworld",
@@ -132,7 +139,9 @@ STORES: tuple[StoreConfig, ...] = (
         id="designinfo",
         name="DesignInfo",
         base_url="https://www.designinfo.in",
-        kind=AdapterKind.SHOPIFY,
+        # WooCommerce, not Shopify: /products.json is 404, and the Store API has
+        # "nintendo-gaming-consoles" as category term 549 (135 products).
+        kind=AdapterKind.WOOCOMMERCE,
         currency="INR",
         tier=2,
         enabled=True,
@@ -146,10 +155,7 @@ STORES: tuple[StoreConfig, ...] = (
         # NO platform_hint on purpose. Even within this category it is not
         # guaranteed everything is Switch, so requiring an explicit console
         # mention is the safe default for an unscoped multi-brand site.
-        note=(
-            "Real kind is WooCommerce, not Shopify -- probe corrects this into "
-            "stores.local.json. Scoped to its one Nintendo category; no games-only split exists."
-        ),
+        note="Scoped to its one Nintendo category; no games-only split exists.",
     ),
     # ---- Tier 2: "legit but less established". Same adapters, smaller shops. ----
     #
