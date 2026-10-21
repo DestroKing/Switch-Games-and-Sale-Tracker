@@ -9,9 +9,10 @@ from __future__ import annotations
 
 import asyncio
 import sqlite3
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 
 from switch_tracker.adapters.base import Adapter
+from switch_tracker.core import matcher
 from switch_tracker.core.concurrency import bounded_gather
 from switch_tracker.core.db import now_iso
 from switch_tracker.core.models import AdapterKind, Failed, Ok, Partial, RawListing, StoreConfig
@@ -81,10 +82,14 @@ class CollectService:
         browser_deadline_s: float = DEFAULT_BROWSER_DEADLINE_S,
         http_concurrency: int = DEFAULT_HTTP_CONCURRENCY,
         browser_concurrency: int = DEFAULT_BROWSER_CONCURRENCY,
+        aliases: Mapping[str, str] | None = None,
     ) -> None:
         self._conn = conn
         self._adapters = adapters
         self._fx = fx
+        # Passed in, not read here: the service stays file-free, so a test can
+        # never pick up the real user's matches.local.json by accident.
+        self._aliases = aliases or {}
         self.http_deadline_s = http_deadline_s
         self.browser_deadline_s = browser_deadline_s
         self.http_concurrency = http_concurrency
@@ -151,6 +156,13 @@ class CollectService:
             bounded_gather(http_stores, self.http_concurrency, process),
             bounded_gather(browser_stores, self.browser_concurrency, process),
         )
+
+        # Regroup EVERY listing, not just this run's: the pass is cheap, and a
+        # partial regroup would leave older listings on an outdated key.
+        try:
+            matcher.rematch(self._conn, self._aliases)
+        except Exception as exc:  # noqa: BLE001 - grouping is derived; the prices are already saved
+            events.warning(f"matching games failed: {exc}")
 
         self._conn.execute("UPDATE run SET finished_at = ? WHERE id = ?", (now_iso(), run_id))
         events.run_finished()

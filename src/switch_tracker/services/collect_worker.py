@@ -11,7 +11,7 @@ from collections.abc import Sequence
 from switch_tracker import settings
 from switch_tracker.adapters.registry import build_registry
 from switch_tracker.config import overrides
-from switch_tracker.core import db
+from switch_tracker.core import db, matcher
 from switch_tracker.core.http import PoliteClient
 from switch_tracker.core.models import AdapterKind, StoreConfig
 from switch_tracker.fx.rates import FxService
@@ -54,6 +54,7 @@ async def run(run_id: int, only: tuple[str, ...] = ()) -> int:
             conn,
             adapters=build_registry(client, provider),
             fx=FxService(conn, client),
+            aliases=matcher.load_aliases(),
         )
         # The FULL store list plus the selection -- see CollectService.run:
         # the store table projects every store's enabled flag, so pre-filtering

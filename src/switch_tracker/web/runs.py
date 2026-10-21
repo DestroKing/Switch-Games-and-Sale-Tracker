@@ -139,6 +139,9 @@ class RunLauncher:
         ).fetchone()
         return int(row["id"]) if row else None
 
+    def worker_alive(self) -> bool:
+        return self._lock.holder_alive()
+
     def reap_stale(self) -> None:
         """Clear a run whose worker is gone.
 

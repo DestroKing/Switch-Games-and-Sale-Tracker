@@ -102,6 +102,13 @@ class TestPersistence:
         await service(conn, adapters).run([store("s1")])
         assert conn.execute("SELECT finished_at FROM run").fetchone()["finished_at"] is not None
 
+    async def test_groups_listings_into_games_at_the_end_of_a_run(self, conn) -> None:
+        both = Ok((listing("A", store="s1"), replace(listing("B", store="s2"), title="Game A")))
+        adapters = {AdapterKind.SHOPIFY: FakeAdapter(AdapterKind.SHOPIFY, both)}
+        await service(conn, adapters).run([store("s1"), store("s2")])
+        ids = {r["game_id"] for r in conn.execute("SELECT game_id FROM listing")}
+        assert len(ids) == 1 and None not in ids
+
     async def test_projects_the_store_config_into_the_store_table(self, conn) -> None:
         adapters = {AdapterKind.SHOPIFY: FakeAdapter(AdapterKind.SHOPIFY, Ok((listing("A"),)))}
         await service(conn, adapters).run([store("s1")])

@@ -101,8 +101,69 @@ class TestDataEndpoints:
     def test_rejects_an_out_of_range_limit(self, client: TestClient) -> None:
         assert client.get("/api/listings?limit=9999").status_code == 422
 
-    def test_history_is_available_even_though_no_page_calls_it_yet(self, client: TestClient) -> None:
+    def test_history_answers_for_a_listing_with_no_points(self, client: TestClient) -> None:
         assert client.get("/api/history?id=1").json() == []
+
+    def test_games_works_on_an_empty_database(self, client: TestClient) -> None:
+        assert client.get("/api/games?sort=offers&dir=desc").json()["total"] == 0
+
+
+class TestWatchlist:
+    def test_add_retarget_and_remove(self, client: TestClient) -> None:
+        item = {"game": "metroid prime 4 beyond", "platform": "SWITCH", "target": 4000}
+        assert [w["target"] for w in client.put("/api/watchlist", json=item).json()] == [4000]
+        retarget = {**item, "target": 3500}
+        assert [w["target"] for w in client.put("/api/watchlist", json=retarget).json()] == [3500]
+        assert (
+            client.delete("/api/watchlist", params={"game": item["game"], "platform": "SWITCH"}).json() == []
+        )
+
+    def test_is_stored_in_the_data_dir_so_it_survives_a_deleted_database(self, client: TestClient) -> None:
+        client.put("/api/watchlist", json={"game": "kirby", "platform": "SWITCH2", "target": None})
+        assert "kirby" in paths.watchlist_path().read_text(encoding="utf-8")
+
+    @pytest.mark.parametrize(
+        "bad",
+        [
+            {"game": "", "platform": "SWITCH"},
+            {"game": "x", "platform": "PS5"},
+            {"game": "x", "platform": "SWITCH", "target": -1},
+        ],
+    )
+    def test_rejects_malformed_items(self, client: TestClient, bad: dict) -> None:
+        assert client.put("/api/watchlist", json=bad).status_code == 422
+
+    def test_a_hand_edited_non_numeric_target_reads_as_no_target(self, client: TestClient) -> None:
+        """The file is hand-editable. A string target must not 500 the whole list."""
+        paths.watchlist_path().write_text(
+            '[{"game": "x", "platform": "SWITCH", "target": "4000"}, {"game": 7, "platform": "SWITCH"}]',
+            encoding="utf-8",
+        )
+        response = client.get("/api/watchlist")
+        assert response.status_code == 200
+        assert [(w["game"], w["target"]) for w in response.json()] == [("x", None)]
+
+    def test_valid_json_that_is_not_a_list_is_also_set_aside(self, client: TestClient) -> None:
+        paths.watchlist_path().write_text('{"hand": "edited"}', encoding="utf-8")
+        client.put("/api/watchlist", json={"game": "x", "platform": "SWITCH"})
+        assert "hand" in paths.watchlist_path().with_suffix(".json.bad").read_text(encoding="utf-8")
+
+    def test_concurrent_adds_lose_nothing(self, client: TestClient) -> None:
+        """Sync endpoints run on a thread pool: unlocked read-modify-write dropped entries."""
+        from concurrent.futures import ThreadPoolExecutor
+
+        from switch_tracker.web import watchlist
+
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            list(pool.map(lambda i: watchlist.upsert(f"game {i}", "SWITCH", None), range(40)))
+        assert len(watchlist.read()) == 40
+
+    def test_a_corrupt_file_is_set_aside_not_overwritten(self, client: TestClient) -> None:
+        paths.watchlist_path().write_text("[{hand-edited, broken", encoding="utf-8")
+        client.put("/api/watchlist", json={"game": "x", "platform": "SWITCH"})
+        assert (
+            paths.watchlist_path().with_suffix(".json.bad").read_text(encoding="utf-8").startswith("[{hand")
+        )
 
 
 class TestActions:

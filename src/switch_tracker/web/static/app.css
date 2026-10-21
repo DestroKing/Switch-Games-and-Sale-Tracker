@@ -225,7 +225,7 @@ button.quiet:hover:not(:disabled) { background: var(--surface-hover); color: var
 }
 .linkish:hover { color: var(--ink); }
 
-select, input[type="search"], input[type="text"] {
+select, input[type="search"], input[type="text"], input[type="number"] {
   font: var(--t-base)/1 var(--font);
   color: var(--ink);
   background: var(--bg-sunken);
@@ -233,7 +233,7 @@ select, input[type="search"], input[type="text"] {
   border-radius: var(--r-md);
   padding: var(--s2) var(--s3);
 }
-input[type="search"]::placeholder { color: var(--ink-3); }
+input[type="search"]::placeholder, input[type="number"]::placeholder { color: var(--ink-3); }
 /* font: inherit purely to keep the UA's 13.33px default out of the computed
    type scale -- a checkbox renders no text, so this is consistency, not looks. */
 input[type="checkbox"] {
@@ -604,6 +604,7 @@ td.dim { color: var(--ink-3); }
 }
 .title-cell .meta { display: inline; }
 .title-cell .meta .tag { margin-left: var(--s1); }
+.title-cell .meta .status { margin-left: var(--s2); }
 
 /* Price direction. The arrow is the primary signal, the colour is secondary --
    readable in monochrome, which is the WCAG 1.4.1 requirement. */
@@ -677,6 +678,44 @@ tr.is-deal td:first-child { box-shadow: inset 3px 0 0 var(--drop); }
 @keyframes breathe { 0%, 100% { opacity: 0.45; } 50% { opacity: 0.8; } }
 .skel-row { height: 34px; margin-bottom: 1px; }
 .skel-tile { height: 58px; }
+
+/* ====================================================== detail rows (▸) */
+
+/* The expand control is a real button stripped to its glyph. The glyph comes
+   from aria-expanded, so what you see and what a screen reader hears can never
+   disagree about whether the row is open. */
+.expand-cell { width: 1%; padding-right: 0; }
+button.expand {
+  background: none; border-color: transparent; color: var(--ink-3);
+  padding: 2px var(--s1); font-family: var(--mono);
+}
+button.expand::before { content: "▸"; }
+button.expand[aria-expanded="true"]::before { content: "▾"; }
+button.expand:hover:not(:disabled) { color: var(--ink); background: var(--surface-hover); }
+
+/* An open detail row reads as part of the row above it: same surface, a rule
+   in the gutter, and no hover flash, since it is not itself a row to act on. */
+tr.detail > td { background: var(--bg); box-shadow: inset 3px 0 0 var(--line-strong); padding: var(--s3) var(--s4); }
+tbody tr.detail:hover > td { background: var(--bg); }
+tr.detail .bad { color: var(--bad); }
+table.offers { font-size: var(--t-sm); }
+table.offers th { position: static; }
+
+.history { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s4); }
+.history p { margin: 0; color: var(--ink-2); font-size: var(--t-sm); }
+.history b { color: var(--ink); font-family: var(--mono); }
+.spark { flex: none; }
+.spark polyline { fill: none; stroke: var(--info); stroke-width: 1.5; stroke-linejoin: round; }
+.spark circle { fill: var(--info); }
+
+/* ============================================================== watchlist */
+
+#watch input.target { width: 8.5em; text-align: right; font-family: var(--mono); padding: var(--s1) var(--s2); }
+#watch .tablewrap { max-height: none; }
+button.watch[aria-pressed="true"] { color: var(--warn); }
+.empty.compact { padding: var(--s4); }
+
+.movers-toolbar { display: flex; align-items: center; gap: var(--s2); margin-bottom: var(--s3); font-size: var(--t-sm); color: var(--ink-2); }
 
 /* ================================================================ subset */
 

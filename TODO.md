@@ -16,7 +16,23 @@
        churn stays out of real diffs.
 4. [x] **Rewrite `docs/walkthrough.md`** — everything since `5fce210` folded
        into the sections it belongs to, not appended.
-5. [ ] **Improvements** — see "Improvement backlog" below; discuss, then pick.
+5. [~] **Improvements** — biggest gains done (below); the rest of the backlog is
+       still to discuss.
+   - [x] **Cross-store matching** — `core/matcher.py`. Re-runnable pass at the end
+         of every collection, once on `serve` for an ungrouped DB, and on demand
+         via `switch-tracker match`. Aliases in `matches.local.json`. Games view
+         is now the default table.
+   - [x] **Scheduled collection** — `switch-tracker collect-now` (through the
+         same RunLauncher guards, waits for the worker) and
+         `schedule --at HH:MM | --off` (Windows Task Scheduler; cron line
+         elsewhere). Known gap: missed days are skipped (`ponytail:` note).
+   - [x] **Watchlist + targets** — `watchlist.local.json`, `/api/watchlist`,
+         panel above the collector, tab-title count, desktop notification
+         while a tab is open. Hit = best IN-STOCK offer ≤ target.
+   - [x] **Price history per row** — ▸ on any listing; SVG sparkline plus a
+         readable summary (now / lowest-ever / highest).
+   - [x] Fixed on the way: facet checkbox listeners stacked one per
+         collection (N runs → N searches per tick); `.movers-toolbar` CSS.
 6. [ ] **Hosting** — see "Putting it on the internet" in the session notes; decide
        on the shape before building anything.
 
@@ -29,9 +45,13 @@ Security
       Prerequisite for any hosting.
 
 Correctness / data
-- [ ] Matcher (`game_id` is still always NULL) — the "cheapest copy of X across
-      shops" view the project exists for.
-- [ ] Alert engine: drop vs. trailing median, suppressed for `fx_suspect` clusters.
+- [x] Matcher — done (see item 5).
+- [ ] Detected deals: drop vs. trailing median, suppressed for `fx_suspect`
+      clusters. (Targeted alerts are done via the watchlist.)
+- [ ] Scheduled task: `StartWhenAvailable` via task XML so a PC that was off
+      at the scheduled time still collects that day.
+- [ ] A dashboard control for the schedule — the frozen exe is windowless, so
+      `schedule --at` gives no on-screen feedback (it logs to windowed.log).
 - [ ] Confirm the Flipkart second pass on a live walk (carried over, below).
 - [ ] Flipkart `read_claimed_total` shortfall check is inert (carried over, below).
 
@@ -59,15 +79,14 @@ Code health
 - [ ] `htmx.min.js` is loaded on every page and has zero `hx-` uses. Delete.
 
 Functionality
-- [ ] Scheduled collection (today: manual, or once to bootstrap).
-- [ ] Watchlist + target price ("tell me when X < ₹Y").
+- [x] Scheduled collection — done (see item 5).
+- [x] Watchlist + target price — done (see item 5).
 - [ ] Landed cost for imports: Play-Asia INR excludes shipping/customs.
 - [ ] CSV export of the current filtered view.
 
 UI
 - [ ] Filter/sort state in the URL: refresh, back, bookmark all lose it today.
-- [ ] Per-listing price history: `/api/history` exists and nothing calls it.
-      A click-to-expand sparkline on a row is the obvious consumer.
+- [x] Per-listing price history — done (see item 5).
 - [ ] Hint when sorting by Change narrows the list (carried over, below).
 
 ## Previous batch — status as of 2026-09-22

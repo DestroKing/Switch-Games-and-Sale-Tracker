@@ -8,6 +8,7 @@ a hung Chromium takes the dashboard down with it.
 
 from __future__ import annotations
 
+import sqlite3
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
@@ -20,7 +21,7 @@ from switch_tracker.config import overrides
 from switch_tracker.core import db
 from switch_tracker.web import deps, queries
 from switch_tracker.web.errors import json_error_handler
-from switch_tracker.web.routers import actions, data, events, pages
+from switch_tracker.web.routers import actions, data, events, pages, watch
 
 
 @dataclass(frozen=True, slots=True)
@@ -82,6 +83,7 @@ def create_app() -> FastAPI:
     app.mount("/static", StaticFiles(directory=str(resources.static_dir())), name="static")
     app.include_router(pages.router)
     app.include_router(data.router)
+    app.include_router(watch.router)
     app.include_router(actions.router)
     app.include_router(events.router)
     app.add_exception_handler(Exception, json_error_handler)
@@ -94,6 +96,23 @@ def serve(collect_on_launch: bool | None = None) -> int:
 
     config = settings.load()
     app = create_app()
+
+    # A database collected before matching existed has listings and no games.
+    # Group it once here, so the Games view works now rather than after the
+    # next 20-minute collection. After that, every collection regroups itself.
+    conn = deps.get_conn()
+    if conn.execute("SELECT 1 FROM game LIMIT 1").fetchone() is None and (
+        conn.execute("SELECT 1 FROM listing LIMIT 1").fetchone() is not None
+    ):
+        from switch_tracker.core import matcher
+
+        try:
+            print(f"  Grouped {matcher.rematch(conn, matcher.load_aliases())} listings into games.")
+        except sqlite3.Error as exc:
+            # Typically "database is locked": a (scheduled) collection is mid-write.
+            # That collection regroups everything when it finishes, so a
+            # dashboard that refused to start here would be all cost, no gain.
+            print(f"  (games not grouped yet -- {exc}; the running collection will do it)")
 
     decision = launch_collect_decision(
         configured=config.collect_on_launch,

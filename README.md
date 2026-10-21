@@ -5,8 +5,8 @@ across Indian retailers, plus Play-Asia for import comparison. Python +
 FastAPI + SQLite, with Playwright for the stores that publish no product feed.
 Runs entirely on your own machine — nothing is uploaded anywhere.
 
-Everything is driven from one dashboard. There is no menu and nothing to
-hand-edit.
+Everything is driven from one dashboard. There is no menu and nothing you have
+to hand-edit (the one optional file is for fixing how games are grouped).
 
 ---
 
@@ -56,15 +56,55 @@ reopening picks the progress back up where it left off.
 
 Below the buttons:
 
+- **Watchlist** — games you starred, their best price right now, and the price
+  you said you would pay. A game whose cheapest *in-stock* offer is at or below
+  your target is marked **at target**, counted in the tab title, and (if you
+  allow it) announced with a desktop notification while the dashboard is open.
 - **Collector** — one tile per store from the last run: how many listings it
   found, and *why* if it found none. A store silently returning zero is the
   failure that otherwise hides for weeks.
-- **Moved since last run** — price changes, once there are two runs to compare.
-  When many listings in the same currency move by the same amount on the same
-  day, that is flagged as the rupee moving rather than a sale.
-- **All listings** — search and filter by console, store, region, condition and
-  stock. Sorting runs in the database across every row, not just the ones on
-  screen — "cheapest first" over a loaded page is a different, wrong answer.
+- **Moved since last run** — price changes of more than 1%, once there are two
+  runs to compare. When many listings in the same currency move by the same
+  amount on the same day, that is flagged as the rupee moving rather than a sale.
+- **Games** — one row per game across every store: its cheapest copy you can
+  buy, where, and how many shops carry it. **▸** opens every offer for that game,
+  and **▸** on an offer shows its price history. **☆ Watch** adds it to the
+  watchlist. Switch to **Every listing** for the raw per-shop rows. Search and
+  filter by console, store, region, condition and stock in either view. Sorting
+  runs in the database across every row, not just the ones on screen —
+  "cheapest first" over a loaded page is a different, wrong answer.
+
+---
+
+## Collecting every day without pressing anything
+
+```bat
+START.bat schedule --at 07:30     :: collect at 07:30 every day (Windows Task Scheduler)
+START.bat schedule --off          :: stop
+```
+
+With the standalone app, use `switch-tracker.exe schedule --at 07:30`. It is a
+windowless app, so it prints nothing on screen; the confirmation goes to
+`windowed.log` in your data folder, and the task appears in Task Scheduler as
+"switch-tracker daily collection". The
+scheduled run goes through the same one-run-at-a-time guard as the button, so
+it can never collide with a collection you started by hand. If the PC is off at
+that time, that day is skipped.
+
+## When two shops' copies of one game show as two rows
+
+Games are grouped by a normalised title, and the grouping errs on the side of
+keeping things apart: two different games merged into one would be far worse
+than one game split in two. When it splits something it should not, create
+`matches.local.json` in your data folder:
+
+```json
+{ "Zelda: Tears of the Kingdom": "The Legend of Zelda: Tears of the Kingdom" }
+```
+
+Paste titles exactly as the dashboard shows them, then run
+`START.bat match` (or `switch-tracker.exe match`) to regroup — it takes seconds
+and never re-scrapes.
 
 ---
 
@@ -91,6 +131,8 @@ Everything writable is under `%LOCALAPPDATA%\switch-tracker\`:
 | `tracker.db` | The price history. This is the valuable one — back it up |
 | `stores.local.json` | Corrections written by "Check stores" |
 | `profiles.local.json` | Selectors saved by "Fix a broken store" |
+| `watchlist.local.json` | Your watched games and targets — survives deleting the database |
+| `matches.local.json` | Your title aliases for grouping games (optional, you create it) |
 | `diagnostics/` | Page dumps from stores that returned nothing |
 
 Set `TRACKER_DATA_DIR` to put them somewhere else.
@@ -119,13 +161,15 @@ The app is unsigned, so Windows SmartScreen will warn on first run.
 ## What it does and does not cover
 
 It tracks what the configured stores actually sell, not every game in
-existence. Two things are deliberately not built yet:
+existence. Not built yet:
 
-- **Matching across stores.** The same cartridge at four shops is four separate
-  rows. Every listing carries a `game_id` that is always empty, waiting for the
-  matcher.
-- **Alerts.** The price history and the currency-move detection are the
-  groundwork; nothing notifies you yet.
+- **Detected deals.** The watchlist alerts on a target *you* set. Spotting a
+  game that is unusually cheap compared with its own history, without being
+  asked, is not built — the price history and the currency-move check are the
+  groundwork for it.
+- **Alerts with no dashboard open.** Notifications appear while a dashboard tab
+  is open. Email or phone alerts would mean sending data to an outside service,
+  which this app deliberately does not do.
 
 Scope is games only. Consoles, Joy-Cons, cases, amiibo, eShop codes, Online
 memberships and repair services are filtered out, as are games for other
