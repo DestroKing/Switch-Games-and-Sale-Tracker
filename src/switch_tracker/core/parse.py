@@ -127,7 +127,6 @@ def _patterns(*sources: str) -> tuple[re.Pattern[str], ...]:
 HARDWARE = _patterns(
     r"\bconsole\b",
     r"\b(oled|lite)\s*(model|console|edition)?\b",
-    r"\bjoy[\s-]?cons?\b",
     r"\bpro\s*controller\b",
     r"\bdock(ing)?\s*(station|set)?\b",
     r"\bhandheld\b.*\bsystem\b",
@@ -165,6 +164,10 @@ ACCESSORY = _patterns(
     # "accessory" itself is in Flipkart's marketing for real games.
     r"\bprojectors?\b",
     r"\bpok[eé]\s*(mon\s*go|ball)\s*plus\b",
+    # HG World, live: "HG WORLD Carry Travel Hard Shell Protective Bag - Switch"
+    # and "Sportswear for N-S ... Gaming & Workout Apparel" (at Rs 0).
+    r"\b(bag|pouch)\b",
+    r"\b(apparel|sportswear)\b",
 )
 
 DIGITAL = _patterns(
@@ -174,9 +177,27 @@ DIGITAL = _patterns(
     r"\bswitch\s*online\b",
     r"\bmembership\b",
     r"\bvoucher\b",
-    r"\bdlc\b",
     r"\bseason\s*pass\b",
 )
+
+# Words that name the product in its NAME but are only marketing in a
+# listing's tail -- checked against the part before the first "|" only. HG
+# World, live: "Nintendo Switch Sports | ... | Joy-Con Compatible | ..." and
+# "Overcooked All You Can Eat (Switch) | ... with All DLC Remastered" are games;
+# "Nintendo Neon Red & Neon Blue Joy-Con (L-R)" is not.
+HARDWARE_HEAD = _patterns(r"\bjoy[\s-]?cons?\b")
+#: Not after "+": nistore's "Pokémon Violet + ... Bundle (Game+DLC)" is a game.
+DIGITAL_HEAD = _patterns(r"(?<!\+)\bdlc\b")
+#: A physical game that ALSO includes DLC says so: "Dying Light Platinum
+#: Edition Switch Game Card, ... DLC Content" (HG World, live).
+_PHYSICAL = re.compile(r"\b(game\s*card|cartridge|physical|game\s*cd)\b", re.IGNORECASE)
+#: "Bayonetta 2 Nintendo Switch (Includes Bayonetta Digital Code)" -- nekavo,
+#: live -- is the boxed game. What it includes is not what it is.
+_INCLUDES = re.compile(r"\(\s*incl(udes?|uding)?\b[^)]*\)", re.IGNORECASE)
+#: A title naming BOTH Lite and OLED lists what a game runs on: nistore, live,
+#: "Mario Kart 8 Deluxe ... (Switch/Lite/OLED)", "Super Smash Bros Ultimate ...
+#: for Switch Lite & OLED Consoles". A console names one model.
+_COMPAT_MODELS = re.compile(r"\b(lite|oled)(\s*(model|console)s?)?\b", re.IGNORECASE)
 
 # A repair/mod/installation service, not a physical product -- a listing like
 # "Nintendo OLED game loading service" names the console and would otherwise
@@ -225,7 +246,8 @@ def _any(patterns: tuple[re.Pattern[str], ...], text: str) -> bool:
     return any(p.search(text) for p in patterns)
 
 
-def platform_of(text: str, hint: Platform | None = None) -> Platform:
+def _named_platform(text: str) -> Platform | None:
+    """The console the text names, UNKNOWN for another console, None for none."""
     if _any(SWITCH2, text):
         return Platform.SWITCH2
     if _any(SWITCH, text):
@@ -237,6 +259,13 @@ def platform_of(text: str, hint: Platform | None = None) -> Platform:
         return Platform.UNKNOWN
     if _any(SWITCH_LOOSE, text):
         return Platform.SWITCH
+    return None
+
+
+def platform_of(text: str, hint: Platform | None = None) -> Platform:
+    named = _named_platform(text)
+    if named is not None:
+        return named
     # No console named at all. Trust the store's context if it has one -- a
     # title pulled from a Switch-games collection is a Switch game.
     return hint if hint is not None else Platform.UNKNOWN
@@ -262,19 +291,30 @@ def classify(context: str, store_hint: Platform | None = None, *, title: str | N
     of dropped for not naming its console.
     """
     text = _WHITESPACE.sub(" ", context)
-    product = text if title is None else _WHITESPACE.sub(" ", title)
+    product = _INCLUDES.sub(" ", text if title is None else _WHITESPACE.sub(" ", title))
+    if re.search(r"\blite\b", product, re.IGNORECASE) and re.search(r"\boled\b", product, re.IGNORECASE):
+        product = _COMPAT_MODELS.sub(" ", product)
+    head = product.split("|", 1)[0]
+
+    # The platform the TITLE names wins over the categories: HG World files
+    # "Super Smash Bros Ultimate for Nintendo Switch | ..." under a Switch 2
+    # category. Only a title naming no console falls back to the context.
+    named = _named_platform(title) if title is not None else None
+    platform = named if named is not None else platform_of(text, store_hint)
 
     # Order matters. Exclusions first, or hardware wins on a platform match.
-    for patterns, kind in (
-        (SERVICE, ProductKind.SERVICE),
-        (DIGITAL, ProductKind.DIGITAL),
-        (HARDWARE, ProductKind.HARDWARE),
-        (ACCESSORY, ProductKind.ACCESSORY),
+    for kind, hit in (
+        (ProductKind.SERVICE, _any(SERVICE, product)),
+        (
+            ProductKind.DIGITAL,
+            _any(DIGITAL, product) or (_any(DIGITAL_HEAD, head) and not _PHYSICAL.search(product)),
+        ),
+        (ProductKind.HARDWARE, _any(HARDWARE, product) or _any(HARDWARE_HEAD, head)),
+        (ProductKind.ACCESSORY, _any(ACCESSORY, product)),
     ):
-        if _any(patterns, product):
-            return Classification(platform_of(text, store_hint), kind)
+        if hit:
+            return Classification(platform, kind)
 
-    platform = platform_of(text, store_hint)
     if platform is Platform.UNKNOWN:
         return Classification(platform, ProductKind.UNKNOWN)
 

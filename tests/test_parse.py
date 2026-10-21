@@ -199,13 +199,105 @@ class TestClassifyExclusions:
 
 def test_exclusions_read_the_title_when_one_is_given() -> None:
     """Tags say what a product is compatible with; the title says what it is."""
-    context = "Mario Kart 8 Deluxe Nintendo Switch NINTENDO SWITCH OLED SWITCH LITE"
+    context = "Mario Kart 8 Deluxe Nintendo Switch NINTENDO SWITCH OLED"
     assert classify(context).kind is ProductKind.HARDWARE  # context alone: the old behaviour
     assert classify(context, title="Mario Kart 8 Deluxe Nintendo Switch").kind is ProductKind.GAME
     # The platform still comes from the whole context.
     assert (
         classify("Hogwarts Legacy Nintendo Switch Games", title="Hogwarts Legacy").platform is Platform.SWITCH
     )
+
+
+class TestRealFeedTitles:
+    """Titles exactly as the shops wrote them, from home runs of check_stores --rejected / --list.
+
+    Each was on the wrong side once. The feed adapters pass the title separately
+    (``title=``), and these assert through that path.
+    """
+
+    @pytest.mark.parametrize(
+        "title",
+        [
+            # nistore: a compatibility list, not a console.
+            "Animal Crossing: New Horizons \u2013 Deluxe Edition for Nintendo Switch, Lite, and OLED",
+            "Donkey Kong Country: Tropical Freeze for Nintendo Switch/Lite/OLED "
+            "\u2013 Ultimate Adventure Edition",
+            "Fire Emblem Warriors: Three Hopes \u2013 Nintendo Switch Game (Switch/Lite/OLED Compatible)",
+            "Luigi\u2019s Mansion 3: Haunted Adventures on Nintendo Switch, Lite, and OLED",
+            "Mario Kart 8 Deluxe \u2013 Ultimate Racing Experience (Switch/Lite/OLED) Nintendo Switch",
+            "Super Mario 3D World + Bowser\u2019s Fury for Nintendo Switch Lite & OLED",
+            "Super Mario Odyssey: Nintendo Switch Lite & OLED Edition",
+            "Super Smash Bros Ultimate \u2013 Nintendo Switch Game for Switch Lite & OLED Consoles",
+            "Pokémon Violet + The Hidden Treasure of Area Zero Bundle (Game+DLC) \u2013 Nintendo Switch",
+            # HG World: Joy-Con and DLC in the marketing, or alongside "Game Card".
+            "Nintendo Switch Sports | Motion-Controlled Athletics | Multiplayer Sports Fun | Best Price | "
+            "Joy-Con Compatible | Nintendo Switch Game Cartridge",
+            "Super Mario Party Jamboree for Nintendo Switch | Multiplayer Minigame Madness | Joy-Con Fun | "
+            "Colorful Board Action | Best Price | Party Favorite",
+            "Dying Light Platinum Edition Switch Game Card, Nintendo Zombie Survival Horror, Parkour Action, "
+            "Co-Op, DLC Content, Best Price",
+            "Overcooked All You Can Eat (Switch) | Nintendo Switch Games Co-op Edition | "
+            "Overcooked Game with All DLC Remastered | Best Multiplayer Nintendo Games",
+            # nekavo: the boxed game, which also includes a code.
+            "Bayonetta 2 Nintendo Switch (Includes Bayonetta Digital Code)",
+        ],
+    )
+    def test_kept_as_games(self, title: str) -> None:
+        assert (
+            classify(f"{title} Nintendo Switch Games", Platform.SWITCH, title=title).kind is ProductKind.GAME
+        )
+
+    @pytest.mark.parametrize(
+        ("title", "kind"),
+        [
+            ("Nintendo Neon Red & Neon Blue Joy-Con (L-R)", ProductKind.HARDWARE),
+            ("Nintendo Switch OLED Model White Joy-Con with GST Bill,", ProductKind.HARDWARE),
+            ("Nintendo \u2013 Switch 32GB Lite \u2013 Blue", ProductKind.HARDWARE),
+            (
+                "Brand New NINTENDO Switch Lite | 15+ Best Games Bundle | 160 GB Internal(32+128) | "
+                "Blue Edition | Handheld Portable Gaming Console | All Standard Accessories",
+                ProductKind.HARDWARE,
+            ),
+            (
+                "Pre Owned NINTENDO Switch V1 | 120+ Best Games Bundle | 1032GB Internal(32+1000) | "
+                "Handheld Portable Gaming Console | All Standard Accessories",
+                ProductKind.HARDWARE,
+            ),
+            ("Cricket 19 International Edition Nintendo Switch (Digital Code)", ProductKind.DIGITAL),
+            ("NBA 2K27 Nintendo Switch 2 (Download Code Only)", ProductKind.DIGITAL),
+            ("HG WORLD Carry Travel Hard Shell Protective Bag \u2013 Switch", ProductKind.ACCESSORY),
+            (
+                "Sportswear for N-S TNS-0125 | Premium Gaming & Workout Apparel | "
+                "Breathable & Sweat-Wicking Fabric",
+                ProductKind.ACCESSORY,
+            ),
+            (
+                "Analog Caps Set of 4 NSW-092U | Enhanced Grip & Precision | "
+                "Compatible with Nintendo Switch, Switch Lite & OLED | Premium Gaming Accessory",
+                ProductKind.ACCESSORY,
+            ),
+            ("Game Gun TNS-2159 | Nintendo Switch Shooting Grip | FPS Game Accessory", ProductKind.ACCESSORY),
+        ],
+    )
+    def test_dropped_as_not_games(self, title: str, kind: ProductKind) -> None:
+        assert classify(f"{title} Nintendo Switch", Platform.SWITCH, title=title).kind is kind
+
+    @pytest.mark.parametrize(
+        "title",
+        [
+            "Super Smash Bros Ultimate for Nintendo Switch | Iconic Fighting Crossover | Massive Roster",
+            "Ben 10 | Action-Packed Alien Battles | Best Price | Nintendo Switch Game Cartridge",
+        ],
+    )
+    def test_the_title_s_console_beats_the_category_s(self, title: str) -> None:
+        """HG World files these Switch 1 games under a Switch 2 category."""
+        result = classify(f"{title} Nintendo Switch 2 Games", Platform.SWITCH, title=title)
+        assert result.platform is Platform.SWITCH
+
+    def test_a_title_naming_no_console_still_takes_the_category_s(self) -> None:
+        assert classify("Hogwarts Legacy Nintendo Switch 2 Games", title="Hogwarts Legacy").platform is (
+            Platform.SWITCH2
+        )
 
 
 def test_a_game_sold_as_a_bundle_of_games_is_still_a_game() -> None:
