@@ -238,6 +238,36 @@ class TestWatchStatus:
         [status] = queries.watch_status(shelf, [{"game": old_key, "platform": "SWITCH", "target": 4500}])
         assert (status["game"], status["hit"]) == (old_key, True)
 
+    def test_a_watch_follows_a_recorded_redirect(self, shelf) -> None:
+        """A re-key match_key alone cannot undo (e.g. the old key held Flipkart marketing)."""
+        shelf.executemany(
+            "INSERT INTO game_redirect VALUES (?, 'SWITCH', ?)",
+            [
+                ("metroid prime 4 beyond premium", "metroid prime 4 b"),
+                ("metroid prime 4 b", "metroid prime 4 beyond"),
+            ],
+        )
+        item = {"game": "metroid prime 4 beyond premium", "platform": "SWITCH", "target": 4500}
+        [status] = queries.watch_status(shelf, [item])
+        assert (status["game"], status["hit"]) == ("metroid prime 4 beyond premium", True)
+
+    def test_a_game_that_exists_never_follows_a_redirect(self, shelf) -> None:
+        """A "New only" watch on a game whose only copy is used finds nothing -- not a redirect's price."""
+        add_listing(shelf, 8, "amazon", "Hades II - Used", platform="SWITCH", condition="PRE_OWNED")
+        add_price(shelf, 8, 1, 1999, at="2026-01-01T00:00:00Z")
+        matcher.rematch(shelf)
+        shelf.execute("INSERT INTO game_redirect VALUES ('hades ii', 'SWITCH', 'metroid prime 4 beyond')")
+        item = {"game": "hades ii", "platform": "SWITCH", "target": 9e9, "condition": "NEW"}
+        [status] = queries.watch_status(shelf, [item])
+        assert (status["best"], status["hit"]) == (None, False)  # not Metroid's price
+
+    def test_a_redirect_cycle_ends_instead_of_hanging(self, shelf) -> None:
+        shelf.executemany(
+            "INSERT INTO game_redirect VALUES (?, 'SWITCH', ?)", [("loop a", "loop b"), ("loop b", "loop a")]
+        )
+        [status] = queries.watch_status(shelf, [{"game": "loop a", "platform": "SWITCH", "target": 1}])
+        assert status["best"] is None
+
     def test_hits_only_at_or_below_target_and_in_stock(self, shelf) -> None:
         status = queries.watch_status(
             shelf,

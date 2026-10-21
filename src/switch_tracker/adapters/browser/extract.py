@@ -174,8 +174,24 @@ _CARD_SCRAPE = """
     }
     return '';
   };
+  // A visible title the shop cut short ("... Breath of the Wild - Nintendo
+  // Swit...": Flipkart cuts every card at 55 characters) is replaced by the
+  // card's own title attribute -- but only one that STARTS WITH the visible
+  // text, so a tooltip saying something else can never become the name.
+  // Saved as-is, the cut name split the game from every other shop's copy.
+  const squash = (s) => s.replace(/\\s+/g, ' ').trim();
+  const uncut = (n, t) => {
+    const cut = /(\\.\\.\\.|\\u2026)$/.exec(t);
+    if (!cut) return t;
+    const stem = squash(t.slice(0, -cut[0].length));
+    for (const el of n.querySelectorAll('[title]')) {
+      const full = squash(el.getAttribute('title') ?? '');
+      if (stem && full.length > stem.length && full.startsWith(stem)) return full;
+    }
+    return t;
+  };
   return nodes.map((n) => ({
-    title: pick(n, cfg.title)
+    title: uncut(n, pick(n, cfg.title))
         || n.querySelector('a[title]')?.getAttribute('title')
         || n.querySelector('img')?.getAttribute('alt')
         || '',

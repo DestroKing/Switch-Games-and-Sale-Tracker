@@ -219,7 +219,7 @@ And outside `src/switch_tracker/`:
 
 | Path | What it is |
 |---|---|
-| `tests/` | 668 tests. `conftest.py` holds the shared setup ("fixtures", §1.12). |
+| `tests/` | 692 tests. `conftest.py` holds the shared setup ("fixtures", §1.12). |
 | `scripts/check_stores.py` | **The pre-release sweep.** Run any store, of any kind, against the **live** site and get a verdict, not just a count (Appendix B.2). |
 | `scripts/scrape_check.py`, `category_check.py`, `diagnose_extraction.py` | Narrower live-site tools: one browser store's walk, feed stores' category slugs, and "why did N rows become M" (Appendix B.2). |
 | `packaging/`, `switch_tracker.spec` | Turning it into a Windows `.exe` (§3.17). |
@@ -1830,9 +1830,48 @@ are left after it. With one word left, "Square Enix Collection" would become
 "collection", and two different publishers' collections would silently share one price
 series.
 
-Re-keying a game would orphan a watch saved under its old key, so `watch_status` falls
-back to running the stored key through `match_key` again when it finds nothing. The ☆ in
-the table checks against the key the server resolved the watch to.
+### Cut titles, and marketing after a bar
+
+The first live run showed Flipkart splitting almost every game. Two causes, fixed at two
+different layers:
+
+- **The title was cut before it was ever saved.** Flipkart's cards show 55 characters
+  and "...": "The Legend of Zelda: Breath of the Wild - Nintendo Swit...". The full name is
+  in the card's `title` attribute, and the scraper read the visible text first. Now a
+  visible title ending in an ellipsis is replaced by a `title` attribute that *starts
+  with* it, never by one that says something else (`adapters/browser/extract.py`). This is
+  a fix to the stored data, not the matcher: the cut name was simply lost. The next
+  collection overwrites each listing's title in place, keeping its price history.
+- **The full title is mostly advertising.** "Mario Kart World Nintendo Switch 2 | Premium
+  Racing Adventure | Best Physical Switch 2 Games | …" changes per listing, so keying the
+  whole thing splits every game. The name is the part before the first `|`, but only
+  under two conditions, and both must hold:
+  1. The part before the `|` names the console, the way Flipkart ends its names
+     ("Neon White Nintendo Switch Games CD | …"). Without that, the tail is a subtitle:
+     "Fire Emblem | Engage" must not merge with "Fire Emblem | Three Houses", and
+     "Splatoon 3 | Side Order" must not merge with Splatoon 3.
+  2. Nothing after the `|` names an edition, a number, or a variant word (deluxe, twin
+     pack, remastered, …). Amazon writes "Shinobi: Art of Vengeance | **Deluxe** Edition |
+     Switch 2", and cutting there would merge the Deluxe with the Standard.
+
+  Otherwise the whole title is keyed as before. When it's unsure, it splits.
+
+Measured on the live data: 24 new merges, all of them correct; nothing that used to group
+came apart; and games found at 2+ stores rose from 247 to 262. Every price was identical
+before and after, and every game's best price agreed with a recalculation from the raw
+price points.
+
+**A re-keyed game leaves a forwarding address.** Watches are stored by key, so any
+improvement to the key would silently orphan them. When a key disappears and *all* its
+listings moved to one new key, `rematch` writes that to `game_redirect` (an additive table).
+A key whose listings split across several new keys records nothing, because that would be
+a guess. A key that comes back into use loses its redirect: it is its own game again.
+`watch_status` tries the stored key, then the stored key run through today's `match_key`,
+then the redirect chain (guarded against cycles), and takes the first that **is** a game.
+A "New only" watch whose game is all pre-owned today reports nothing, rather than falling
+through to another game's price. On the live data, all 109 keys this change retired still
+found their game. The ☆ in the table checks against the key
+the server resolved the watch to.
 
 What is **not** on the stop list matters more than what is. "a" and "an" were on it at
 first, and the first real title tried showed the problem: "Pokemon Legends Z-A"
@@ -2642,7 +2681,7 @@ land here from anywhere.
 Nothing is "done" until all four are green. Run them from the project root.
 
 ```bash
-uv run pytest                           # 668 tests, about four minutes
+uv run pytest                           # 692 tests, about four minutes
 uv run ruff check src tests scripts     # lint
 uv run ruff format src tests scripts    # formatting (rewrites files)
 uv run mypy                             # types, strict mode

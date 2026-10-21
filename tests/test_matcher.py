@@ -64,6 +64,16 @@ class TestMatchKey:
             ),
             ("U&I Entertainment Hotline Miami Collection", "Hotline Miami Collection"),
             ("Electronic Arts EA Sports FC 25", "EA Sports FC 25"),
+            # Flipkart: "Name | marketing | marketing" -- real titles from a live run.
+            (
+                "Mario Kart World Nintendo Switch 2 | Premium Racing Adventure | Best Physical Switch",
+                "Mario Kart World - Nintendo Switch 2",
+            ),
+            (
+                "Neon White Nintendo Switch Games CD | Lightning-Fast First-Person Action Platformer",
+                "Neon White - Nintendo Switch",
+            ),
+            ("Taxi Chaos 2 | Standard Edition | Switch", "Taxi Chaos 2 - Nintendo Switch"),
         ],
     )
     def test_merges_spellings_of_one_game(self, a: str, b: str) -> None:
@@ -83,6 +93,17 @@ class TestMatchKey:
             ("Capcom Fighting Collection", "Fighting Collection"),
             # Only a prefix is stripped, never a word mid-title.
             ("Mario & Sonic at the Olympic Games", "Mario at the Olympic Games"),
+            # An edition, a variant word or a number after "|" is part of the product.
+            ("Shinobi: Art of Vengeance | Deluxe Edition | Switch 2", "Shinobi: Art of Vengeance"),
+            ("Sonic Frontiers | Definitive Edition | Switch 2", "Sonic Frontiers"),
+            ("Pikmin | Twin Pack", "Pikmin"),
+            ("Little Nightmares | Switch Complete Edition", "Little Nightmares"),
+            ("Xenoblade Chronicles | 3", "Xenoblade Chronicles"),
+            # No console before the bar: the tail is a subtitle, sequel or DLC.
+            ("Fire Emblem | Three Houses", "Fire Emblem | Engage"),
+            ("Mario + Rabbids | Sparks of Hope", "Mario + Rabbids | Kingdom Battle"),
+            ("Persona 5 | Tactica", "Persona 5"),
+            ("Splatoon 3 | Side Order", "Splatoon 3"),
         ],
     )
     def test_keeps_different_games_apart(self, a: str, b: str) -> None:
@@ -90,6 +111,9 @@ class TestMatchKey:
 
     def test_a_title_that_is_all_noise_cannot_match(self) -> None:
         assert match_key("Nintendo Switch Game (Asia)") == ""
+
+    def test_a_head_that_is_all_noise_keys_the_whole_title(self) -> None:
+        assert match_key("Nintendo Switch 2 | Mario Kart World") == "mario kart world"
 
     @pytest.mark.parametrize(
         ("title", "key"),
@@ -142,6 +166,41 @@ class TestRematch:
         }
         matcher.rematch(conn, aliases)
         assert game_of(conn, 1) == game_of(conn, 2)
+
+    def redirects(self, conn) -> dict[str, str]:
+        return {r["old_title"]: r["new_title"] for r in conn.execute("SELECT * FROM game_redirect")}
+
+    def test_a_re_keyed_game_records_where_it_went(self, conn) -> None:
+        """Watches are stored by key; a matcher change must leave a forwarding address."""
+        add(conn, 1, "a", "Mario Kart World Nintendo Switch 2 | Premium Racing Adventure")
+        conn.execute(
+            "INSERT INTO game (canonical_title, platform, region) VALUES ('old key', 'SWITCH', 'IN')"
+        )
+        conn.execute("UPDATE listing SET game_id = last_insert_rowid()")
+        matcher.rematch(conn)
+        assert self.redirects(conn) == {"old key": "mario kart world"}
+
+    def test_a_key_split_across_new_games_records_no_guess(self, conn) -> None:
+        add(conn, 1, "a", "Mario Kart World")
+        add(conn, 2, "b", "Donkey Kong Bananza")
+        conn.execute(
+            "INSERT INTO game (canonical_title, platform, region) VALUES ('old key', 'SWITCH', 'IN')"
+        )
+        conn.execute("UPDATE listing SET game_id = last_insert_rowid()")
+        matcher.rematch(conn)
+        assert self.redirects(conn) == {}
+
+    def test_a_key_still_in_use_is_not_redirected(self, conn) -> None:
+        add(conn, 1, "a", "Mario Kart World")
+        matcher.rematch(conn)
+        matcher.rematch(conn)
+        assert self.redirects(conn) == {}
+
+    def test_a_key_back_in_use_drops_its_old_redirect(self, conn) -> None:
+        conn.execute("INSERT INTO game_redirect VALUES ('mario kart world', 'SWITCH', 'something else')")
+        add(conn, 1, "a", "Mario Kart World")
+        matcher.rematch(conn)
+        assert self.redirects(conn) == {}
 
 
 class TestAliasesFile:

@@ -1135,7 +1135,10 @@ async function saveWatch(game, platform, target, condition) {
 async function dropWatch(game, platform) {
   // Remember the entry first: unwatching used to throw a typed-in target away
   // with no way back, one mis-click on ★ from losing it for good.
-  const previous = watched.find((w) => (w.game === game || w.best?.game === game) && w.platform === platform);
+  // An exact watch first: with both an old-key watch that resolves to this
+  // game and a direct one on it, ★ must remove the direct one.
+  const previous = watched.find((w) => w.game === game && w.platform === platform)
+    ?? watched.find((w) => w.best?.game === game && w.platform === platform);
   // Delete by the STORED key: a ☆ in the table carries the game's current key.
   game = previous?.game ?? game;
   watched = await api(`/api/watchlist?${new URLSearchParams({ game, platform })}`, { method: "DELETE" });

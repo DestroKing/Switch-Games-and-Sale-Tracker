@@ -163,6 +163,33 @@ class TestSelectors:
         await page.goto(url)
         assert (await from_selectors(page, CARD_PROFILE))[0].title == "Pikmin 4"
 
+    @pytest.mark.parametrize(
+        ("visible", "attr", "title"),
+        [
+            # Flipkart's real markup: the visible name is cut, the attribute is whole.
+            (
+                "The Legend of Zelda: Breath of the Wild - Nintendo Swit...",
+                "The Legend of Zelda: Breath of the Wild - Nintendo Switch (2017)",
+                "The Legend of Zelda: Breath of the Wild - Nintendo Switch (2017)",
+            ),
+            ("Pikmin 4 Deluxe…", "Pikmin 4 Deluxe Bundle", "Pikmin 4 Deluxe Bundle"),
+            # An attribute that does not extend the visible text is a tooltip, not the name.
+            ("Hades II Nintendo Sw...", "Add to wishlist", "Hades II Nintendo Sw..."),
+            # Not cut: the visible text wins even when an attribute is longer.
+            ("Pikmin 4", "Pikmin 4 for Nintendo Switch", "Pikmin 4"),
+        ],
+    )
+    async def test_a_cut_visible_title_is_replaced_by_the_full_title_attribute(
+        self, page: Page, html_page, visible: str, attr: str, title: str
+    ) -> None:
+        url = html_page(
+            f"/cut-{abs(hash(visible))}",
+            f"""<html><body><div class="card"><h3 class="name"><a title="{attr}">{visible}</a></h3>
+            <span class="cost">₹3,999</span><a class="more" href="/p/9">buy</a></div></body></html>""",
+        )
+        await page.goto(url)
+        assert (await from_selectors(page, CARD_PROFILE))[0].title == title
+
     async def test_falls_back_to_an_image_alt(self, page: Page, html_page) -> None:
         url = html_page(
             "/s4",
