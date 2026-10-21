@@ -61,7 +61,7 @@ cross-reference looks like §3.4 — so skipping around is safe.
   - [3.4 Reading a price — where the real bugs live](#34-reading-a-price--where-the-real-bugs-live)
   - [3.5 SKUs — forty lines that decide whether the project works](#35-skus--forty-lines-that-decide-whether-the-project-works)
   - [3.6 Scraping a page — the four-layer ladder](#36-scraping-a-page--the-four-layer-ladder)
-  - [3.7 Knowing when to stop turning pages](#37-knowing-when-to-stop-turning-pages)
+  - [3.7 Knowing when to stop turning pages — and when not to](#37-knowing-when-to-stop-turning-pages--and-when-not-to)
   - [3.8 Turning the page when there's no URL to go to](#38-turning-the-page-when-theres-no-url-to-go-to)
   - [3.9 Per-shop quirks, without per-shop code](#39-per-shop-quirks-without-per-shop-code)
   - [3.10 Exchange rates — and the null that matters](#310-exchange-rates--and-the-null-that-matters)
@@ -212,8 +212,9 @@ And outside `src/switch_tracker/`:
 
 | Path | What it is |
 |---|---|
-| `tests/` | 494 tests. `conftest.py` holds the shared setup ("fixtures", §1.12). |
-| `scripts/scrape_check.py` | Run **one** store against the **live** site and print what came back. |
+| `tests/` | 542 tests. `conftest.py` holds the shared setup ("fixtures", §1.12). |
+| `scripts/check_stores.py` | **The pre-release sweep.** Run any store, of any kind, against the **live** site and get a verdict, not just a count (Appendix B.2). |
+| `scripts/scrape_check.py`, `category_check.py`, `diagnose*.py` | Narrower live-site tools: one browser store's walk, feed stores' category slugs, and "why did N rows become M" (Appendix B.2). |
 | `packaging/`, `switch_tracker.spec` | Turning it into a Windows `.exe` (§3.17). |
 | `START.bat`, `setup.ps1`, `run.ps1` | What a Windows user double-clicks. |
 | `docs/` | This file, plus the plan/HLD/LLD written before the code. |
@@ -243,7 +244,7 @@ What you'll find in there:
 | `profiles.local.json` | Selectors the click-to-pick tool saved (§3.16). | Yes — but you'll have to re-pick them. |
 | `settings.json` | Port, headful, collect-on-launch. | Yes — defaults return. |
 | `run.lock` | The pid of a running worker (§3.12). | Yes, when nothing is running. |
-| `diagnostics/` | Screenshots and HTML from stores that returned nothing. | Yes, always. |
+| `diagnostics/` | Screenshots and HTML from stores that returned nothing, plus `flipkart-p<N>-navigation.json` redirect traces (§3.7). | Yes, always. |
 
 For experiments, point the whole app somewhere disposable:
 
@@ -257,7 +258,7 @@ version and are not read by the Python app.)*
 ## 0.5 The whole system on one page
 
 ```
-   YOU                                              FOURTEEN SHOPS
+   YOU                                           TWENTY-FOUR SHOPS
     │                                            (nistore, amazon_in,
     │ browser at 127.0.0.1:4173                    flipkart, playasia, …)
     ▼                                                      ▲
@@ -521,9 +522,9 @@ program and downloads a ~400 MB browser. That single fact dominates the packagin
 
 | File | Lines | Job |
 |---|---|---|
-| `web/templates/index.html` | ~195 | The shell the server renders once |
-| `web/static/app.css` | ~725 | The design system (Part 4) |
-| `web/static/app.js` | ~740 | Everything that happens after load |
+| `web/templates/index.html` | ~205 | The shell the server renders once |
+| `web/static/app.css` | ~720 | The design system (Part 4) |
+| `web/static/app.js` | ~810 | Everything that happens after load |
 
 **Why not React.** React, Vue and Svelte all need a **build step** — a toolchain that
 compiles your source into files a browser can load. That means Node.js, a package
@@ -850,7 +851,7 @@ if needs_browser(stores, only):
 An HTTP-only selection never pays to launch Chromium — and `needs_browser` asks the
 **selection**, not the enabled flags, for the reason §3.14 spells out.
 
-**7. The run (`services/collect.py:CollectService.run`, `collect.py:88`).**
+**7. The run (`services/collect.py:CollectService.run`, `collect.py:93`).**
 
 ```python
 active = select_stores(stores, only)     # scope
@@ -867,14 +868,14 @@ Two pools, because eight simultaneous Chrome contexts and eight simultaneous HTT
 requests cost wildly different amounts of memory. Two deadlines for the same reason:
 **180 s** per HTTP store, **600 s** per browser store.
 
-**8. One store (`_process_store`, `collect.py:154`).** This is where failure is
+**8. One store (`_process_store`, `collect.py:159`).** This is where failure is
 *contained*. `adapter.fetch()` is wrapped in `asyncio.wait_for` and in a deliberately
 broad `except Exception`, and every exit — timeout, crash, `Failed`, `Partial`, `Ok` —
 ends the same way: a row in `run_store` and a `store_finished` event.
 
-> A store that explodes is a *store* failure, never a *run* failure. Thirteen shops
+> A store that explodes is a *store* failure, never a *run* failure. The other twenty-two
 > still get collected. That containment is why the dashboard can honestly show
-> "13 ok, 1 failed: TimeoutError" instead of nothing at all.
+> "22 ok, 1 failed: TimeoutError" instead of nothing at all.
 
 **9. Saving (`_persist`, `collect.py:221`).** Per listing, inside one transaction:
 
@@ -952,6 +953,27 @@ WooCommerce shops list only a **parent** category on purpose — WooCommerce ret
 product under its parent *and* each of its child terms, so listing the children beside it
 fetches the same products two or three times and throws the duplicates away at dedupe.
 
+**And one shop that cannot be scoped at all.** HG World is the exception that shows why
+the rule exists. Its Cloudflare front end returns 403 for the Store API's `category=`
+parameter by *every* route: term id or slug, v1 or legacy path, 100 or 10 per page. It is
+the parameter and not rate limiting, because a bare request repeated *after* the refusals
+still answers 200. The two routes that look like escapes are both dead ends.
+`category_id=` answers 200 only because WordPress ignores unknown parameters, so it returns
+the unfiltered catalogue. `wp/v2/product?product_cat=` filters correctly but carries no
+price. So HG World is fetched **unscoped**, about 16 pages and 1,596 products, and the
+classifier sieves the lot.
+
+Fetching it unscoped meant two settings had to change together. `collections=()` is the
+obvious one. The other is dropping `platform_hint`. Once the classifier is the *only*
+sieve, a hint saying "assume Switch when the text names no console" quietly relabels a
+general electronics shop's terse-titled accessories as games. It is the same reasoning as
+`designinfo` in §3.3. The cost is that a Switch game whose title never says "switch" is
+missed. That is acceptable here because HG World's own titles are verbose, and a missed row
+is recoverable where a poisoned price series is not. Both properties are pinned by tests
+(`test_stores.py` for the missing hint, `test_adapter_woocommerce.py` for the unscoped
+fetch), so restoring either one fails loudly. The full investigation is in the
+store's comment in `stores.py`, and `scripts/check_stores.py --probe` reproduces it (B.2).
+
 ## 3.2 Three ways to read a shop
 
 **Files:** `adapters/shopify.py`, `adapters/woocommerce.py`, `adapters/browser/`
@@ -978,6 +1000,20 @@ source, and that difference is surfaced rather than flattened.**
 
 `Failed` carries a human-readable `reason`, because that text is the only thing you'll see
 when a shop goes quiet.
+
+**Which makes the reason text worth getting right.** The WooCommerce adapter used to treat
+a refused request exactly like an empty category: it hit `break`, collected nothing, and
+reported *"Store API reachable but returned no Switch products"*. That sentence is false
+for a store answering 403, and it sends you hunting for a classifier problem that isn't
+there. Now every early exit records why. A refusal records `HTTP 403`, a garbled body
+records `invalid JSON`, and a body that isn't a product list says so. The verdict follows
+the evidence:
+
+| What happened | Outcome |
+|---|---|
+| Nothing collected, and requests failed | `Failed("category …, page 1: HTTP 403")`, the real cause |
+| Nothing collected, and requests succeeded | `Failed("…returned no Switch products")`, true now |
+| Rows collected, but some pages failed | `Partial`, naming the pages it lost |
 
 ## 3.3 Deciding what's a game — the sieve
 
@@ -1025,7 +1061,8 @@ titles on a specialist shop is exactly what poisons a general one.
 **File:** `core/parse.py`
 
 Indian shops write prices at least six ways: `4,499.00`, `Rs. 4499`, `INR 4,499`,
-`4.499,00`. Two bugs found the hard way are recorded here, and both teach the same lesson.
+`4.499,00`. Three bugs found the hard way are recorded here, and all three teach the same
+lesson.
 
 **Bug one — `Rs.`** The original code stripped everything that wasn't a digit, dot or
 comma. The dot in `Rs.` survives that filter, so `Rs. 4499` became `.4499` → **₹0.45**.
@@ -1036,8 +1073,24 @@ point" is wrong for Indian prices. `3,599` has no dot, so the comma looked like 
 point: **₹3.60 instead of ₹3,599**. A thousand times too small. The rule now is: a comma
 with no dot anywhere is *always* a thousands separator.
 
-> **Neither bug threw an exception. Both produced a plausible number.** That is the theme
-> of this entire codebase — in a scraper, the dangerous failure is the one that type-checks.
+**Bug three: `rs` inside a word.** When a card's price selector matches nothing,
+`first_rupee_price` searches the whole card's text for a rupee marker (layer 4 of the
+ladder in §3.6). Its pattern looked for `Rs` with no word boundary, so it matched the "rs"
+*inside* ordinary words and took whatever number came next. "Mario Party Supe**rs**tars
+3 modes" was priced at **₹3**, and "Warrio**rs** 4 player co-op" at **₹4**. The fix puts a
+`\b` boundary in front of `Rs` and `INR`. `₹` needs none, because it isn't a word
+character. The digit group was also tightened to how money is actually written (comma
+groups, at most two decimals), and the match goes back through `parse_price` instead of a
+second, local parser. Two parsers for one job drift apart.
+
+One limitation is kept on purpose and written into the docstring. "First" really means
+first: `MRP ₹5,999 ₹3,999` yields 5,999, the struck-through price. Plain text can't tell
+the two apart, and that is why store profiles prefer a sale-price selector wherever a shop
+offers one (§3.9).
+
+> **None of the three threw an exception. All three produced a plausible number.** That
+> is the theme of this entire codebase: in a scraper, the dangerous failure is the one
+> that type-checks.
 
 Which is why `parse_price` returns `None` on failure and never `0`:
 
@@ -1096,7 +1149,7 @@ real CSS. Handing it to the browser's own `querySelector` throws — and that ca
 exception silently disabled out-of-stock detection **for every shop at once**. It's now
 emulated as a plain text search.
 
-## 3.7 Knowing when to stop turning pages
+## 3.7 Knowing when to stop turning pages — and when not to
 
 **File:** `adapters/browser/pagination.py`
 
@@ -1111,6 +1164,72 @@ GIVE_UP_AFTER = 4            # four pages, not one — one odd page isn't an end
 
 A **proportion** sustained over several pages is what distinguishes "genuinely finished"
 from "recycling filler".
+
+### The opposite mistake: stopping because one page failed
+
+**File:** `adapters/browser/adapter.py`, the page loop and the second pass after it.
+
+Running dry is one reason to stop. A page that *won't load* is a different question, and
+Flipkart is where it got answered.
+
+Partway through a walk, Flipkart answers a perfectly valid page URL with a `301` to **the
+byte-identical URL**, 19 hops in a row, until Chromium gives up with
+`ERR_TOO_MANY_REDIRECTS`. It looks like a bad URL and isn't one. It is a **verdict on the
+session**, and the page it hits *moves between runs*:
+
+| Run | What happened |
+|---|---|
+| `--pages 3` | p1–p3 all clean |
+| full, older build | p3 clean, **p4 struck**, p5–p8 collected normally |
+| full, a later build | p1–p2 clean, **p3 struck**, and the walk *stopped* |
+
+That third row was the real bug. The loop used to `break` on a failed page, assuming a
+page that failed twice would keep failing. So one struck page threw away the rest of the
+catalogue, and a run returned 79 listings where the older continue-anyway build had
+collected 228. The fix is four rules, each answering one shape of failure:
+
+1. **Wait, then retry.** On a failed navigation the adapter closes the tab, sleeps
+   `_REDIRECT_LOOP_BACKOFF_S` (8 s), and tries once more in a fresh tab. The wait is the
+   part that matters. An instant re-issue, fresh tab or not, gets the same verdict.
+2. **Skip, don't stop.** If the retry fails too, the page goes into a `struck` dict and
+   the walk carries on to the next page.
+3. **But stop on a streak.** `_MAX_NAV_FAILURES = 3` *consecutive* failures end the walk.
+   Only a streak separates "one struck page" from "this session is blocked outright", and
+   the second case must stop rather than spend the whole time budget proving it. One good
+   page resets the count.
+4. **Go back for what was lost.** After the walk, a **second pass** retries every struck
+   page once. The elapsed walk *was* the backoff, since minutes have passed, and the
+   redirect traces show Flipkart's edge answering 200 to the identical request once the
+   verdict expires. The pass checks the same deadline before every page.
+
+The bookkeeping detail is what makes the verdict honest. A failed page is *held back* in
+`struck` rather than written straight into `problems`. Only pages the second pass
+couldn't recover get reported. So a walk that lost p5 and got it back reports **Ok**,
+which is what actually happened, instead of a `Partial` that would send you
+investigating a complete fetch. Both passes fold rows in through one shared `_absorb()`,
+so a recovered page dedupes and classifies exactly like its neighbours. Measured on a
+live walk: **79 → 184 listings**, p5 struck and skipped.
+
+**Why not just fix the URL?** Because there's no fixed version. The traces from one run show
+the edge normalising the *same* request two different ways. The hop that leaves
+`sid=4rr%2Cfa6%2C32v` encoded answers 200. The hop that decodes it to `sid=4rr,fa6,32v`
+is the one that loops. Which form comes back isn't decided by what was sent. There's
+nothing to choose, only a page to retry later. That's the warning in the comment above
+`_REDIRECT_LOOP_BACKOFF_S`, and it is there so nobody spends an afternoon re-encoding.
+
+Two supporting pieces:
+
+- **The shop's own pager link is preferred.** `_flipkart_page_url()` uses the page's own
+  `page=N` link when that link keeps *both* platform filters, and falls back to the
+  template otherwise. A pager link that drops the Switch 2 facet would quietly halve the
+  catalogue.
+- **Every failed navigation leaves a trace.** `_goto_flipkart()` records each
+  main-frame redirect hop and writes `diagnostics/flipkart-p<N>-navigation.json` on
+  failure. That file is how the "self-redirect, moving page" diagnosis above was made, so
+  the next one won't need a reproduction.
+
+All of this runs without a browser in `tests/test_flipkart_recovery.py`, against a mocked
+page.
 
 ## 3.8 Turning the page when there's no URL to go to
 
@@ -1209,21 +1328,31 @@ to any shop somebody has actually looked at; no shop acquires it by accident.
 
 ### Where declarative stops working
 
-There is exactly one store-id branch in the codebase, in `extract.py`:
+Store-id branches exist, and every one of them names the same shop:
 
 ```python
-if store_id == "flipkart":
+if store_id == "flipkart":      # extract.py, once: read the hydration state
+if store.id == "flipkart":      # adapter.py, four times: navigation recovery (§3.7)
 ```
 
-Flipkart needed a genuinely different *mechanism* — walk the page's hydration state — and
-you cannot express "walk the Redux store" as a config value. The useful distinction:
+Flipkart needed a genuinely different *mechanism* twice. First it had to walk the page's
+hydration state, and you can't express "walk the Redux store" as a config value. Then it
+needed the redirect-loop recovery, which is a different way of *navigating*, not
+different values for the same navigation. The useful distinction:
 
 - *"Scroll differently, wait longer, reject these URLs"* → a **parameter**. Same algorithm,
   different values. Belongs on the profile.
-- *"Don't read the DOM at all"* → a **mechanism**. Different algorithm. Needs code.
+- *"Don't read the DOM at all"*, *"retry a refused page later"* → a **mechanism**.
+  Different algorithm. Needs code.
 
-`docs/python-rewrite-hld.md` records the trigger for revisiting this: when a **second**
-shop needs mechanism-level divergence, a strategy seam stops being speculative.
+`docs/python-rewrite-hld.md` records the trigger for revisiting this: when a **second
+shop** needs mechanism-level divergence, a strategy seam stops being speculative. Note
+what has and hasn't happened. The branches went from one to five, but the shop count is
+still one, so the trigger as written hasn't fired. What *has* changed is the cost of
+waiting. Four checks scattered through one loop are harder to read than one. The middle
+ground is a profile flag such as `navigation_retry=True`. It would be a parameter that
+switches the recovery on, and it would remove the id checks from the walk without
+building a strategy interface for one implementation.
 
 ## 3.10 Exchange rates — and the null that matters
 
@@ -1342,6 +1471,38 @@ subtly so. `in_stock_only` **filters** on the latest row, and two of the four so
 **order by** it. A projected value can't be filtered or sorted on. That version passes a
 casual test and breaks three features.
 
+### The second-newest row, and what "moved" means
+
+The same subquery, written once as `_NTH_LATEST_ID`, takes an `OFFSET`. Offset 0 is
+`latest` and offset 1 is `previous`, so `listings()` LEFT JOINs both and computes the
+movement in SQL:
+
+```sql
+CASE WHEN previous.inr_price IS NOT NULL AND previous.inr_price != 0
+          AND latest.inr_price IS NOT NULL
+          AND ABS(<pct>) > 1.0              -- MIN_CHANGE_PCT
+     THEN <pct> ELSE NULL END AS change_pct
+```
+
+It is a LEFT join on purpose. A listing seen only once has no previous row, and it must
+still appear in the list with a `NULL` change rather than disappear from it.
+
+Three decisions are built into it:
+
+- **Movement has a floor.** `MIN_CHANGE_PCT = 1.0`. A ₹4,499 game re-quoted at ₹4,489 is
+  rounding noise, not news, and a "movers" view full of 0.2% wiggles hides the 30% drop
+  you came for. The same floor applies to `movers()` (§4.3), so the panel and the column
+  can't disagree about whether something moved. At or under the floor, `change_pct` is
+  `NULL`, which means "nothing to report", the same as no previous observation.
+- **Sorting by change narrows the list to real movers.** With `sort=change`, the floor
+  and "has a previous price" become `WHERE` conditions, applied **before** `COUNT` and
+  `LIMIT`. If they were applied after, page 2 would start in the wrong place and the
+  total would count rows you can't reach. So `total` drops when you pick that sort. That
+  is intended, and noted in Appendix C because it reads like a bug the first time.
+- **NULLs sort last in both directions.** SQLite puts NULL first in ascending order,
+  which would open "biggest drops first" with a screen of listings that never moved.
+  `ORDER BY change_pct IS NULL, change_pct …` keeps them at the bottom either way.
+
 ### How "identical results" was guaranteed
 
 The acceptance criterion wasn't speed, it was *same rows*. So the old query was pasted into
@@ -1352,6 +1513,16 @@ tied timestamps).
 
 Frozen deliberately: an oracle imported from production changes when production changes,
 and would agree with any rewrite including a wrong one.
+
+The cost of freezing is that a **deliberate** behaviour change has to be copied into the
+oracle by hand. That really happened. The 1% floor landed in `queries.py` and not in the
+oracle, so fifteen matrix cases failed on the one row whose price hadn't moved: `0.0` in
+the oracle, `NULL` in production. The fix is to write the new rule into the oracle as a
+literal, `> 1.0`, and *not* to import `MIN_CHANGE_PCT`, for the same reason as above. The
+failure was the oracle doing its job. It stops anything changing the rows without
+someone deciding to. `sort=change` is outside the matrix and has its own test
+(`test_change_sort_shows_only_actual_movers`), because the narrowing is specified
+behaviour, not something to compare against old SQL.
 
 ## 3.12 Making sure two runs can't collide
 
@@ -1499,6 +1670,23 @@ corrected on run 1 reported "will switch" forever, because the baseline never mo
 Probe will only ever write a `kind` this build can actually fetch with. Anything else
 (unreachable, a Shopify shop with its feed switched off) gets the shop *disabled* with a
 readable reason, rather than a config value nothing can use.
+
+**Detection checks the shape of the reply, not a substring.** Probe used to decide "this
+is Shopify" if the body of `/products.json` *contained the text* `"products"`. A WordPress
+404 page answers with status 200, and its inline JavaScript routinely contains that exact
+literal. So HG World, a hand-verified WooCommerce shop, was detected as Shopify, and probe
+wrote `kind=SHOPIFY` into `stores.local.json`. Because corrections layer *over* the
+shipped config (§3.1), that one wrong write overrode the correct `stores.py` entry for a
+month. Every run then failed with the Shopify adapter's *"no parseable JSON"*.
+
+The check now parses the reply and tests its structure. Shopify means a JSON object whose
+`products` is a list. WooCommerce means a non-empty JSON list whose first item has a
+`prices` key. `get_json` already returns `None` for a refusal or non-JSON, so an HTML page
+can't pass either test, whatever text it contains.
+
+The general lesson: a correction mechanism is only as trustworthy as its detector, and
+**a correction overrides a hand-verified fact**. So a detector that writes corrections has
+to fail *closed*, by writing nothing, when it isn't sure.
 
 **Inspect** (`services/inspect.py`) — the click-to-pick tool. It opens a **visible** Chrome
 on the shop's page; you Alt+click the product card, then its title, price and link.
@@ -1659,9 +1847,29 @@ starts it shows the current store, page, running totals and failure count, with 
 log **collapsed inside it**. Diagnostics matter when something breaks and should not
 dominate the page the rest of the time.
 
-**6. Moved since last run** — capped at six rows with `Show all N changes`. The backend
-returns sixty. Showing all sixty measured 3,176px of a 9,409px page — a third of the
-document for a secondary section, pushing the main table out of sight.
+**6. Moved since last run.** This shows six rows, then `Show all N changes`, with a
+**Store** dropdown above it.
+
+The preview limit is a layout decision. When the backend returned sixty rows, showing
+all sixty measured 3,176px of a 9,409px page. That is a third of the document for a
+secondary section, and it pushed the main table out of sight. The preview stays at six
+whatever the backend returns.
+
+The backend used to **cap** movers at sixty. It no longer does, and the reason is about
+honesty, not convenience. A cap made every count derived from it a *floor*. The UI had to
+print "60+ changed", and the "price drops" figure in the stats strip could only ever say
+"at least". Removing the cap makes both numbers true totals. The 1% movement floor
+(§3.11) is what keeps an uncapped list from filling with rounding noise.
+
+The store dropdown is built from the stores that **actually have movements** in the
+current data, not from the full store list, so no option ever leads to an empty panel.
+If a refresh removes the selected store's movements, the filter falls back to *All
+stores* instead of showing an unexplained blank. Filtering happens in the browser over
+data already fetched. That's an exception to the "filter in SQL" rule in §3.11, and it
+is safe only because the list is now complete: filtering a capped list would answer
+"which of the first sixty moved at this shop", which is a different question. (It costs
+a full fetch on every page load, and that's on the improvement list for when movers
+reach the thousands.)
 
 ## 4.4 The listings table
 
@@ -1685,12 +1893,26 @@ lives on the `<th>`, which is where assistive technology looks.
 sort a *subset* and present it as the whole answer — the cheapest price on this page is
 not the cheapest price.
 
-**The Change column costs no backend work.** `/api/movers` and `/api/listings` both
-return `l.id`, so the two are joined in the browser:
+**The Change column is sortable, so it comes from the server.** It started as a
+browser-side join: `/api/movers` and `/api/listings` both return `l.id`, so the page
+matched them up with
 
 ```js
 movementById = new Map(mv.map((m) => [m.id, m]));
 ```
+
+That was free, and it was fine until someone wanted to *sort* by change. A browser-side
+join can only sort the rows already on screen, which is the subset problem from the
+paragraph above. So `listings()` now returns `change_pct` on every row (§3.11), and
+sorting by change re-queries the server like any other column. The map is still there
+for two things only the movers payload has: the previous absolute price for the
+`was ₹4,499` tooltip, and the `fx_suspect` flag that decides whether a drop counts as a
+deal.
+
+Unchanged and sub-1% prices render as `—`, not `+0.0%`. A plus sign in front of zero
+makes "nothing happened" look like a rise. (`deltaCell` also has a `<0.1%` branch for
+moves too small to show at one decimal. It predates the 1% floor and can no longer be
+reached.)
 
 A row whose price dropped gets `▼23.1%` and a green rule in the gutter. The rule is
 `inset 3px 0 0` on the first cell — not a coloured row background, which would destroy
@@ -1713,6 +1935,18 @@ sticks to *that box*, not the viewport. Unbounded, the box never scrolls interna
 the header simply leaves with the page. The height limit is what gives sticky something
 to stick inside. This is a trap worth remembering — it looks like a `top` offset bug and
 is not one.
+
+**"Load 100 more" appends; it doesn't repaint.** It used to rebuild the whole table by
+reassigning `innerHTML`. That destroyed the rows you were reading, left the browser
+nothing to anchor the scroll position to, and snapped you back to the top, so every
+"load more" cost you the scroll back down. Now `search(append=true)` paints only the new
+rows and inserts them into the `<tbody>` already on screen. Two details matter:
+
+- **Focus survives.** If you reached the button by keyboard, focus moves to the new
+  button with `preventScroll: true`, so you aren't dropped onto `<body>` and the view
+  doesn't jump past the rows that just arrived.
+- **Sort handlers bind only on a full paint.** On append, the header buttons keep their
+  existing DOM nodes, so binding again would make one click sort twice.
 
 ## 4.5 Filters
 
@@ -1819,8 +2053,9 @@ A test asserts the adapter's time budget is lower than the service's deadline. A
 pins which shops use which pagination mechanism. Comments can't fail a build.
 
 **4. Per-shop differences are data; per-shop mechanisms are code.**
-Seven shops with different recipes, one store-id branch in the whole codebase — and the
-trigger for revisiting that is written down.
+Ten browser shops with different recipes, and every store-id branch in the codebase
+belongs to one of them (Flipkart). The trigger for revisiting that is written down, and so
+is the point at which it starts to bite (§3.9).
 
 **5. Record why, especially when the reason is a bug you already hit.**
 Nearly every non-obvious line has a comment naming the failure that motivated it. That is
@@ -1895,6 +2130,7 @@ land here from anywhere.
 | **listing** | One product at one shop. `UNIQUE(store_id, sku)` (§3.5). |
 | **lock file** | `run.lock`, holding a running worker's process id. Guard layer 3 against two runs at once (§3.12). |
 | **mypy / type checking** | Reads your type annotations and finds mismatches *before* you run the code. Configured `strict` here (§1.14). |
+| **oracle (test)** | A frozen, known-good copy of old behaviour that a rewrite is compared against. Deliberately *not* imported from production, so it can't silently agree with a wrong change (§3.11). |
 | **ORM** | A library that hides SQL behind objects (e.g. SQLAlchemy). Deliberately not used — the SQL *is* the logic here (§1.6). |
 | **overrides / corrections** | Machine-written config that layers on top of the hand-written config, in a *separate file*, because a tool must never rewrite the source it also imports (§3.1). |
 | **pagination** | Walking a shop's catalogue page by page. Knowing when to stop is a real problem (§3.7, §3.8). |
@@ -1912,6 +2148,7 @@ land here from anywhere.
 | **selector scoring** | Checking a human's click against the real page before saving it — "matched 88% of sampled cards" (§3.16). |
 | **SKU** | The stable per-shop product id. If it isn't stable, every price series has exactly one point and nothing reports an error (§3.5). |
 | **SSE (Server-Sent Events)** | One long-lived HTTP response the server keeps pushing text into. One-way, auto-reconnecting, no library (§1.10, §3.13). |
+| **struck page** | A page that failed to *load*, as opposed to one that loaded and came back empty. It is held back, retried in a second pass after the walk, and reported only if it is still missing (§3.7). |
 | **subprocess** | A process started by another process. The dashboard starts every job as a subprocess of itself (Part 2). |
 | **template** | HTML with placeholders, filled in by Python. Here: Jinja2 (§1.5). |
 | **transaction** | A group of database writes that either all land or none do. `_persist` wraps a whole store's rows in one. |
@@ -1928,7 +2165,7 @@ land here from anywhere.
 Nothing is "done" until all four are green. Run them from the project root.
 
 ```bash
-uv run pytest                           # 494 tests, a couple of minutes
+uv run pytest                           # 542 tests, about four minutes
 uv run ruff check src tests scripts     # lint
 uv run ruff format src tests scripts    # formatting (rewrites files)
 uv run mypy                             # types, strict mode
@@ -1941,7 +2178,31 @@ gets a throwaway one from a fixture (§1.12). It is safe to run constantly.
 ## B.2 Testing against a real shop
 
 Unit tests prove the logic. They cannot prove a shop still looks the way it did last
-month — only the live site can:
+month — only the live site can.
+
+**Start with `check_stores.py`.** It is the pre-release sweep. It runs **any** store of
+**any** kind through the same registry, store list (with local corrections applied) and
+profiles the collector uses, and it *judges* the result instead of just counting it. It
+flags pages that repeat, prices at zero or 100×, a currency that disagrees with the store
+config, and catalogues where nothing is in stock. Each check exists because that failure
+has shipped here at least once.
+
+```bash
+uv run python scripts/check_stores.py                    # every enabled store
+uv run python scripts/check_stores.py hgworld flipkart   # just these
+uv run python scripts/check_stores.py --kind BROWSER     # one adapter kind
+uv run python scripts/check_stores.py flipkart --pages 3 --headful
+uv run python scripts/check_stores.py hgworld --probe    # isolate an HTTP 403
+```
+
+`--probe` is for a feed store that answers 403 or 401. It re-asks the host one variable
+at a time: with and without the category filter, at `per_page` 100 and 10, by term id and
+by slug. Then it **repeats the first request that worked**. That last step tells the two
+causes apart. If the known-good baseline now fails too, the trigger is request volume and
+no parameter change will help. If it still passes, a specific parameter is being blocked.
+This is how the HG World diagnosis in §3.1 was made.
+
+The narrower tools answer more specific questions:
 
 ```bash
 uv run python scripts/scrape_check.py playasia --pages 3
@@ -1950,7 +2211,8 @@ uv run python scripts/category_check.py                     # feed stores' categ
 uv run python scripts/diagnose_extraction.py gamepookie     # why did N rows become M?
 ```
 
-All three drive the **shipped** adapter and the **shipped** profile on purpose. A checker
+All of them, `check_stores` included, drive the **shipped** adapter and the **shipped**
+profile on purpose. A checker
 carrying its own private copy of a store profile can pass while the collector fails on
 the same page.
 
@@ -1987,6 +2249,7 @@ TRACKER_DATA_DIR=/tmp/tracker-scratch uv run python scripts/scrape_check.py nist
 | `adapters/shopify.py` | `tests/test_adapter_shopify.py` |
 | `adapters/woocommerce.py` | `tests/test_adapter_woocommerce.py` |
 | anything under `adapters/browser/` | `test_adapter_browser.py`, `test_browser_extract.py`, `test_browser_logic.py` |
+| the page loop's retry / skip / second pass (§3.7) | `tests/test_flipkart_recovery.py` (mocked page, no browser) |
 | `services/collect.py`, `selection.py` | `tests/test_service_collect.py` |
 | `services/probe.py` | `tests/test_service_probe.py` |
 | `web/queries.py` | `tests/test_queries.py` (holds the frozen oracle from §3.11) |
@@ -2052,8 +2315,8 @@ single right answer. Three real candidates:
 | Where | What it would mean |
 |---|---|
 | `parse_price` itself | "Two figures in one string → take the *lower*" (the sale price). Fixes every caller at once, and bakes a retail assumption into a pure parser. |
-| The caller, `adapters/browser/extract.py:224` | A fallback already lives there: `parse_price(row.get("priceText")) or first_rupee_price(...)`. `first_rupee_price` deliberately takes the **first** rupee figure out of a text blob — maybe the selector path should lean on it harder. |
-| `price_looks_wrong` (`parse.py:230`) | It already flags anything outside ₹299–₹12,000, so a glued number *is* noticed — but only as "worth a look", never rejected. Is flagging enough? |
+| The caller, `adapters/browser/extract.py:264` | A fallback already lives there: `parse_price(row.get("priceText")) or first_rupee_price(...)`. `first_rupee_price` deliberately takes the **first** rupee figure out of a text blob — maybe the selector path should lean on it harder. |
+| `price_looks_wrong` (`parse.py:260`) | It already flags anything outside ₹299–₹12,000, so a glued number *is* noticed — but only as "worth a look", never rejected. Is flagging enough? |
 
 Before you choose, answer the question that decides it: **can any shipped store profile
 actually produce such a string?** `adapters/browser/profiles.py` holds the `price`
@@ -2067,7 +2330,7 @@ it was wrong once, in a way that produced a believable number and no error. Once
 felt that, the comment density everywhere else in this codebase stops looking like
 over-explaining.
 
-**If you want a bigger one.** Add a fifteenth shop to `config/stores.py`: guess its
+**If you want a bigger one.** Add a twenty-fifth shop to `config/stores.py`: guess its
 `kind`, leave `platform_hint` alone unless the shop sells *only* Switch games (§3.3),
 then press **Check stores** and let `probe` correct your guess (§3.16). Watch what it
 writes to `stores.local.json` — and note that your guess in `stores.py` was never edited.
@@ -2104,6 +2367,11 @@ writes to `stores.local.json` — and note that your guess in `stores.py` was ne
 | **Moved since last run** is always empty | It needs two runs to compare. | Collect again later. |
 | One store tile says 0 listings | Expected failure mode, and the reason is on the tile. Screenshots and HTML land in `<data dir>/diagnostics/`. | `scripts/scrape_check.py <store>`, then **Fix a broken store** (§3.16). |
 | **CeX India** says 0 listings | Known and expected, not a regression. Its four selector lists ship as **unverified guesses**: CeX is a client-rendered Nuxt/Algolia app whose real DOM has never been captured, so the profile was written to fail loudly into a diagnostics dump rather than to be trusted. | `scripts/scrape_check.py cex_in --headful`, read `<data dir>/diagnostics/cex_in.html`, then **Fix a broken store** (§3.16). |
+| The `.exe` shows a bug this document says is fixed | The packaged build is older than the source. Several reports (HG World's *"no parseable JSON"*, Flipkart continuing past a failed page without the retry line, `+0.0` in the Change column) turned out to be fixed in the repo and reproducible only in a stale build. | Run `scripts/check_stores.py <store>` from source first. If that passes, rebuild with `BUILD-EXE.bat`. |
+| **HG World** fails with `HTTP 403` | Cloudflare blocks the Store API's `category=` filter on that host (§3.1). If it says *"no parseable JSON"* instead, a stale correction is making it use the Shopify adapter (§3.16). | Make sure `stores.py` has no `collections` for it. Press **Reset corrections**, then **Check stores**. `check_stores.py hgworld --probe` shows exactly which requests are refused. |
+| **Flipkart** logs `ERR_TOO_MANY_REDIRECTS` on a page | A session-level self-redirect, not a bad URL (§3.7). The page is retried after a pause, skipped if that fails too, and retried once more after the walk. | Usually nothing to do. If the store ends **Partial**, read `diagnostics/flipkart-p<N>-navigation.json` for the hop-by-hop trace. |
+| Sorting by **Change** shows far fewer listings | Intended. That sort only lists real movers: listings with a previous price that moved by more than 1% (§3.11). | Sort by anything else to see everything again. |
+| A price changed a little and the Change column says `—` | Moves of 1% or less are treated as noise and not reported, in the column or the movers panel (§3.11). | Nothing. `MIN_CHANGE_PCT` in `web/queries.py` is the knob. |
 | `A run is already going` (409) | One run at a time, enforced in the database, not the UI (§3.12). | Wait for it, or restart the app — a dead worker's run is reaped on startup. |
 | `'collect' is started by the dashboard, not run directly` | You ran a worker by hand without `--run-id`. Workers report into an existing run. | Use the dashboard, or `scripts/scrape_check.py` for one store. |
 | `Address already in use` on startup | Something else has port 4173 — often an earlier copy still running. | `PORT=4174 uv run python -m switch_tracker`, or close the other copy. |

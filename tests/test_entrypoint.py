@@ -7,6 +7,7 @@ imported it.
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 import textwrap
@@ -25,9 +26,7 @@ REDIRECT_CHECK = textwrap.dedent(
 )
 
 
-def test_a_windowed_build_logs_into_the_configured_data_dir(
-    tmp_path: Path, monkeypatch: type
-) -> None:
+def test_a_windowed_build_logs_into_the_configured_data_dir(tmp_path: Path, monkeypatch: type) -> None:
     """The log must follow TRACKER_DATA_DIR like every other writable file.
 
     It used to build its own %LOCALAPPDATA%\\switch-tracker path, so it was the
@@ -39,7 +38,9 @@ def test_a_windowed_build_logs_into_the_configured_data_dir(
         capture_output=True,
         text=True,
         check=False,
-        env={"PATH": "/usr/bin:/bin", "TRACKER_DATA_DIR": str(tmp_path), "PYTHONPATH": "src"},
+        # Inherit, then override. A from-scratch env drops SYSTEMROOT, and on
+        # Windows `import asyncio` then dies in Winsock before the test starts.
+        env={**os.environ, "TRACKER_DATA_DIR": str(tmp_path), "PYTHONPATH": "src"},
     )
 
     assert result.returncode == 0, result.stderr

@@ -1,6 +1,76 @@
 # TODO
 
-Tracking the current batch of fixes. Status as of 2026-09-22.
+## Current batch — 2026-10-21, in order
+
+1. [x] **Sync `main`** — fast-forwarded to `origin/main` (`f4bebcb`: uncapped
+       movers, 1% movement floor, store filter on the movers panel).
+2. [x] **Green test suite** — 542 passed. Two real problems fixed, both in tests:
+   - `test_entrypoint.py` built a from-scratch env (`PATH=/usr/bin:/bin`). On
+     Windows that drops `SYSTEMROOT`, and `import asyncio` dies in Winsock
+     (`WinError 10106`) before the test begins. Now inherits `os.environ`.
+   - `test_queries.py` oracle never learned the 1% floor from `cbfc39b`, so an
+     unchanged price was `0.0` in the oracle and `NULL` in production (15
+     failures). Oracle now carries the rule as a literal.
+3. [x] **`ruff format` gate** — 27 files reformatted (whitespace only) plus one
+       stale `# noqa: E501` removed. 542 still pass. Commit it on its own so the
+       churn stays out of real diffs.
+4. [x] **Rewrite `docs/walkthrough.md`** — everything since `5fce210` folded
+       into the sections it belongs to, not appended.
+5. [ ] **Improvements** — see "Improvement backlog" below; discuss, then pick.
+6. [ ] **Hosting** — see "Putting it on the internet" in the session notes; decide
+       on the shape before building anything.
+
+## Improvement backlog (unprioritised until discussed)
+
+Security
+- [ ] Reject cross-site POSTs to `/actions/*` (check `Origin`/`Sec-Fetch-Site`)
+      and pin the `Host` header. Today any web page you visit can POST to
+      `127.0.0.1:4173/actions/reset-corrections` and the server will act on it.
+      Prerequisite for any hosting.
+
+Correctness / data
+- [ ] Matcher (`game_id` is still always NULL) — the "cheapest copy of X across
+      shops" view the project exists for.
+- [ ] Alert engine: drop vs. trailing median, suppressed for `fx_suspect` clusters.
+- [ ] Confirm the Flipkart second pass on a live walk (carried over, below).
+- [ ] Flipkart `read_claimed_total` shortfall check is inert (carried over, below).
+
+Performance
+- [ ] `/api/movers` is now uncapped and the page fetches all of it on every
+      boot. Fine at hundreds; at thousands of movers push the store filter and
+      the preview limit into SQL.
+- [ ] `listings()` always LEFT JOINs `previous` (a second seek per row) even
+      when `change_pct` is not being sorted on. Measure before touching.
+
+Code health
+- [ ] `store.id == "flipkart"` now appears 4× in `adapter.py` plus once in
+      `extract.py`. Still one *shop*, so the HLD's "second shop" trigger for a
+      strategy seam has not fired — but a `profile.navigation_retry` flag
+      would remove the id checks from the walk.
+- [ ] `test_flipkart_recovery.py` leaks an un-awaited `AsyncMock` coroutine
+      (RuntimeWarning at `adapter.py:468`).
+- [ ] Starlette deprecation: `TestClient` over `httpx` → install `httpx2`
+      before the next Starlette major removes it.
+- [ ] Delete the TypeScript tree (`src/*.ts`, `src/web/`, root `*.local.json`)?
+      It is still being edited (`server.ts` in `cd9af2f`) as a "legacy
+      reference", which is maintenance for code nothing runs.
+- [ ] `.movers-toolbar` (new in `f4bebcb`) has no CSS in `app.css`.
+
+- [ ] `htmx.min.js` is loaded on every page and has zero `hx-` uses. Delete.
+
+Functionality
+- [ ] Scheduled collection (today: manual, or once to bootstrap).
+- [ ] Watchlist + target price ("tell me when X < ₹Y").
+- [ ] Landed cost for imports: Play-Asia INR excludes shipping/customs.
+- [ ] CSV export of the current filtered view.
+
+UI
+- [ ] Filter/sort state in the URL: refresh, back, bookmark all lose it today.
+- [ ] Per-listing price history: `/api/history` exists and nothing calls it.
+      A click-to-expand sparkline on a row is the obvious consumer.
+- [ ] Hint when sorting by Change narrows the list (carried over, below).
+
+## Previous batch — status as of 2026-09-22
 
 ## Root cause for most of this: stale build
 
@@ -109,9 +179,8 @@ we sent. There is no encoding to choose — only a page to retry.
       `stores.local.json`, overriding the hand-verified config. Fix: shape-check
       the parsed JSON instead of substring-matching text.
 
-- [ ] **"Load 100 more" scrolls back to top.** `app.js:634` reassigns
-      `$("list").innerHTML` on append, destroying and rebuilding the whole
-      table. Append the new rows to the existing `<tbody>` instead.
+- [x] **"Load 100 more" scrolls back to top.** Fixed in `340ddab`: append
+      now inserts into the existing `<tbody>` and restores keyboard focus.
 
 ## Notes / deferred
 

@@ -38,8 +38,16 @@ def add_listing(
     conn.execute(
         "INSERT INTO listing (id, store_id, sku, url, raw_title, platform, region, condition, "
         "first_seen, last_seen) VALUES (?,?,?,?,?,?,?,?,'t','t')",
-        (listing_id, store, f"sku{listing_id}", f"https://x/{listing_id}", title,
-         platform, region, condition),
+        (
+            listing_id,
+            store,
+            f"sku{listing_id}",
+            f"https://x/{listing_id}",
+            title,
+            platform,
+            region,
+            condition,
+        ),
     )
 
 
@@ -324,18 +332,25 @@ def _oracle_listings(conn: sqlite3.Connection, q: queries.ListingQuery) -> dict:
         LEFT JOIN latest previous ON previous.listing_id = l.id AND previous.rn = 2
         {clause}
     """
-    total = conn.execute(
-        f"{_ORACLE_LATEST_CTE} SELECT COUNT(*) AS n {from_clause}", params).fetchone()["n"]
-    rows = [dict(r) for r in conn.execute(
-        f"{_ORACLE_LATEST_CTE} SELECT l.id, l.raw_title, l.url, l.region, l.platform, l.condition, "
-        f"s.name AS store, latest.inr_price, latest.native_price, latest.native_currency, "
-        f"latest.in_stock, latest.captured_at, "
-        f"CASE WHEN previous.inr_price IS NOT NULL AND previous.inr_price != 0 "
-        f"AND latest.inr_price IS NOT NULL "
-        f"THEN ((latest.inr_price - previous.inr_price) / previous.inr_price) * 100.0 "
-        f"ELSE NULL END AS change_pct {from_clause} "
-        f"ORDER BY {q.sort_column()} {q.sort_direction()}, l.id ASC LIMIT ? OFFSET ?",
-        [*params, q.safe_limit(), q.safe_offset()])]
+    total = conn.execute(f"{_ORACLE_LATEST_CTE} SELECT COUNT(*) AS n {from_clause}", params).fetchone()["n"]
+    rows = [
+        dict(r)
+        for r in conn.execute(
+            f"{_ORACLE_LATEST_CTE} SELECT l.id, l.raw_title, l.url, l.region, l.platform, l.condition, "
+            f"s.name AS store, latest.inr_price, latest.native_price, latest.native_currency, "
+            f"latest.in_stock, latest.captured_at, "
+            f"CASE WHEN previous.inr_price IS NOT NULL AND previous.inr_price != 0 "
+            f"AND latest.inr_price IS NOT NULL "
+            # The 1% movement floor (queries.MIN_CHANGE_PCT), as a literal for the
+            # same reason the CTE is one: an imported threshold would agree with
+            # any value production chose.
+            f"AND ABS(((latest.inr_price - previous.inr_price) / previous.inr_price) * 100.0) > 1.0 "
+            f"THEN ((latest.inr_price - previous.inr_price) / previous.inr_price) * 100.0 "
+            f"ELSE NULL END AS change_pct {from_clause} "
+            f"ORDER BY {q.sort_column()} {q.sort_direction()}, l.id ASC LIMIT ? OFFSET ?",
+            [*params, q.safe_limit(), q.safe_offset()],
+        )
+    ]
     return {"total": total, "rows": rows, "offset": q.safe_offset(), "limit": q.safe_limit()}
 
 
@@ -345,23 +360,25 @@ def populated(conn: sqlite3.Connection) -> sqlite3.Connection:
     add_listing(conn, 1, "nistore", "Zelda Tears of the Kingdom")
     add_listing(conn, 2, "amazon", "Mario Kart World", platform="SWITCH2")
     add_listing(conn, 3, "nistore", "Metroid Prime", region="JP", condition="PRE_OWNED")
-    add_listing(conn, 4, "amazon", "Splatoon 3")           # exactly ONE price point
-    add_listing(conn, 5, "nistore", "Pikmin 4")            # NO price points at all
-    add_listing(conn, 6, "amazon", "Kirby Forgotten Land") # NULL inr_price
+    add_listing(conn, 4, "amazon", "Splatoon 3")  # exactly ONE price point
+    add_listing(conn, 5, "nistore", "Pikmin 4")  # NO price points at all
+    add_listing(conn, 6, "amazon", "Kirby Forgotten Land")  # NULL inr_price
 
     add_price(conn, 1, 1, 4999, at="2026-01-01T00:00:00Z")
     add_price(conn, 1, 2, 3999, at="2026-01-02T00:00:00Z")
     add_price(conn, 2, 1, 5999, at="2026-01-01T00:00:00Z")
-    add_price(conn, 2, 2, 5999, at="2026-01-02T00:00:00Z")   # unchanged: not a mover
+    add_price(conn, 2, 2, 5999, at="2026-01-02T00:00:00Z")  # unchanged: not a mover
     add_price(conn, 3, 1, 2499, at="2026-01-01T00:00:00Z", in_stock=0)
     add_price(conn, 3, 2, 1999, at="2026-01-02T00:00:00Z", in_stock=0)
     add_price(conn, 4, 1, 6999, at="2026-01-01T00:00:00Z")
     conn.execute(
         "INSERT INTO price_point (listing_id, run_id, captured_at, native_currency, "
-        "native_price, inr_price, in_stock) VALUES (6,1,'2026-01-01T00:00:00Z','USD',59.99,NULL,1)")
+        "native_price, inr_price, in_stock) VALUES (6,1,'2026-01-01T00:00:00Z','USD',59.99,NULL,1)"
+    )
     conn.execute(
         "INSERT INTO price_point (listing_id, run_id, captured_at, native_currency, "
-        "native_price, inr_price, in_stock) VALUES (6,2,'2026-01-02T00:00:00Z','USD',49.99,NULL,1)")
+        "native_price, inr_price, in_stock) VALUES (6,2,'2026-01-02T00:00:00Z','USD',49.99,NULL,1)"
+    )
     return conn
 
 
@@ -373,8 +390,7 @@ def test_change_sort_shows_only_actual_movers(populated: sqlite3.Connection) -> 
 
 def _case_id(q: queries.ListingQuery) -> str:
     """Readable pytest ids, so a failure names the parameter combination."""
-    filters = "-".join(
-        x for x in (q.q, q.platform, q.condition, *q.regions, *q.stores) if x)
+    filters = "-".join(x for x in (q.q, q.platform, q.condition, *q.regions, *q.stores) if x)
     stock = "instock" if q.in_stock_only else ""
     page = f"l{q.limit}o{q.offset}" if (q.limit, q.offset) != (100, 0) else ""
     return "-".join(x for x in (q.sort, q.direction, filters, stock, page) if x)
@@ -427,9 +443,7 @@ class TestMatchesTheShippedQuery:
             assert row["prev_price"] == by_id[row["id"]]["prev_price"]
             assert row["captured_at"] == by_id[row["id"]]["captured_at"]
 
-    def test_the_fixture_actually_exercises_the_awkward_cases(
-        self, populated: sqlite3.Connection
-    ) -> None:
+    def test_the_fixture_actually_exercises_the_awkward_cases(self, populated: sqlite3.Connection) -> None:
         """A matrix over a fixture that has no edge cases proves nothing."""
         rows = queries.listings(populated, queries.ListingQuery())["rows"]
         ids = {r["id"] for r in rows}
@@ -438,9 +452,7 @@ class TestMatchesTheShippedQuery:
         assert 6 in ids, "a NULL inr_price must not drop the listing"
         assert {m["id"] for m in queries.movers(populated)} == {1, 3}
 
-    def test_a_tie_on_captured_at_resolves_to_the_later_insert(
-        self, conn: sqlite3.Connection
-    ) -> None:
+    def test_a_tie_on_captured_at_resolves_to_the_later_insert(self, conn: sqlite3.Connection) -> None:
         """The one deliberate behaviour change, asserted against the NEW rule.
 
         Two runs inside the same second give two rows the same captured_at.
@@ -497,8 +509,7 @@ class TestMultiValueFilters:
 
     def test_stores_and_regions_combine_with_AND(self, spread: sqlite3.Connection) -> None:
         """Amazon OR nistore, AND (JP OR ASIA_EN) -- not four independent ORs."""
-        result = queries.listings(
-            spread, queries.ListingQuery(stores=("amazon",), regions=("JP", "ASIA_EN")))
+        result = queries.listings(spread, queries.ListingQuery(stores=("amazon",), regions=("JP", "ASIA_EN")))
         assert self._ids(result) == {2}
 
     def test_an_unknown_id_simply_matches_nothing(self, spread: sqlite3.Connection) -> None:
@@ -507,8 +518,7 @@ class TestMultiValueFilters:
 
     def test_total_counts_the_filtered_set_not_the_page(self, spread: sqlite3.Connection) -> None:
         """total and rows must agree, or the count under the table lies."""
-        result = queries.listings(
-            spread, queries.ListingQuery(stores=("amazon", "nistore"), limit=2))
+        result = queries.listings(spread, queries.ListingQuery(stores=("amazon", "nistore"), limit=2))
         assert result["total"] == 4
         assert len(result["rows"]) == 2
 
