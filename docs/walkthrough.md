@@ -1334,6 +1334,24 @@ while destroying the results, and would pass one.
 After: **2 extractions, 70 raw rows.** And the failure mode is now impossible for *any*
 shop, not just this one.
 
+**The proof is only as good as what it fingerprints.** A home run later stopped Play-Asia
+at page 102 of 139, missing about 1,600 products. `diagnose-pager` showed why: the one
+card class matched three things on page 1. There were 36 search results in
+`#pa-modern-products-container`, 30 grey loading placeholders, and 8 "recommended" cards
+repeated on every page. Clicking Next swapped the results for placeholders at once, so the
+fingerprint changed instantly and the page counted as turned *before its results arrived*.
+Deep pages load slowest, so from about page 97 only the recommended row was read, and four
+pages of repeats later the productivity tracker (§3.7) ended the walk.
+
+So the card selector is now scoped to the results grid, with no fallbacks. A fallback would
+bring the bug back: while the grid is empty mid-load, the fingerprint would fall through to
+it and read "turned" again. Deep pages also get `advance_timeout_ms` (20 s instead of 4 s)
+to replace the results; the real end of the catalogue is a disabled Next, which returns at
+once. A browser test reproduces the swap, and it fails with the old selector.
+
+Play-Asia's address does change, to `#fc=p:2`. Jumping straight to a page by that fragment
+was left alone: click paging works once it waits for the right thing.
+
 ## 3.9 Per-shop quirks, without per-shop code
 
 **File:** `adapters/browser/profiles.py`

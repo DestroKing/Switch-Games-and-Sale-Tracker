@@ -568,8 +568,13 @@ class TestPagingPathSelection:
         that is what broke paging, because _click_next fingerprints the first
         few cards to confirm a page turned. Furniture does not change between
         pages, so a successful click read as a failure.
+
+        Then a home run showed that class is ALSO used by loading placeholders
+        and a "recommended" row, so the cards are scoped to the results grid,
+        with no fallback the fingerprint could fall through to mid-load.
         """
-        assert PROFILES["playasia"].card[0] == "div.pa-modern-product-item"
+        assert PROFILES["playasia"].card == ("#pa-modern-products-container div.pa-modern-product-item",)
+        assert PROFILES["playasia"].advance_timeout_ms == 20_000
 
     def test_the_paging_rule_changes_path_selection_for_play_asia_only(self) -> None:
         """Asserted against the SHIPPED stores and profiles, not a fixture.
