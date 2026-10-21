@@ -241,6 +241,49 @@ class TestFailures:
         assert len(result.listings) == 100
         assert "HTTP 403" in result.reason
 
+    async def test_a_page_that_times_out_is_read_as_smaller_pages(self, adapter, server) -> None:
+        """HG World, live: page 14 of 100 timed out on every retry and ended the walk.
+        Page 2 of 100 is pages 5-8 of 25 -- the same products, four lighter requests."""
+        base, recorder = server
+        games = [product(i, f"Game {i} Switch") for i in range(230)]
+        recorder.plan_pages(
+            V1,
+            page(*games[:100], total=230),
+            (503, "busy", {}),  # page 2 of 100 fails on every retry
+            page(*games[200:], total=230),  # page 3 of 100
+            (200, "[]", {}),
+            *(page(*games[100 + 25 * k : 125 + 25 * k], total=230) for k in range(4)),  # pages 5-8 of 25
+        )
+        result = await adapter.fetch(store_at(base), NullSink())
+        assert isinstance(result, Ok), result
+        assert len(result.listings) == 230
+
+    async def test_a_page_that_fails_even_split_is_skipped_not_the_end(self, adapter, server) -> None:
+        base, recorder = server
+        games = [product(i, f"Game {i} Switch") for i in range(230)]
+        recorder.plan_pages(
+            V1,
+            page(*games[:100], total=230),
+            (503, "busy", {}),
+            page(*games[200:], total=230),
+            *((503, "busy", {}) for _ in range(5)),  # pages 4-8: the split retry fails too
+        )
+        result = await adapter.fetch(store_at(base), NullSink())
+        assert isinstance(result, Partial)
+        assert len(result.listings) == 130  # pages 1 and 3; only page 2's products are missing
+        assert "page 2" in result.reason
+
+    async def test_stops_itself_at_its_time_budget_and_keeps_what_it_read(self, adapter, server) -> None:
+        """The service's deadline would cancel the store and keep nothing."""
+        base, recorder = server
+        games = [product(i, f"Game {i} Switch") for i in range(300)]
+        recorder.plan_pages(V1, *(page(*games[100 * k : 100 * k + 100], total=300) for k in range(3)))
+        adapter.TIME_BUDGET_S = 0.0  # spent before page 2 is asked for
+        result = await adapter.fetch(store_at(base), NullSink())
+        assert isinstance(result, Partial)
+        assert len(result.listings) == 100
+        assert "stopped after" in result.reason
+
     async def test_a_reachable_api_with_no_switch_products_is_a_failure(self, adapter, server) -> None:
         base, recorder = server
         recorder.plan(V1, page(product(1, "Canon EOS R5 Camera")))

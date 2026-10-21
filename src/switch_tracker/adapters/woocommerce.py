@@ -10,13 +10,14 @@ run.  Everywhere else, "did we get everything" is inference.
 
 from __future__ import annotations
 
+import asyncio
 import html
 import json
 from typing import Any
 from urllib.parse import quote
 
 from switch_tracker.adapters.base import ProgressSink
-from switch_tracker.core.http import PoliteClient
+from switch_tracker.core.http import HttpResult, PoliteClient
 from switch_tracker.core.models import (
     AdapterKind,
     Failed,
@@ -41,6 +42,13 @@ class WooAdapter:
     PER_PAGE = 100
     # A backstop, not a target -- see ShopifyAdapter.MAX_PAGES.
     MAX_PAGES = 100
+    #: A page that times out on every retry is asked for again as this many
+    #: smaller pages -- the same products, a lighter request each.
+    SPLIT = 4
+    #: The walk stops itself here and returns Partial with everything read so
+    #: far. MUST stay below CollectService.DEFAULT_HTTP_DEADLINE_S: that one
+    #: cancels the store, and a cancelled store keeps NOTHING (a test pins it).
+    TIME_BUDGET_S = 300.0
 
     def __init__(self, client: PoliteClient) -> None:
         self._client = client
@@ -60,8 +68,13 @@ class WooAdapter:
         problems: list[str] = []
         raw_fetched = 0
         expected_total = 0
+        loop = asyncio.get_running_loop()
+        started = loop.time()
+        out_of_time = False
 
         for category in category_values:
+            if out_of_time:
+                break
             suffix = f"&category={quote(category)}" if category else ""
             # Read ONCE per category query, not once per page.
             #
@@ -70,14 +83,35 @@ class WooAdapter:
             # label a complete fetch "partial" on every run. The header
             # states the total for the QUERY, not for the page.
             category_total: int | None = None
+            skipped_last = False
 
             for page in range(1, self.MAX_PAGES + 1):
-                url = f"{store.base_url}{base_path}?per_page={self.PER_PAGE}&page={page}{suffix}"
-                response = await self._client.get(url, {"accept": "application/json"})
+                # Never before the first page: a budget spent on discovery alone
+                # must still read something rather than return nothing.
+                if (page > 1 or rows) and loop.time() - started > self.TIME_BUDGET_S:
+                    problems.append(
+                        f"stopped after {self.TIME_BUDGET_S:.0f}s, "
+                        f"before category {category or 'all'} page {page}"
+                    )
+                    out_of_time = True
+                    break
+                response = await self._page(store, base_path, suffix, page)
                 if not response.ok:
                     error = f"HTTP {response.status}" if response.status else response.body[:200]
                     problems.append(f"category {category or 'all'}, page {page}: {error}")
+                    # One page that failed even as smaller pages is skipped, not
+                    # the end of the walk: the store's own count says whether
+                    # more products lie past it. Two in a row means the store
+                    # itself is struggling, and the walk stops there.
+                    if (
+                        not skipped_last
+                        and category_total is not None
+                        and page * self.PER_PAGE < category_total
+                    ):
+                        skipped_last = True
+                        continue
                     break
+                skipped_last = False
 
                 if category_total is None:
                     header = response.headers.get("x-wp-total")
@@ -130,6 +164,43 @@ class WooAdapter:
         if expected_total > 0 and raw_fetched < expected_total:
             return Partial(tuple(listings), f"stopped early{completeness}")
         return Ok(tuple(listings))
+
+    async def _get(
+        self, store: StoreConfig, base_path: str, suffix: str, per_page: int, page: int
+    ) -> HttpResult:
+        url = f"{store.base_url}{base_path}?per_page={per_page}&page={page}{suffix}"
+        return await self._client.get(url, {"accept": "application/json"})
+
+    async def _page(self, store: StoreConfig, base_path: str, suffix: str, page: int) -> HttpResult:
+        """One page of PER_PAGE products, retried as SPLIT smaller pages if it times out.
+
+        A Store API page of 100 products is a heavy request, and HG World --
+        fetched unscoped, all ~1,700 products -- timed out on page 14 on every
+        retry, ending the walk with a quarter of the shop unread. The same
+        products, asked for as pages of 25 (page p of 100 is pages 4p-3..4p
+        of 25), are four light requests instead. Only a timeout or a 5xx is
+        retried this way: a 403 or a 404 is an answer, not a hiccup.
+        """
+        response = await self._get(store, base_path, suffix, self.PER_PAGE, page)
+        if response.ok or 0 < response.status < 500:
+            return response
+
+        size = self.PER_PAGE // self.SPLIT
+        products: list[Any] = []
+        headers: dict[str, str] | None = None
+        for sub in range((page - 1) * self.SPLIT + 1, page * self.SPLIT + 1):
+            part = await self._get(store, base_path, suffix, size, sub)
+            try:
+                items = json.loads(part.body) if part.ok else None
+            except ValueError:
+                items = None
+            if not isinstance(items, list):
+                return response
+            headers = part.headers if headers is None else headers
+            products.extend(items)
+            if len(items) < size:
+                break
+        return HttpResult(ok=True, status=200, body=json.dumps(products), headers=headers or {})
 
     async def _resolve_path(self, store: StoreConfig) -> str | None:
         for path in _PATHS:
