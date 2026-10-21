@@ -144,9 +144,7 @@ class WooAdapter:
         the numeric id first is what works everywhere; the slug remains the
         fallback for installs that do not expose product_cat.
         """
-        terms = await self._client.get_json(
-            f"{store.base_url}/wp-json/wp/v2/product_cat?slug={quote(slug)}"
-        )
+        terms = await self._client.get_json(f"{store.base_url}/wp-json/wp/v2/product_cat?slug={quote(slug)}")
         if isinstance(terms, list) and terms and isinstance(terms[0], dict):
             term_id = terms[0].get("id")
             if term_id is not None:

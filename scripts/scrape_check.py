@@ -101,8 +101,10 @@ async def _walk(store: StoreConfig, profile: StoreProfile, *, max_pages: int, he
     from switch_tracker.adapters.browser.adapter import uses_click_paging
 
     mechanism = (
-        f"click: {profile.next_page}" if profile.next_page
-        else "click: numeric page-number" if uses_click_paging(profile, store.search_urls[0])
+        f"click: {profile.next_page}"
+        if profile.next_page
+        else "click: numeric page-number"
+        if uses_click_paging(profile, store.search_urls[0])
         else "URL template {p}"
     )
     print(f"  paging     : {mechanism}")
@@ -192,10 +194,12 @@ async def diagnose_pager(store_id: str, *, headful: bool) -> int:
     try:
         context = await provider.new_context()
         if profile.cookies and profile.cookie_domain:
-            await context.add_cookies([
-                {"name": n, "value": v, "domain": profile.cookie_domain, "path": "/"}
-                for n, v in profile.cookies
-            ])
+            await context.add_cookies(
+                [
+                    {"name": n, "value": v, "domain": profile.cookie_domain, "path": "/"}
+                    for n, v in profile.cookies
+                ]
+            )
         page = await context.new_page()
         url = store.search_urls[0].replace("{p}", "1")
         print(f"\n  loading {url}")

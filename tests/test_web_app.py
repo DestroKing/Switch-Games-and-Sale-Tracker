@@ -187,15 +187,11 @@ class TestFirstRunGuidance:
     def test_tells_a_new_user_to_check_stores_first(self, client: TestClient) -> None:
         assert "Start with" in client.get("/").text
 
-    def test_leads_with_check_stores_before_anything_has_been_probed(
-        self, client: TestClient
-    ) -> None:
+    def test_leads_with_check_stores_before_anything_has_been_probed(self, client: TestClient) -> None:
         body = client.get("/").text
         assert '<button class="primary" data-action="probe">' in body
 
-    def test_leads_with_collect_once_the_stores_have_been_checked(
-        self, client: TestClient
-    ) -> None:
+    def test_leads_with_collect_once_the_stores_have_been_checked(self, client: TestClient) -> None:
         from switch_tracker.config import overrides
 
         overrides.set_override("nistore", note="corrected by probe")
@@ -418,4 +414,3 @@ class TestListingFilterEncoding:
         """Their controls are three-way segments where option one means "all"."""
         q = self._captured(client, monkeypatch, platform="SWITCH2", condition="NEW")
         assert (q.platform, q.condition) == ("SWITCH2", "NEW")
-

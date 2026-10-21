@@ -218,15 +218,11 @@ class TestClassifyPlatform:
     def test_other_consoles_are_not_switch(self, title: str) -> None:
         assert classify(title, Platform.SWITCH).platform is Platform.UNKNOWN
 
-    @pytest.mark.parametrize(
-        "title", ["Mario Kart World Switch 2", "Zelda NS2", "Metroid Nintendo Switch 2"]
-    )
+    @pytest.mark.parametrize("title", ["Mario Kart World Switch 2", "Zelda NS2", "Metroid Nintendo Switch 2"])
     def test_switch_2_is_detected(self, title: str) -> None:
         assert classify(title).platform is Platform.SWITCH2
 
-    @pytest.mark.parametrize(
-        "title", ["Mario Kart World Switch 2", "Zelda NS2", "Metroid Nintendo Switch 2"]
-    )
+    @pytest.mark.parametrize("title", ["Mario Kart World Switch 2", "Zelda NS2", "Metroid Nintendo Switch 2"])
     def test_switch_2_beats_a_switch_store_hint(self, title: str) -> None:
         """The hint must not flatten Switch 2 stock into Switch.
 

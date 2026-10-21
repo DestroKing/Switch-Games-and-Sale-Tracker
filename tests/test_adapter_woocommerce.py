@@ -173,9 +173,7 @@ class TestClassificationContext:
 
 
 class TestCompleteness:
-    async def test_x_wp_total_is_counted_once_per_query_not_once_per_page(
-        self, adapter, server
-    ) -> None:
+    async def test_x_wp_total_is_counted_once_per_query_not_once_per_page(self, adapter, server) -> None:
         """The bug this port fixes.
 
         woocommerce.ts does `expectedTotal += total` INSIDE the page loop, so a
@@ -187,9 +185,7 @@ class TestCompleteness:
         first = [product(i, f"Game {i} Switch") for i in range(100)]
         second = [product(100 + i, f"Game {100 + i} Switch") for i in range(100)]
         third = [product(200 + i, f"Game {200 + i} Switch") for i in range(13)]
-        recorder.plan_pages(
-            V1, page(*first, total=213), page(*second, total=213), page(*third, total=213)
-        )
+        recorder.plan_pages(V1, page(*first, total=213), page(*second, total=213), page(*third, total=213))
 
         result = await adapter.fetch(store_at(base), NullSink())
 
@@ -221,7 +217,8 @@ class TestFailures:
 
     async def test_later_http_failure_keeps_collected_products(self, adapter, server) -> None:
         base, recorder = server
-        recorder.plan_pages(V1,
+        recorder.plan_pages(
+            V1,
             page(*(product(i, f"Game {i} Switch") for i in range(100))),
             (403, "Forbidden", {}),
         )
@@ -230,9 +227,7 @@ class TestFailures:
         assert len(result.listings) == 100
         assert "HTTP 403" in result.reason
 
-    async def test_a_reachable_api_with_no_switch_products_is_a_failure(
-        self, adapter, server
-    ) -> None:
+    async def test_a_reachable_api_with_no_switch_products_is_a_failure(self, adapter, server) -> None:
         base, recorder = server
         recorder.plan(V1, page(product(1, "Canon EOS R5 Camera")))
         result = await adapter.fetch(store_at(base, platform_hint=None), NullSink())

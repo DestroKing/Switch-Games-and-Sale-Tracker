@@ -88,12 +88,12 @@ async def test_a_struck_page_is_recovered_on_a_second_pass(monkeypatch):
     third = Extracted("Metroid Switch", 5000, "https://www.flipkart.com/metroid/p/three", True)
     loader = AsyncMock(
         side_effect=[
-            ([first], "selectors"),                       # p1
+            ([first], "selectors"),  # p1
             RuntimeError("net::ERR_TOO_MANY_REDIRECTS"),  # p2, struck
             RuntimeError("net::ERR_TOO_MANY_REDIRECTS"),  # p2, backoff retry
-            ([second], "selectors"),                      # p3, the walk carries on
-            ([], "selectors"),                            # p4, end of the catalogue
-            ([third], "selectors"),                       # p2 again, second pass
+            ([second], "selectors"),  # p3, the walk carries on
+            ([], "selectors"),  # p4, end of the catalogue
+            ([third], "selectors"),  # p2 again, second pass
         ]
     )
     monkeypatch.setattr(adapter, "_load_page", loader)
@@ -128,8 +128,7 @@ async def test_gives_up_after_three_consecutive_navigation_failures(monkeypatch)
     monkeypatch.setattr(module, "_flipkart_page_url", AsyncMock(return_value=store.search_urls[0]))
     first = Extracted("Mario Switch", 3000, "https://www.flipkart.com/mario/p/one", True)
     loader = AsyncMock(
-        side_effect=[([first], "selectors")]
-        + [RuntimeError("net::ERR_TOO_MANY_REDIRECTS")] * 20
+        side_effect=[([first], "selectors")] + [RuntimeError("net::ERR_TOO_MANY_REDIRECTS")] * 20
     )
     monkeypatch.setattr(adapter, "_load_page", loader)
 
@@ -212,9 +211,7 @@ async def test_flipkart_page_two_navigates_by_url_rather_than_clicking(monkeypat
     goto = AsyncMock()
     monkeypatch.setattr(adapter, "_goto_flipkart", goto)
 
-    await adapter._load_page(
-        AsyncMock(), store, profile, store.search_urls[0], 2, resolved_url=target
-    )
+    await adapter._load_page(AsyncMock(), store, profile, store.search_urls[0], 2, resolved_url=target)
 
     click_next.assert_not_awaited()
     assert goto.await_args.args[1] == target

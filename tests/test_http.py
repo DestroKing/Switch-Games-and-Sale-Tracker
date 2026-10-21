@@ -97,9 +97,7 @@ class TestRetries:
         assert not result.ok
         assert recorder.hits.count("/x") == 3
 
-    async def test_an_unreachable_host_returns_a_result_not_an_exception(
-        self, client: PoliteClient
-    ) -> None:
+    async def test_an_unreachable_host_returns_a_result_not_an_exception(self, client: PoliteClient) -> None:
         result = await client.get("http://127.0.0.1:9/nothing")
         assert not result.ok
         assert result.status == 0

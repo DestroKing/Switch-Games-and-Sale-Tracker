@@ -155,7 +155,7 @@ _PAGE_MARKERS = (
     ("Access Denied", "access denied"),
     ("Please enable JavaScript", "JS-gate"),
     ("window.location", "client-side redirect"),
-    ("<meta http-equiv=\"refresh\"", "meta-refresh redirect"),
+    ('<meta http-equiv="refresh"', "meta-refresh redirect"),
     ("Login", "login wall"),
 )
 
