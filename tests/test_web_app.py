@@ -116,6 +116,11 @@ class TestDataEndpoints:
     def test_games_works_on_an_empty_database(self, client: TestClient) -> None:
         assert client.get("/api/games?sort=offers&dir=desc").json()["total"] == 0
 
+    def test_facets_take_the_listing_filters(self, client: TestClient) -> None:
+        r = client.get("/api/facets?q=x&platform=SWITCH2&store=a,b&region=JP&condition=NEW&in_stock=true")
+        assert r.status_code == 200
+        assert r.json()["stores"] == []
+
 
 class TestCrossSiteGuard:
     """Any page the user visits can make the browser POST here, and a rebound

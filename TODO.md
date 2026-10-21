@@ -73,6 +73,20 @@ Done in the batch after that (not yet committed):
 - **Schedule status line** under Collector, read-only (`/api/schedule` <- `schtasks /Query`).
 - Not verified live (by request): registering the XML task and it actually firing.
 
+Done in the batch after that (not yet committed):
+
+- **Filters in the URL**: view, search, console, regions, stores, condition, stock and
+  sort survive refresh and bookmarks (`replaceState`; only known values are read back;
+  paging is never in the URL). Checked in Chromium, including a hostile URL.
+- **Out-of-stock separator** in Games when sorted by price; drawn once, across Load more.
+- **Facet counts follow the other active filters** (each facet ignores its own).
+- **Matcher strips Amazon publisher prefixes** (start of title only; Sega/Capcom/Konami/
+  Namco/EA deliberately not on the list; never cut to a stub).
+- `run.ps1` opens the configured port, not a hard-coded 4173.
+- Test hygiene: the `AsyncMock` warning in `test_flipkart_recovery.py` (root cause:
+  `Page.locator` is synchronous, so the mock returned an un-awaited coroutine).
+- README: "Validating all stores on your own PC".
+
 ---
 
 ## 2. Next up, in order
@@ -85,11 +99,7 @@ calibration: the last feature batch produced about **1 bug per 100 new lines**;
 | # | Item | Gain | Size | Risk | Notes |
 |---|---|---|---|---|---|
 | 1 | **Static read-only snapshot** for the internet + scoped phone layout | High | M-L | Med, loud | Export Games + Watchlist only; strip `run_store.detail` and local paths; CSP; http(s) URLs only. Host choice pending (§3) |
-| 2 | **Filters in the URL** (refresh/back/bookmark) | Med | M | Med, loud | Pays off more once the snapshot has shareable links |
-| 3 | Out-of-stock sort hint (separator row or header note) | Low | S | Low | "Best price ▲" lists in-stock first; reads as a bug |
-| 4 | Facet counts that respect the other active filters | Low | M | Med, silent | Store counts ignore the console filter today |
-| 5 | Test hygiene: un-awaited `AsyncMock` warning in `test_flipkart_recovery.py` | Low | S | Low | |
-| 6 | **Detected deals** (drop vs trailing median, FX-suppressed) | Med-High | L | **High, silent** | Only if the lowest-ever signal proves not enough; ship as a flag before it ever alerts |
+| 2 | Back/forward between filter states (`pushState` + `popstate`) | Low | S | Low | URL filters are done with `replaceState`; add only if asked |
 
 Verification runs (2026-10-21, on the office network, into a throwaway data dir):
 
@@ -116,10 +126,10 @@ Verification runs (2026-10-21, on the office network, into a throwaway data dir)
 
 Follow-ups from the live data and the final review:
 
-- [ ] Matcher: strip known publisher prefixes Amazon prepends; consider truncated
-      titles (medium risk, **silent** -- a wrong strip merges different games).
-- [ ] `run.ps1` opens `http://127.0.0.1:4173` regardless of the configured port
-      (now a 403 instead of a connection error if they differ).
+- [x] Matcher: publisher prefixes stripped (done above).
+- [ ] Matcher: titles the shops truncate ("...twin pa") still split -- alias them;
+      prefix-matching truncations risks wrong merges (**silent**).
+- [x] `run.ps1` port (done above).
 
 ---
 
@@ -136,6 +146,10 @@ Any / New only toggle (built).
 ---
 
 ## 4. Dropped, with reasons
+
+- **Detected deals** (drop vs trailing median) -- YAGNI for now: the lowest-ever tag
+  already answers "is this a good price?" with a plain `MIN`, and trend detection is the
+  riskiest kind of bug (a plausible false "deal"). Revisit if lowest-ever proves not enough.
 
 - **Merging `scrape_check.py` into `check_stores.py`** -- ~40% of `scrape_check` is
   unique (`--diagnose-pager`, per-page timing, paging-mechanism printout), so a merge

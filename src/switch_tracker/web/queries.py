@@ -11,8 +11,10 @@ from __future__ import annotations
 import sqlite3
 from collections import Counter
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
+
+from switch_tracker.core.matcher import match_key
 
 # Whitelisted, because these land in SQL TEXT rather than as parameters.
 SORT_COLUMNS = {
@@ -382,6 +384,14 @@ def watch_status(
         found = games(conn, ListingQuery(game=key, platform=item["platform"], condition=condition, limit=1))[
             "rows"
         ]
+        if not found:
+            # Watched under an older key: a matcher improvement (e.g. a stripped
+            # publisher prefix) re-keys the game, so re-key the watch the same way.
+            rekeyed = match_key(item["game"])
+            rekeyed = aliases.get(rekeyed, rekeyed)
+            if rekeyed != key:
+                q = ListingQuery(game=rekeyed, platform=item["platform"], condition=condition, limit=1)
+                found = games(conn, q)["rows"]
         best = found[0] if found else None
         target = item.get("target")
         hit = bool(
@@ -456,9 +466,27 @@ def movers(conn: sqlite3.Connection) -> list[dict[str, Any]]:
     return enriched
 
 
-def facets(conn: sqlite3.Connection) -> dict[str, list[dict[str, Any]]]:
-    """Filter options built from what is actually in the database."""
-    return {
+def _facet_counts(conn: sqlite3.Connection, query: ListingQuery, column: str) -> dict[str, int]:
+    """Listings per ``column`` value under ``query``'s filters. LEFT JOIN on the
+    latest price, so unpriced listings still count unless in-stock is asked for."""
+    where, params = _filters(query)
+    clause = f"WHERE {' AND '.join(where)}" if where else ""
+    sql = (
+        f"SELECT {column}, COUNT(*) FROM listing l "
+        f"LEFT JOIN price_point latest ON latest.id = {_LATEST_ID} {clause} GROUP BY {column}"
+    )
+    return dict(conn.execute(sql, params).fetchall())
+
+
+def facets(conn: sqlite3.Connection, query: ListingQuery | None = None) -> dict[str, list[dict[str, Any]]]:
+    """Filter options built from what is actually in the database.
+
+    Standard faceted counts: each store's count applies every active filter
+    EXCEPT the store filter itself (likewise regions), so ticking a store does
+    not zero its siblings. Every store/region in the data stays listed, at 0 if
+    need be, so a ticked box never vanishes from under the user.
+    """
+    out = {
         "stores": _rows(
             conn.execute(
                 "SELECT s.id, s.name, COUNT(l.id) AS n FROM store s "
@@ -475,6 +503,14 @@ def facets(conn: sqlite3.Connection) -> dict[str, list[dict[str, Any]]]:
             conn.execute("SELECT condition, COUNT(*) AS n FROM listing GROUP BY condition ORDER BY n DESC")
         ),
     }
+    if query is not None:
+        stores = _facet_counts(conn, replace(query, stores=()), "l.store_id")
+        regions = _facet_counts(conn, replace(query, regions=()), "l.region")
+        for s in out["stores"]:
+            s["n"] = stores.get(s["id"], 0)
+        for r in out["regions"]:
+            r["n"] = regions.get(r["region"], 0)
+    return out
 
 
 def history(conn: sqlite3.Connection, listing_id: int) -> list[dict[str, Any]]:
