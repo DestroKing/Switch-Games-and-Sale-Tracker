@@ -192,8 +192,10 @@ DIGITAL_HEAD = _patterns(r"(?<!\+)\bdlc\b")
 #: Edition Switch Game Card, ... DLC Content" (HG World, live).
 _PHYSICAL = re.compile(r"\b(game\s*card|cartridge|physical|game\s*cd)\b", re.IGNORECASE)
 #: "Bayonetta 2 Nintendo Switch (Includes Bayonetta Digital Code)" -- nekavo,
-#: live -- is the boxed game. What it includes is not what it is.
-_INCLUDES = re.compile(r"\(\s*incl(udes?|uding)?\b[^)]*\)", re.IGNORECASE)
+#: live -- is the boxed game. What it includes is not what it is. Same for a
+#: box list naming a game card: designinfo, live, "Nintendo Ring Fit Adventure
+#: Switch Game (Motion controller + Gamecard)".
+_INCLUDES = re.compile(r"\(\s*incl(udes?|uding)?\b[^)]*\)|\([^)]*\bgame\s*card\b[^)]*\)", re.IGNORECASE)
 #: A title naming BOTH Lite and OLED lists what a game runs on: nistore, live,
 #: "Mario Kart 8 Deluxe ... (Switch/Lite/OLED)", "Super Smash Bros Ultimate ...
 #: for Switch Lite & OLED Consoles". A console names one model.

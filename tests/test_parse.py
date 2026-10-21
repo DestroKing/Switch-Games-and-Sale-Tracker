@@ -240,6 +240,8 @@ class TestRealFeedTitles:
             "Overcooked Game with All DLC Remastered | Best Multiplayer Nintendo Games",
             # nekavo: the boxed game, which also includes a code.
             "Bayonetta 2 Nintendo Switch (Includes Bayonetta Digital Code)",
+            # designinfo: the box lists its controller next to the game card.
+            "Nintendo Ring Fit Adventure Switch Game (Motion controller + Gamecard)",
         ],
     )
     def test_kept_as_games(self, title: str) -> None:
