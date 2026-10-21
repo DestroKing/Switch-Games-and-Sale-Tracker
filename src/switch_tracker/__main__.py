@@ -87,6 +87,12 @@ def _parse(argv: list[str]) -> argparse.Namespace:
     )
     parser.add_argument("--at", default=None, help="for 'schedule': daily time, HH:MM (24h)")
     parser.add_argument("--off", action="store_true", help="for 'schedule': remove the daily collection")
+    parser.add_argument(
+        "--slot",
+        default=None,
+        help="for 'collect-now': HH:MM; skip if a successful collection already finished since "
+        "the latest such time (the scheduled task passes its own)",
+    )
     parser.add_argument("store_id", nargs="?", help="for 'inspect': which store to open")
     parser.add_argument("--run-id", type=int, default=None, help="internal: the run to report into")
     parser.add_argument(
@@ -142,7 +148,7 @@ def _dispatch(args: argparse.Namespace) -> int:
         from switch_tracker import schedule
 
         if args.command == "collect-now":
-            return schedule.collect_now()
+            return schedule.collect_now(slot=args.slot)
         return schedule.unregister() if args.off else schedule.register(args.at)
 
     if args.command == "serve":

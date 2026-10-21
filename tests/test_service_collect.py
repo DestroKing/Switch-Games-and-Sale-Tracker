@@ -102,6 +102,27 @@ class TestPersistence:
         await service(conn, adapters).run([store("s1")])
         assert conn.execute("SELECT finished_at FROM run").fetchone()["finished_at"] is not None
 
+    async def test_backs_up_the_database_after_a_run(self, conn, tmp_path: Path) -> None:
+        adapters = {AdapterKind.SHOPIFY: FakeAdapter(AdapterKind.SHOPIFY, Ok((listing("A"),)))}
+        await service(conn, adapters, backup_dir=tmp_path / "backups").run([store("s1")])
+        [copy] = list((tmp_path / "backups").glob("tracker-run*.db"))
+        backup = sqlite3.connect(copy)
+        # The copy holds THIS run's data -- it is taken after saving, not before.
+        assert backup.execute("SELECT COUNT(*) FROM price_point").fetchone()[0] == 1
+        # ...and the run is already marked finished in it, so a restored copy
+        # does not show a crashed run.
+        assert backup.execute("SELECT finished_at FROM run").fetchone()[0] is not None
+        backup.close()
+
+    async def test_a_failed_backup_is_a_warning_not_a_failed_run(self, conn, tmp_path: Path) -> None:
+        blocker = tmp_path / "not-a-dir"
+        blocker.write_text("a file where the backup folder should be", encoding="utf-8")
+        adapters = {AdapterKind.SHOPIFY: FakeAdapter(AdapterKind.SHOPIFY, Ok((listing("A"),)))}
+        await service(conn, adapters, backup_dir=blocker).run([store("s1")])
+        assert conn.execute("SELECT finished_at FROM run").fetchone()["finished_at"] is not None
+        warnings = [r["detail"] for r in conn.execute("SELECT detail FROM run_event WHERE kind = 'warning'")]
+        assert any("backup failed" in (w or "") for w in warnings)
+
     async def test_only_web_links_are_ever_stored(self, conn) -> None:
         """A store's own data sets this URL; a javascript: href is script on the dashboard."""
         hostile = [

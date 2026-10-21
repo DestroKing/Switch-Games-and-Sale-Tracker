@@ -10,10 +10,11 @@ from __future__ import annotations
 import asyncio
 import sqlite3
 from collections.abc import Mapping, Sequence
+from pathlib import Path
 from urllib.parse import urlsplit
 
 from switch_tracker.adapters.base import Adapter
-from switch_tracker.core import matcher
+from switch_tracker.core import db, matcher
 from switch_tracker.core.concurrency import bounded_gather
 from switch_tracker.core.db import now_iso
 from switch_tracker.core.models import AdapterKind, Failed, Ok, Partial, RawListing, StoreConfig
@@ -89,6 +90,7 @@ class CollectService:
         http_concurrency: int = DEFAULT_HTTP_CONCURRENCY,
         browser_concurrency: int = DEFAULT_BROWSER_CONCURRENCY,
         aliases: Mapping[str, str] | None = None,
+        backup_dir: Path | None = None,
     ) -> None:
         self._conn = conn
         self._adapters = adapters
@@ -96,6 +98,8 @@ class CollectService:
         # Passed in, not read here: the service stays file-free, so a test can
         # never pick up the real user's matches.local.json by accident.
         self._aliases = aliases or {}
+        #: None = no backup (tests). The worker passes paths.backups_dir().
+        self._backup_dir = backup_dir
         self.http_deadline_s = http_deadline_s
         self.browser_deadline_s = browser_deadline_s
         self.http_concurrency = http_concurrency
@@ -171,6 +175,19 @@ class CollectService:
             events.warning(f"matching games failed: {exc}")
 
         self._conn.execute("UPDATE run SET finished_at = ? WHERE id = ?", (now_iso(), run_id))
+
+        # Back up only once the run is saved, grouped AND marked finished. Taken
+        # before finished_at, every backup's newest run was "still running", so
+        # a restored copy showed a crashed run and lost it for the scheduler's
+        # "already collected today" check. Before run_finished(), though, so a
+        # failure warning still reaches the live log. A failed backup (disk full,
+        # permissions) is a warning, never a failed collection.
+        if self._backup_dir is not None:
+            try:
+                db.backup(self._conn, self._backup_dir, run_id)
+            except Exception as exc:  # noqa: BLE001 - the backup is a copy; the original is intact
+                events.warning(f"database backup failed: {exc}")
+
         events.run_finished()
         return run_id
 

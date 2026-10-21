@@ -319,17 +319,41 @@ def games(conn: sqlite3.Connection, query: ListingQuery) -> dict[str, Any]:
     # A game with no rupee price at all goes last too: SQLite would otherwise
     # sort its NULL price FIRST ascending, above every real one.
     in_stock_first = "best_price IS NULL, best_in_stock DESC, " if column == "best_price" else ""
+    # Lowest price EVER recorded for the game, across every store and every
+    # run, in the condition being viewed (so a "New only" watch is compared
+    # with new copies' history). Computed OUTSIDE the grouped query on purpose:
+    # inside it would sit next to the best-offer MIN() and its bind parameter
+    # would land ahead of the filter parameters.
+    condition_clause = "AND x.condition = ?" if query.condition else ""
+    history = f"""
+        FROM price_point pp
+        JOIN listing x ON x.id = pp.listing_id
+        JOIN game xg ON xg.id = x.game_id
+        WHERE xg.canonical_title = sub.game AND x.platform = sub.platform {condition_clause}
+    """
+    history_params = [query.condition] * 2 if query.condition else []
     rows = _rows(
         conn.execute(
-            f"SELECT * FROM ({grouped}) "
+            f"SELECT sub.*, (SELECT MIN(pp.inr_price) {history}) AS lowest_ever, "
+            f"(SELECT COUNT(DISTINCT pp.run_id) {history}) AS runs_seen "
+            f"FROM ({grouped}) AS sub "
             f"ORDER BY {in_stock_first}{column} {query.sort_direction()}, game ASC, platform ASC "
             "LIMIT ? OFFSET ?",
-            [*params, query.safe_limit(), query.safe_offset()],
+            [*history_params, *params, query.safe_limit(), query.safe_offset()],
         )
     )
     for row in rows:
         del row["best_rank"]
         row["best_in_stock"] = bool(row["best_in_stock"])
+        # "At its lowest" only means something with history: on a game seen in
+        # one collection, every price is trivially the lowest ever.
+        row["at_lowest"] = bool(
+            row["runs_seen"] >= 2
+            and row["best_in_stock"]
+            and row["best_price"] is not None
+            and row["lowest_ever"] is not None
+            and row["best_price"] <= row["lowest_ever"]
+        )
     return {"total": total, "rows": rows, "offset": query.safe_offset(), "limit": query.safe_limit()}
 
 
@@ -352,7 +376,12 @@ def watch_status(
     out = []
     for item in items:
         key = aliases.get(item["game"], item["game"])
-        found = games(conn, ListingQuery(game=key, platform=item["platform"], limit=1))["rows"]
+        # A "New only" watch is the same games() query with the condition
+        # filter set, so best price, stock and lowest-ever all agree with it.
+        condition = "NEW" if item.get("condition") == "NEW" else ""
+        found = games(conn, ListingQuery(game=key, platform=item["platform"], condition=condition, limit=1))[
+            "rows"
+        ]
         best = found[0] if found else None
         target = item.get("target")
         hit = bool(

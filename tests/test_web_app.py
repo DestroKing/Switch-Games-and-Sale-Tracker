@@ -245,6 +245,43 @@ class TestWatchlist:
             client.delete("/api/watchlist", params={"game": item["game"], "platform": "SWITCH"}).json() == []
         )
 
+    def test_retargeting_keeps_a_new_only_setting(self, client: TestClient) -> None:
+        """The target box sends no condition; that must not reset New-only to Any."""
+        client.put("/api/watchlist", json={"game": "x", "platform": "SWITCH", "condition": "NEW"})
+        [item] = client.put("/api/watchlist", json={"game": "x", "platform": "SWITCH", "target": 3000}).json()
+        assert (item["condition"], item["target"]) == ("NEW", 3000)
+
+    def test_the_toggle_keeps_the_target_and_an_explicit_null_clears_it(self, client: TestClient) -> None:
+        """The toggle sends no target, so it cannot race a target edit and restore the old price."""
+        client.put("/api/watchlist", json={"game": "x", "platform": "SWITCH", "target": 3000})
+        [kept] = client.put(
+            "/api/watchlist", json={"game": "x", "platform": "SWITCH", "condition": "NEW"}
+        ).json()
+        assert (kept["target"], kept["condition"]) == (3000, "NEW")
+        [cleared] = client.put(
+            "/api/watchlist", json={"game": "x", "platform": "SWITCH", "target": None}
+        ).json()
+        assert (cleared["target"], cleared["condition"]) == (None, "NEW")
+
+    def test_a_hand_edited_duplicate_does_not_survive_an_update(self, client: TestClient) -> None:
+        paths.watchlist_path().write_text(
+            '[{"game": "x", "platform": "SWITCH", "target": 1},'
+            ' {"game": "x", "platform": "SWITCH", "target": 2}]',
+            encoding="utf-8",
+        )
+        entries = client.put("/api/watchlist", json={"game": "x", "platform": "SWITCH", "target": 9}).json()
+        assert [e["target"] for e in entries] == [9]
+
+    def test_an_entry_written_before_conditions_existed_reads_as_any(self, client: TestClient) -> None:
+        paths.watchlist_path().write_text(
+            '[{"game": "x", "platform": "SWITCH", "target": 1}]', encoding="utf-8"
+        )
+        assert client.get("/api/watchlist").json()[0]["condition"] == "ANY"
+
+    def test_rejects_an_unknown_condition(self, client: TestClient) -> None:
+        response = client.put("/api/watchlist", json={"game": "x", "platform": "SWITCH", "condition": "USED"})
+        assert response.status_code == 422
+
     def test_is_stored_in_the_data_dir_so_it_survives_a_deleted_database(self, client: TestClient) -> None:
         client.put("/api/watchlist", json={"game": "kirby", "platform": "SWITCH2", "target": None})
         assert "kirby" in paths.watchlist_path().read_text(encoding="utf-8")

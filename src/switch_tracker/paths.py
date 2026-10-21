@@ -65,6 +65,11 @@ def lock_path() -> Path:
     return data_dir() / "run.lock"
 
 
+def backups_dir() -> Path:
+    """Automatic copies of tracker.db, one per collection (see core.db.backup)."""
+    return data_dir() / "backups"
+
+
 def diagnostics_dir() -> Path:
     d = data_dir() / "diagnostics"
     d.mkdir(parents=True, exist_ok=True)

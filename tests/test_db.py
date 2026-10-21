@@ -137,6 +137,27 @@ class TestExistingDatabase:
         assert "condition" in columns
 
 
+class TestBackups:
+    def test_keeps_only_the_newest_copies_and_nothing_else(self, fresh, tmp_path: Path) -> None:
+        folder = tmp_path / "backups"
+        folder.mkdir()
+        (folder / "my-notes.txt").write_text("not a backup", encoding="utf-8")
+        for run_id in range(1, 5):
+            db.backup(fresh, folder, run_id, keep=2)
+        names = sorted(p.name for p in folder.iterdir())
+        kept = [int(n.split("-")[1].removeprefix("run")) for n in names if n.startswith("tracker-run")]
+        assert kept == [3, 4]  # the newest two runs
+        assert "my-notes.txt" in names  # never touched
+
+    def test_a_backup_is_a_complete_openable_database(self, fresh, tmp_path: Path) -> None:
+        fresh.execute("INSERT INTO run (started_at) VALUES ('t')")
+        copy = db.backup(fresh, tmp_path / "b", run_id=1)
+        restored = sqlite3.connect(copy)
+        assert restored.execute("SELECT COUNT(*) FROM run").fetchone()[0] == 1
+        assert restored.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+        restored.close()
+
+
 class TestActiveRunGuard:
     """Layer 2 of the triple concurrency guard -- the authoritative one."""
 

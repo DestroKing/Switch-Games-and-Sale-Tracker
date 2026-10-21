@@ -713,6 +713,18 @@ table.offers th { position: static; }
 /* ============================================================== watchlist */
 
 .watch-note { font-size: var(--t-sm); color: var(--ink-2); }
+.schedule-note { margin: 0 0 var(--s3); font-size: var(--t-sm); }
+.schedule-note:empty { display: none; }
+.schedule-note code { font-family: var(--mono); color: var(--ink-2); }
+
+/* Price history under a best price: a dim "lowest ₹X", or the tag when the
+   price IS the all-time low. Block-level so the price column stays aligned. */
+td.price .price-note { display: block; margin-top: 2px; font: 400 var(--t-micro)/1.3 var(--font); }
+td.price .lowest { color: var(--ink-3); }
+.tag.low { background: var(--ok-bg); color: var(--ok); }
+
+/* The per-watch Any / New only toggle: the toolbar's segmented control, compact. */
+.seg.mini button { padding: 2px var(--s2); font-size: var(--t-sm); }
 .watch-note .linkish { margin-left: var(--s1); text-decoration: underline; }
 
 #watch input.target { width: 8.5em; text-align: right; font-family: var(--mono); padding: var(--s1) var(--s2); }

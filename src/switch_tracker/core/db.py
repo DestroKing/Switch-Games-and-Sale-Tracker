@@ -189,5 +189,31 @@ def _migrate(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE listing ADD COLUMN condition TEXT NOT NULL DEFAULT 'NEW'")
 
 
+#: How many backups to keep. A week of daily collections; each is one
+#: compacted copy of the database, so the disk cost is ~7x the database.
+BACKUPS_KEPT = 7
+
+
+def backup(conn: sqlite3.Connection, directory: Path, run_id: int, keep: int = BACKUPS_KEPT) -> Path:
+    """Write a consistent copy of the database, then drop all but the newest ``keep``.
+
+    ``VACUUM INTO`` is SQLite's own online backup: it reads one snapshot, so a
+    dashboard reading (or writing run bookkeeping) at the same moment cannot
+    produce a torn copy -- copying ``tracker.db`` with the file system could,
+    and would also miss whatever is still in the WAL file.
+
+    Named by run id first so they sort oldest-first by name, whatever the clock.
+    Only files matching that exact pattern are ever deleted, so nothing a user
+    puts in the folder is touched.
+    """
+    directory.mkdir(parents=True, exist_ok=True)
+    target = directory / f"tracker-run{run_id:06d}-{datetime.now(UTC):%Y%m%d-%H%M%S}.db"
+    conn.execute("VACUUM INTO ?", (str(target),))
+    copies = sorted(directory.glob("tracker-run[0-9][0-9][0-9][0-9][0-9][0-9]-*.db"))
+    for old in copies[: max(0, len(copies) - keep)]:
+        old.unlink(missing_ok=True)
+    return target
+
+
 def now_iso() -> str:
     return datetime.now(UTC).isoformat(timespec="seconds").replace("+00:00", "Z")

@@ -38,6 +38,15 @@ def facets(conn: Conn) -> dict[str, list[dict[str, object]]]:
     return queries.facets(conn)
 
 
+@router.get("/schedule")
+def schedule_status() -> dict[str, object]:
+    """Whether the daily collection is set up, and when it runs next. READ-ONLY:
+    registering a task stays a command-line action, never a web endpoint."""
+    from switch_tracker import schedule
+
+    return schedule.status()
+
+
 @router.get("/history")
 def history(id: int, conn: Conn) -> list[dict[str, object]]:
     """A single listing's price series -- the chart under an expanded row."""
