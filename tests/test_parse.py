@@ -154,10 +154,18 @@ class TestClassifyExclusions:
             "Nintendo Switch Joy-Con Pair",
             "Nintendo Switch Docking Station",
             "Nintendo Switch 2 Online Game Bundled With Pokemon Pokopia",
+            # The console under its bare name (nekavo, nistore, Play-Asia, live).
+            "Nintendo Switch 2",
+            "Nintendo Switch 2 (Japan Only) (Japan)",
+            "Nintendo Switch 2 (US)",
         ],
     )
     def test_hardware_is_excluded(self, title: str) -> None:
         assert classify(title).kind is ProductKind.HARDWARE
+
+    def test_a_game_named_after_the_console_is_still_a_game(self) -> None:
+        assert classify("Nintendo Switch Sports").kind is ProductKind.GAME
+        assert classify("Nintendo Switch 2 Welcome Tour").kind is ProductKind.GAME
 
     @pytest.mark.parametrize(
         "title",
