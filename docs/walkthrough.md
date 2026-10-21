@@ -1087,6 +1087,20 @@ for patterns, kind in ((SERVICE, ...), (DIGITAL, ...), (HARDWARE, ...), (ACCESSO
 **Why exclusions run first:** "Nintendo Switch Pro Controller" contains the word "Switch".
 Check the platform first and it sails through as a game.
 
+**Exclusions read the title; the platform reads everything.** The feed stores pass tags and
+categories too, so that a terse "Hogwarts Legacy" in a "Nintendo Switch Games" category
+still counts as a Switch game. But tags say what a product is *compatible with*, not what
+it *is*. Consolegarage tags every Switch game "NINTENDO SWITCH OLED" and "SWITCH LITE", so
+checking the console rule against tags threw out 58 of its 92 products, Mario Kart 8 Deluxe
+among them. `classify(context, hint, title=...)` now checks the exclusions against the
+title alone. That took consolegarage from 30 listings to 75, with only its consoles and
+cases still dropped. `check_stores.py <store> --rejected` lists what a feed store dropped
+and why; that's how this was found.
+
+**Another console beats a bare "switch".** "The Crew 2 PS4 | … | Seamless Switch" came out
+as a Switch game. Explicit markers ("Nintendo Switch", "NSW") still win outright, but the
+loose ones (a bare "switch", "NS", "Nintendo") now count only after the other-console check.
+
 **Each exclusion word is checked against real titles before it's added.** A "PXN Flight
 Simulator Joystick … Nintendo Switch" came through HG World as a game, so joysticks, fight
 or arcade sticks, flight sticks, HOTAS and racing wheels are now excluded. "Gamepad" was
@@ -1095,7 +1109,9 @@ of a real game (*Sonic x Shadow Generations*). "Throttle" and "mouse" stay out t
 of Full Throttle and Mickey Mouse. The same HG World list held a "Mini Projector … Video
 Game For TV" and a "Pokémon GO Plus | Auto-Catch Accessory", so projectors and the
 Pokémon GO Plus / Poké Ball Plus are excluded by name. Excluding "accessory" itself would
-drop that Sonic game too.
+drop that Sonic game too. A console sold with a game ("Nintendo Switch 2 … Bundled With
+Pokemon Pokopia", ₹59,999 at designinfo) is hardware. The rule is "bundl**ed** with",
+because Flipkart writes "Classic JRPG Bundle with Six … Titles" into a real game.
 
 ### The store hint, and the rule that saves it
 

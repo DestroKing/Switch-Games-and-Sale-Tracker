@@ -128,6 +128,22 @@ class TestClassificationContext:
         assert isinstance(result, Ok)
         assert [listing.title for listing in result.listings] == ["Mario Kart World"]
 
+    async def test_compatibility_tags_never_make_a_game_hardware(self, adapter, server) -> None:
+        """consolegarage, live: every Switch game is tagged "NINTENDO SWITCH OLED" and
+        "SWITCH LITE". Checked against tags, the console rule dropped 58 of its games."""
+        base, recorder = server
+        tags = ["NINTENDO", "NINTENDO SWITCH OLED", "SWITCH", "SWITCH LITE"]
+        recorder.plan(
+            "/products.json",
+            page(
+                product(1, "Mario Kart 8 Deluxe Nintendo Switch", tags=tags),
+                product(2, "Nintendo Switch OLED model With White set", tags=tags),
+            ),
+        )
+        result = await adapter.fetch(store_at(base), NullSink())
+        assert isinstance(result, Ok)
+        assert [listing.title for listing in result.listings] == ["Mario Kart 8 Deluxe Nintendo Switch"]
+
     async def test_skips_a_product_with_an_unparseable_price(self, adapter, server) -> None:
         base, recorder = server
         recorder.plan("/products.json", page(product(1, "Zelda", price="")))

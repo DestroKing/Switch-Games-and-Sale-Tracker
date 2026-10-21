@@ -217,9 +217,12 @@ PROFILES: dict[str, StoreProfile] = {
         # carry a numeric id, so its absence is a reliable negative.
         reject_url_parts=("/search/", "/category/"),
         require_digit_in_url=True,
-        # FULL CATALOGUE. The live page reports 139 pages of ~44 products, so
-        # ~6,100 rows and ~5,200 distinct cartridges. 150 leaves headroom for
-        # the catalogue growing between runs.
+        # FULL CATALOGUE. The live page reports 139 pages of ~36 results, but
+        # only about the first 98 carry prices: from halfway through p98 to the
+        # end every product is unpriced (checked by hand on a home run), so the
+        # walk ending at ~p99 with ~3,300 listings IS the whole buyable
+        # catalogue -- an empty page is the end, not a failure. 150 leaves
+        # headroom for the catalogue growing between runs.
         #
         # Sorting cannot help choose a better subset -- Play-Asia's sort control
         # writes a URL FRAGMENT (#fc=o:3), which is never sent to the server, so

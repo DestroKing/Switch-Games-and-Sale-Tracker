@@ -250,7 +250,7 @@ class WooAdapter:
         )
         context = f"{name} {categories}"
 
-        result = classify(context, store.platform_hint)
+        result = classify(context, store.platform_hint, title=name)
         if result.kind is not ProductKind.GAME or result.platform is Platform.UNKNOWN:
             return None
 
