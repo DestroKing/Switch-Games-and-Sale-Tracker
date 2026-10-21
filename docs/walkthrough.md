@@ -1097,6 +1097,21 @@ title alone. That took consolegarage from 30 listings to 75, with only its conso
 cases still dropped. `check_stores.py <store> --rejected` lists what a feed store dropped
 and why; that's how this was found.
 
+Even in titles, a few words are context rather than the product, and `--rejected` showed each
+one dropping real games:
+
+| Word | Is the product when… | Is only context when… |
+|---|---|---|
+| Lite / OLED | one model is named: "Nintendo Switch Lite – Turquoise" | both are listed: "Mario Kart 8 Deluxe (Switch/Lite/OLED)" (nistore) |
+| Joy-Con | it's in the name: "Nintendo Neon Red & Neon Blue Joy-Con" | it's after the first `\|`: "Nintendo Switch Sports \| … \| Joy-Con Compatible" (HG World) |
+| DLC | it's in the name of a non-physical product | it follows "+" ("Game+DLC"), sits after the `\|`, or comes with "Game Card"/"Cartridge" (HG World) |
+| Digital code | "Cricket 19 … (Digital Code)" | it's inside "(Includes …)": "Bayonetta 2 (Includes Bayonetta Digital Code)" (nekavo) |
+
+**The title's console beats the category's.** HG World files "Super Smash Bros Ultimate for
+Nintendo Switch" under a Switch 2 category, so seven Switch 1 games came out as Switch 2.
+When the title names a console, that console wins. Only a title naming no console falls
+back to the tags and categories.
+
 **Another console beats a bare "switch".** "The Crew 2 PS4 | … | Seamless Switch" came out
 as a Switch game. Explicit markers ("Nintendo Switch", "NSW") still win outright, but the
 loose ones (a bare "switch", "NS", "Nintendo") now count only after the other-console check.
