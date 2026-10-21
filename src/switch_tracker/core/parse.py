@@ -148,6 +148,14 @@ ACCESSORY = _patterns(
     r"\b(t[- ]?shirt|hoodie|mug|keychain|poster|figure|plush)\b",
     r"\bcontrollers?\b",
     r"\bcooling\s*pads?\b",
+    # HG World is fetched unscoped (stores.py), and its "PXN 2119 Pro Flight
+    # Simulator Joystick ... Nintendo Switch" came through as a game. Not
+    # "throttle" (Full Throttle) or "mouse" (Mickey Mouse): game titles. Not
+    # "gamepad" either: Flipkart's marketing writes "Gamepad Accessory" into
+    # real game listings (Sonic x Shadow Generations, seen live).
+    r"\b(joy\s*sticks?|hotas)\b",
+    r"\b(arcade|fight(ing)?|flight)\s*sticks?\b",
+    r"\bracing\s*wheels?\b",
 )
 
 DIGITAL = _patterns(

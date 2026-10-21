@@ -17,6 +17,11 @@ collector failed on the same site, which has already happened here once.
     uv run python scripts/check_stores.py --kind BROWSER      # one adapter kind
     uv run python scripts/check_stores.py flipkart --pages 3 --headful
     uv run python scripts/check_stores.py hgworld --probe     # isolate an HTTP refusal
+    uv run python scripts/check_stores.py hgworld --list      # every listing it returned
+    uv run python scripts/check_stores.py --jobs 1            # one store at a time
+
+Stores are checked several at a time (``--jobs``, default 6; at most 3 browser
+stores at once). Each store's output is printed as one block when it finishes.
 
 ``--probe`` answers a different question from a run: when a feed store returns
 403/401, it re-asks the same host one variable at a time -- with and without
@@ -33,10 +38,14 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import contextlib
+import contextvars
+import io
 import json
 import pathlib
 import re
 import sqlite3
+import sys
 import textwrap
 import time
 
@@ -49,6 +58,32 @@ from switch_tracker.core.models import AdapterKind, Failed, Ok, Partial, RawList
 #: Headers a WAF or a wp-json hardening plugin announces itself under. Their
 #: ABSENCE on a 403 is informative too -- that points at WordPress itself.
 _TELLTALE = ("server", "cf-ray", "cf-mitigated", "x-sucuri-id", "x-sucuri-block", "retry-after")
+
+
+#: The buffer the CURRENT store's output goes to while stores run in parallel.
+_buffer: contextvars.ContextVar[io.StringIO | None] = contextvars.ContextVar("buffer", default=None)
+
+
+class _PerStoreStdout:
+    """``sys.stdout`` that writes into the running store's own buffer, if it has one.
+
+    Every print() below stays as it is, and two stores checked at once never
+    interleave their lines: each store's block is printed whole when it
+    finishes. asyncio gives every task its own copy of the context, so the
+    buffer set in one store's task is invisible to the others.
+    """
+
+    def __init__(self, real: io.TextIOBase) -> None:
+        self._real = real
+
+    def write(self, text: str) -> int:
+        return (_buffer.get() or self._real).write(text)
+
+    def flush(self) -> None:
+        self._real.flush()
+
+    def __getattr__(self, name: str) -> object:
+        return getattr(self._real, name)
 
 
 class PrintSink:
@@ -183,7 +218,7 @@ def _echo_html(path: pathlib.Path) -> None:
     print(f"        text starts: {text[:300]!r}")
 
 
-async def run_store(store: StoreConfig, *, pages: int, headful: bool) -> bool:
+async def run_store(store: StoreConfig, *, pages: int, headful: bool, list_all: bool = False) -> bool:
     """Collect one store for real. True when it came back usable."""
     client = PoliteClient()
     provider = None
@@ -257,6 +292,15 @@ async def run_store(store: StoreConfig, *, pages: int, headful: bool) -> bool:
             f"      e.g. {sample.title[:60]!r} {sample.native_currency} {sample.native_price} "
             f"stock={sample.in_stock} cond={sample.condition} {sample.url[:60]}"
         )
+    if list_all:
+        # Every row the classifier let through, so a non-game (a joystick, a
+        # console) is spotted by eye instead of hiding behind one sample.
+        for x in sorted(listings, key=lambda x: x.title.lower()):
+            stock = "in stock" if x.in_stock else "OUT"
+            print(
+                f"      {x.native_price:>9.0f} {x.platform.value:7} {x.condition.value:9} {stock:8} "
+                f"{x.title[:90]}"
+            )
     _echo_diagnostics(store.id, wall_start)
     return isinstance(outcome, (Ok, Partial)) and bool(listings)
 
@@ -452,6 +496,13 @@ async def main() -> int:
         help="print where this store's settings resolve from, plus its recorded run outcomes",
     )
     parser.add_argument("--limit", type=int, default=15, help="how many runs --history shows")
+    parser.add_argument("--list", action="store_true", help="print every listing each store returned")
+    parser.add_argument(
+        "--jobs",
+        type=int,
+        default=6,
+        help="stores checked at once (default 6; browser stores at most 3); 1 = one at a time",
+    )
     args = parser.parse_args()
 
     stores = [
@@ -469,29 +520,48 @@ async def main() -> int:
         print("no stores matched")
         return 2
 
-    failures: list[str] = []
-    for store in stores:
-        print(f"\n== {store.id} ({store.kind.value}) {store.base_url}")
-        if args.history:
-            history(store.id, args.limit)
-            continue
-        if args.probe:
+    if args.history or args.probe:
+        for store in stores:
+            print(f"\n== {store.id} ({store.kind.value}) {store.base_url}")
+            if args.history:
+                history(store.id, args.limit)
             # Both feed kinds, not just the configured one: the point of a probe
             # is often to find out that the configured kind is wrong.
-            if store.kind in (AdapterKind.WOOCOMMERCE, AdapterKind.SHOPIFY):
+            elif store.kind in (AdapterKind.WOOCOMMERCE, AdapterKind.SHOPIFY):
                 await probe(store, args.slug)
             else:
                 print(f"    --probe covers feed stores; {store.id} is {store.kind.value}")
-            continue
-        try:
-            if not await run_store(store, pages=args.pages, headful=args.headful):
-                failures.append(store.id)
-        except Exception as exc:  # noqa: BLE001 - one bad store must not end the sweep
-            print(f"    RAISED {type(exc).__name__}: {exc}")
-            failures.append(store.id)
-
-    if args.probe or args.history:
         return 0
+
+    # In parallel ACROSS stores only: every store is a different host and gets
+    # its own PoliteClient, so each shop still sees one request at a time with
+    # the usual gap. Browser stores each launch a Chromium, hence their lower cap.
+    jobs = max(1, args.jobs)
+    slots, browser_slots = asyncio.Semaphore(jobs), asyncio.Semaphore(min(jobs, 3))
+    if jobs > 1:
+        sys.stdout = _PerStoreStdout(sys.stdout)  # type: ignore[assignment]
+        print(f"Checking {len(stores)} stores, up to {jobs} at a time; each prints when it finishes.")
+
+    async def check(store: StoreConfig) -> bool:
+        browser = store.kind is AdapterKind.BROWSER
+        # Browser slot FIRST: a browser store queued for one must not sit on a
+        # general slot that a feed store could be using meanwhile.
+        async with browser_slots if browser else contextlib.nullcontext(), slots:
+            buffer = io.StringIO() if jobs > 1 else None
+            token = _buffer.set(buffer)
+            try:
+                print(f"\n== {store.id} ({store.kind.value}) {store.base_url}")
+                return await run_store(store, pages=args.pages, headful=args.headful, list_all=args.list)
+            except Exception as exc:  # noqa: BLE001 - one bad store must not end the sweep
+                print(f"    RAISED {type(exc).__name__}: {exc}")
+                return False
+            finally:
+                _buffer.reset(token)
+                if buffer is not None:
+                    print(buffer.getvalue(), end="", flush=True)
+
+    usable = await asyncio.gather(*(check(s) for s in stores))
+    failures = [s.id for s, ok in zip(stores, usable, strict=True) if not ok]
     print(f"\n{len(stores) - len(failures)}/{len(stores)} stores usable")
     if failures:
         print(f"unusable: {', '.join(failures)}")

@@ -8,7 +8,6 @@ and its real socket behaviour; a mock would let both regress unnoticed.
 from __future__ import annotations
 
 import contextlib
-import socket
 import threading
 from collections.abc import Iterator
 from dataclasses import dataclass, field
@@ -83,11 +82,11 @@ def server() -> Iterator[tuple[str, Recorder]]:
         def log_message(self, *_: object) -> None:
             """Silence the default stderr logging; a pristine test run matters."""
 
-    with socket.socket() as probe:
-        probe.bind(("127.0.0.1", 0))
-        port = int(probe.getsockname()[1])
-
-    httpd = ThreadingHTTPServer(("127.0.0.1", port), Handler)
+    # Port 0 on the server itself: the OS picks a free port and the server
+    # already holds it. Probing a free port first and binding it afterwards
+    # left a gap in which a parallel test worker (pytest -n) could take it.
+    httpd = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    port = int(httpd.server_address[1])
     thread = threading.Thread(target=httpd.serve_forever, daemon=True)
     thread.start()
     try:

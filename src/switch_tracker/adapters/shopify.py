@@ -25,6 +25,7 @@ from switch_tracker.core.models import (
     StoreConfig,
 )
 from switch_tracker.core.parse import classify, infer_condition, infer_region, parse_price
+from switch_tracker.core.skus import one_product_per_sku
 
 
 class ShopifyAdapter:
@@ -47,7 +48,7 @@ class ShopifyAdapter:
             else ["/products.json"]
         )
 
-        listings: list[RawListing] = []
+        rows: list[tuple[RawListing, str]] = []
         problems: list[str] = []
 
         for path in paths:
@@ -66,14 +67,15 @@ class ShopifyAdapter:
                 for raw in products:
                     listing = self._to_listing(store, raw)
                     if listing is not None:
-                        listings.append(listing)
+                        rows.append((listing, str(raw.get("id"))))
 
-                sink.page(store.id, page, len(listings))
+                sink.page(store.id, page, len(rows))
 
                 # The real stopping signal: a short page means the last page.
                 if len(products) < self.PAGE_SIZE:
                     break
 
+        listings = one_product_per_sku(rows)
         if not listings:
             return Failed("; ".join(problems) or "zero products returned")
         if problems:

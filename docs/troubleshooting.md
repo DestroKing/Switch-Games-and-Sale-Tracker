@@ -59,8 +59,13 @@ result rather than just counting it, flagging:
 - a currency that disagrees with the store's config;
 - catalogues where nothing is in stock.
 
-Each of those checks exists because that failure has shipped here at least once. A full
-sweep takes a while, because it waits between requests to the same shop on purpose.
+Each of those checks exists because that failure has shipped here at least once.
+
+**It checks several stores at once**: 6 by default, at most 3 of them browser stores,
+because each opens its own browser. Each store's report prints as one block when that store
+finishes, so the order differs from run to run. A full sweep takes about as long as the
+slowest store. Each shop still gets one request at a time with the usual pause between
+requests; the speed-up only comes from checking *different* shops at the same time.
 
 | Variation | Command |
 |---|---|
@@ -69,6 +74,8 @@ sweep takes a while, because it waits between requests to the same shop on purpo
 | One kind of store at a time | `uv run python scripts/check_stores.py --kind BROWSER` (or `WOOCOMMERCE`, `SHOPIFY`, …) |
 | Fewer pages, in a visible browser | `uv run python scripts/check_stores.py flipkart --pages 3 --headful` |
 | Where a store's settings come from, and its recorded run outcomes | `uv run python scripts/check_stores.py flipkart --history` |
+| Every listing a store returned: spot a non-game (a joystick, a console) that got through | `uv run python scripts/check_stores.py hgworld --list` |
+| More or fewer stores at once (`--jobs 1` = one at a time, easiest to follow live) | `uv run python scripts/check_stores.py --jobs 10` |
 
 Afterwards, press **Check stores** once in the dashboard. An older version of it switched
 a store off just because it could not reach it at that moment. The current one turns such
@@ -105,7 +112,8 @@ What each one tells you:
   **five**, and nothing says the other layers were never tried. It prints to the console
   only, so you can paste the output somewhere.
 - **`category_check`** asks each feed store's own API how many products are really in each
-  configured category. A wrong category name then shows up as a visible number, rather
+  configured category. All the stores are checked at once, and the results print in
+  the order you named them. A wrong category name then shows up as a visible number, rather
   than a silent zero folded into a total.
 
 Every one of these drives the **shipped** adapter and the **shipped** profile on purpose.
@@ -144,7 +152,7 @@ It exits with code 1 if anything in the **cut** or **bad price** column is not z
 | Column | What a non-zero number means | What to do |
 |---|---|---|
 | **cut** | Titles the shop cut short ("…Nintendo Swit...") among listings it showed in its latest run. The scraper reads the full name from the card when the page has it (walkthrough §3.18), so this means a shop cuts titles a different way. | Tell a developer the store id. Note: a listing cut in an older run is repaired the next time the shop shows it, so only current listings count. |
-| **bad price** | A latest price of zero or less. Never right. | `uv run python scripts/check_stores.py <store>` to see what the page offers now. |
+| **bad price** | A latest price of zero or less. Never right. Note: a listing the shop has since removed is NOT counted as buyable. If a store's latest *fully successful* run didn't include it, it no longer wins "best price" and no longer counts as in stock. A partial or failed run never does this, because it may simply not have reached the listing. | `uv run python scripts/check_stores.py <store>` to see what the page offers now. |
 | **no INR** | A price with no rupee figure: an import store and no exchange rate stored yet. Recording no number is deliberate (walkthrough §3.10). | Press **Update exchange rate**. |
 | **ungrouped** | Listings the matcher couldn't key, usually because the title is all console words ("Nintendo Switch Game"). | Usually nothing. Such listings still appear in **Every listing**. |
 | **compared across 2+ stores** | Not a problem, just the number to watch. If it drops sharply after a change, grouping got worse. | |
