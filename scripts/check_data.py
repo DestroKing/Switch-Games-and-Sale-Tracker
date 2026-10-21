@@ -32,10 +32,15 @@ WITH latest AS (
 -- Listings each store showed in its most recent run. A cut title on a listing the
 -- shop has since stopped showing is repaired the next time it appears, so only
 -- these count.
+-- Each store's latest run is found once, not once per price row: per row, it
+-- rescanned the store's whole history and slowed down as the database grew.
+last_run AS (
+  SELECT x.store_id, MAX(pp.run_id) AS run_id
+  FROM price_point pp JOIN listing x ON x.id = pp.listing_id GROUP BY x.store_id
+),
 current AS (
   SELECT p.listing_id FROM price_point p JOIN listing l ON l.id = p.listing_id
-  WHERE p.run_id = (SELECT MAX(pp.run_id) FROM price_point pp JOIN listing x ON x.id = pp.listing_id
-                    WHERE x.store_id = l.store_id)
+  JOIN last_run r ON r.store_id = l.store_id AND r.run_id = p.run_id
 )
 SELECT l.store_id,
        COUNT(*)                                                                 AS listings,
