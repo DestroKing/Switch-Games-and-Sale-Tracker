@@ -124,6 +124,8 @@ straight to your settings — there is nothing to copy or paste.
 
 Plain clicks still work normally, so you can dismiss cookie banners first.
 
+To find out *why* a store fails, see [`docs/troubleshooting.md`](docs/troubleshooting.md).
+
 ---
 
 ## Where your data lives
@@ -154,10 +156,7 @@ inside it. It is around 900 MB.
 
 Then run `switch-tracker.exe` from inside that folder.
 
-`CHECK.bat` runs the built app's self-check and keeps the window open, which is
-the quickest way to confirm a build works. (Double-clicking the exe directly
-will flash and vanish if it exits — that is Windows closing the console, not a
-crash.)
+To confirm a build works, double-click `CHECK.bat` ([`docs/troubleshooting.md`](docs/troubleshooting.md) §4).
 
 The app is unsigned, so Windows SmartScreen will warn on first run.
 
@@ -186,100 +185,26 @@ consoles — even on stores that file them all under one category.
 
 ```bash
 uv sync                              # dependencies
-uv run pytest                        # 494 tests
+uv run pytest                        # 695 tests
 uv run ruff check src tests scripts  # lint
 uv run mypy                          # types (strict)
 uv run python -m switch_tracker spike   # packaging self-check
 ```
 
-`scripts/check_stores.py` is the pre-release sweep, and the one to reach for
-first. It runs **any** store of **any** kind through the registry the collector
-itself uses, for one store or for all of them, and judges the result rather
-than just counting it — flagging pages that repeat, prices at zero or 100x,
-a currency that disagrees with the store config, and catalogues where nothing
-is in stock.
-
-```bash
-uv run python scripts/check_stores.py                   # every enabled store
-uv run python scripts/check_stores.py hgworld flipkart  # just these two
-uv run python scripts/check_stores.py flipkart --pages 3 --headful
-uv run python scripts/check_stores.py hgworld --probe   # isolate an HTTP 403
-```
-
-`--probe` is for a feed store that answers 403/401: it re-asks the host one
-variable at a time — with and without the category filter, at `per_page` 100
-and 10, by term id and by slug — and then repeats the first known-good request,
-which is what distinguishes a blocked parameter from plain rate limiting.
-
-`scripts/scrape_check.py <store_id>` runs one store's **real** collection path
-against the live site and prints what came back — which engine launched, which
-pager was used, how many listings survived. It drives the shipped adapter and
-the shipped profile on purpose: a check that carries its own private copy of a
-store profile can pass while the collector fails on the same page.
-
-```bash
-uv run python scripts/scrape_check.py playasia --pages 3
-uv run python scripts/scrape_check.py e2zstore --headful
-```
-
-`scripts/category_check.py` does the same job for the feed-based stores: it asks
-each store's own API how many products are really in each configured category,
-so a wrong slug is a visible number rather than a silent zero folded into a total.
-
-`scripts/diagnose_extraction.py <store_id>` answers "why did this store extract
-12 rows when the page shows 24?" — it reports which of the four extraction
-layers won, how many rows each one offers, where the survivors are lost, and
-whether page 2 actually differs from page 1. It prints everything to the
-console rather than dumping a file, so its output can be pasted somewhere.
-
+Checking that the stores, the collected data and a build really work — every
+command, and what to do when something fails — is in
+**[`docs/troubleshooting.md`](docs/troubleshooting.md)**.
 
 Design documents are in `docs/`:
 
 - **`walkthrough.md`** — start here. Orientation (what runs, where every file lives,
   where your data goes), the tech stack and why each piece was chosen over its
   alternatives, a step-by-step trace of one collection run, then a feature-by-feature
-  tour of the code. Ends with a glossary, a first-change exercise and a
-  troubleshooting table. Assumes no prior knowledge of any of the technologies.
+  tour of the code. Ends with a glossary and a first-change exercise. Assumes no
+  prior knowledge of any of the technologies.
+- **`troubleshooting.md`** — validating the stores, the collected data and a
+  build, and a table of symptoms with their fixes.
 - `python-rewrite-plan.md` — the original spec
 - `python-rewrite-hld.md` — architecture, and the options that lost
 - `python-rewrite-lld.md` — the build plan
 
----
-
-## Validating all stores on your own PC
-
-Shops change their sites without warning, and some networks (offices especially)
-block shopping sites outright. To check that every store really works, run
-these from the project folder, on your own network, in a prompt where `uv` works
-(`START.bat` sets that up the first time). None of them writes to your price
-history.
-
-```bat
-:: 1. The main check: every enabled store, one by one. Judges the result, not
-::    just the count -- repeated pages, prices at zero or 100x, a wrong
-::    currency, everything out of stock.
-uv run python scripts\check_stores.py
-
-:: 2. Include stores that are switched off, to spot one disabled by mistake
-uv run python scripts\check_stores.py --include-disabled
-
-:: 3. One kind of store at a time
-uv run python scripts\check_stores.py --kind BROWSER
-uv run python scripts\check_stores.py --kind WOOCOMMERCE
-```
-
-When one fails, narrow it down:
-
-```bat
-uv run python scripts\check_stores.py flipkart --headful         :: watch it in a visible browser
-uv run python scripts\check_stores.py hgworld --probe            :: why a store answers 403 / refuses
-uv run python scripts\scrape_check.py playasia --diagnose-pager  :: why paging stops early
-uv run python scripts\diagnose_extraction.py gamepookie          :: why N rows became M
-uv run python scripts\category_check.py                          :: are the category settings right?
-```
-
-A full sweep takes a while: it waits between requests to the same shop on purpose.
-
-Afterwards, press **Check stores** once in the dashboard. An older version of it
-switched a store off just because it could not reach it at that moment; the
-current one turns such stores back on as soon as they answer.

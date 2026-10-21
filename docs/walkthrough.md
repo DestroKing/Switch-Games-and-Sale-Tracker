@@ -16,7 +16,7 @@ changed.
 | **new to all of this** | Part 0, then Part 1, then straight through. Roughly two hours. |
 | **a programmer, new to this codebase** | §0.3 and §0.5, then Part 2 *including the trace at its end*, then dip into Part 3. Half an hour. |
 | **here to change one thing** | §0.2, then **Appendix B**, then the one §3.x section about the thing you're changing. |
-| **stuck, right now** | **Appendix C**. |
+| **stuck, right now** | [`troubleshooting.md`](troubleshooting.md). |
 
 Part 1 does not depend on Part 3, every section names the files it is about, and every
 cross-reference looks like §3.4 — so skipping around is safe.
@@ -148,7 +148,7 @@ explained later:
 | A store tile can say "0 listings" **with a reason**, instead of just failing | §3.2 |
 | **Moved since last run** stays empty until you have collected twice | §3.11 |
 
-If something goes wrong, jump to **Appendix C — when it doesn't work**.
+If something goes wrong, jump to [`troubleshooting.md`](troubleshooting.md).
 
 ## 0.3 Where the code lives
 
@@ -219,9 +219,10 @@ And outside `src/switch_tracker/`:
 
 | Path | What it is |
 |---|---|
-| `tests/` | 692 tests. `conftest.py` holds the shared setup ("fixtures", §1.12). |
-| `scripts/check_stores.py` | **The pre-release sweep.** Run any store, of any kind, against the **live** site and get a verdict, not just a count (Appendix B.2). |
-| `scripts/scrape_check.py`, `category_check.py`, `diagnose_extraction.py` | Narrower live-site tools: one browser store's walk, feed stores' category slugs, and "why did N rows become M" (Appendix B.2). |
+| `tests/` | 695 tests. `conftest.py` holds the shared setup ("fixtures", §1.12). |
+| `scripts/check_stores.py` | **The pre-release sweep.** Run any store, of any kind, against the **live** site and get a verdict, not just a count ([troubleshooting.md](troubleshooting.md) §2). |
+| `scripts/scrape_check.py`, `category_check.py`, `diagnose_extraction.py` | Narrower live-site tools: one browser store's walk, feed stores' category slugs, and "why did N rows become M" ([troubleshooting.md](troubleshooting.md) §2). |
+| `scripts/check_data.py` | Read-only check of what a collection **saved**: cut titles, bad prices, missing rupee figures, ungrouped listings, games compared across stores ([troubleshooting.md](troubleshooting.md) §3). |
 | `packaging/`, `switch_tracker.spec` | Turning it into a Windows `.exe` (§3.17). |
 | `START.bat`, `setup.ps1`, `run.ps1` | What a Windows user double-clicks. |
 | `docs/` | This file, plus the plan/HLD/LLD written before the code. |
@@ -1018,7 +1019,7 @@ missed. That is acceptable here because HG World's own titles are verbose, and a
 is recoverable where a poisoned price series is not. Both properties are pinned by tests
 (`test_stores.py` for the missing hint, `test_adapter_woocommerce.py` for the unscoped
 fetch), so restoring either one fails loudly. The full investigation is in the
-store's comment in `stores.py`, and `scripts/check_stores.py --probe` reproduces it (B.2).
+store's comment in `stores.py`, and `scripts/check_stores.py --probe` reproduces it ([troubleshooting.md](troubleshooting.md) §2).
 
 ## 3.2 Three ways to read a shop
 
@@ -1559,7 +1560,7 @@ Three decisions are built into it:
   and "has a previous price" become `WHERE` conditions, applied **before** `COUNT` and
   `LIMIT`. If they were applied after, page 2 would start in the wrong place and the
   total would count rows you can't reach. So `total` drops when you pick that sort. That
-  is intended, and noted in Appendix C because it reads like a bug the first time.
+  is intended, and noted in [troubleshooting.md](troubleshooting.md) because it reads like a bug the first time.
 - **NULLs sort last in both directions.** SQLite puts NULL first in ascending order,
   which would open "biggest drops first" with a screen of listings that never moved.
   `ORDER BY change_pct IS NULL, change_pct …` keeps them at the bottom either way.
@@ -2681,7 +2682,7 @@ land here from anywhere.
 Nothing is "done" until all four are green. Run them from the project root.
 
 ```bash
-uv run pytest                           # 692 tests, about four minutes
+uv run pytest                           # 695 tests, about four minutes
 uv run ruff check src tests scripts     # lint
 uv run ruff format src tests scripts    # formatting (rewrites files)
 uv run mypy                             # types, strict mode
@@ -2693,64 +2694,11 @@ gets a throwaway one from a fixture (§1.12). It is safe to run constantly.
 
 ## B.2 Testing against a real shop
 
-Unit tests prove the logic. They cannot prove a shop still looks the way it did last
-month — only the live site can.
-
-**Start with `check_stores.py`.** It is the pre-release sweep. It runs **any** store of
-**any** kind through the same registry, store list (with local corrections applied) and
-profiles the collector uses, and it *judges* the result instead of just counting it. It
-flags pages that repeat, prices at zero or 100×, a currency that disagrees with the store
-config, and catalogues where nothing is in stock. Each check exists because that failure
-has shipped here at least once.
-
-```bash
-uv run python scripts/check_stores.py                    # every enabled store
-uv run python scripts/check_stores.py hgworld flipkart   # just these
-uv run python scripts/check_stores.py --kind BROWSER     # one adapter kind
-uv run python scripts/check_stores.py flipkart --pages 3 --headful
-uv run python scripts/check_stores.py hgworld --probe    # isolate an HTTP 403
-```
-
-`--probe` is for a feed store that answers 403 or 401. It re-asks the host one variable
-at a time: with and without the category filter, at `per_page` 100 and 10, by term id and
-by slug. Then it **repeats the first request that worked**. That last step tells the two
-causes apart. If the known-good baseline now fails too, the trigger is request volume and
-no parameter change will help. If it still passes, a specific parameter is being blocked.
-This is how the HG World diagnosis in §3.1 was made.
-
-The narrower tools answer more specific questions:
-
-```bash
-uv run python scripts/scrape_check.py playasia --pages 3
-uv run python scripts/scrape_check.py e2zstore --headful    # watch it happen
-uv run python scripts/category_check.py                     # feed stores' category slugs
-uv run python scripts/diagnose_extraction.py gamepookie     # why did N rows become M?
-```
-
-All of them, `check_stores` included, drive the **shipped** adapter and the **shipped**
-profile on purpose. A checker
-carrying its own private copy of a store profile can pass while the collector fails on
-the same page.
-
-They answer different questions. `scrape_check` walks a browser store the way a real run
-does. `category_check` asks a feed store's own API for a real product count per configured
-slug — the number that otherwise vanishes into `woocommerce.py`'s per-category total, so a
-wrong slug in three contributes zero to both sides of the completeness check and reports
-nothing. `diagnose_extraction` explains a *gap*: which of the four layers (§3.6) actually
-won, how many rows each one offers, where the survivors are lost, and whether page 2
-differs from page 1 at all.
-
-That last one exists because of a real trap. `extract()` returns the moment JSON-LD
-succeeds, so a page carrying five products in a schema.org block and twenty-four in the
-DOM yields **five** — and nothing anywhere says the CSS selectors were never consulted.
-It also prints only to the console, never to a file, because the machine that can reach a
-store is often not the machine that can share a dump.
-
-Prefer a disposable database while experimenting:
-
-```bash
-TRACKER_DATA_DIR=/tmp/tracker-scratch uv run python scripts/scrape_check.py nistore
-```
+Unit tests prove the logic; only the live site proves a shop still looks the way it did
+last month. The live-site tools (`check_stores.py` and the narrower `scrape_check.py`,
+`diagnose_extraction.py`, `category_check.py`), and `check_data.py` for what a collection
+saved, are documented with every option in
+[`troubleshooting.md` §2–3](troubleshooting.md#2-validating-the-stores).
 
 ## B.3 Where the tests for X live
 
@@ -2878,31 +2826,4 @@ writes to `stores.local.json` — and note that your guess in `stores.py` was ne
 
 # Appendix C — When it doesn't work
 
-| Symptom | What's actually happening | Fix |
-|---|---|---|
-| Dashboard opens, everything empty | The app auto-collects **once**, only to bootstrap an empty database (§3.15). After that it never starts a run by itself. | Press **Collect prices**. |
-| **Moved since last run** is always empty | It needs two runs to compare. | Collect again later. |
-| One store tile says 0 listings | Expected failure mode, and the reason is on the tile. Screenshots and HTML land in `<data dir>/diagnostics/`. | `scripts/scrape_check.py <store>`, then **Fix a broken store** (§3.16). |
-| **CeX India** says 0 listings | Known and expected, not a regression. Its four selector lists ship as **unverified guesses**: CeX is a client-rendered Nuxt/Algolia app whose real DOM has never been captured, so the profile was written to fail loudly into a diagnostics dump rather than to be trusted. | `scripts/scrape_check.py cex_in --headful`, read `<data dir>/diagnostics/cex_in.html`, then **Fix a broken store** (§3.16). |
-| The `.exe` shows a bug this document says is fixed | The packaged build is older than the source. Several reports (HG World's *"no parseable JSON"*, Flipkart continuing past a failed page without the retry line, `+0.0` in the Change column) turned out to be fixed in the repo and reproducible only in a stale build. | Run `scripts/check_stores.py <store>` from source first. If that passes, rebuild with `BUILD-EXE.bat`. |
-| **HG World** fails with `HTTP 403` | Cloudflare blocks the Store API's `category=` filter on that host (§3.1). If it says *"no parseable JSON"* instead, a stale correction is making it use the Shopify adapter (§3.16). | Make sure `stores.py` has no `collections` for it. Press **Reset corrections**, then **Check stores**. `check_stores.py hgworld --probe` shows exactly which requests are refused. |
-| **Flipkart** logs `ERR_TOO_MANY_REDIRECTS` on a page | A session-level self-redirect, not a bad URL (§3.7). The page is retried after a pause, skipped if that fails too, and retried once more after the walk. | Usually nothing to do. If the store ends **Partial**, read `diagnostics/flipkart-p<N>-navigation.json` for the hop-by-hop trace. |
-| Sorting by **Change** shows far fewer listings | Intended. That sort only lists real movers: listings with a previous price that moved by more than 1% (§3.11). | Sort by anything else to see everything again. |
-| A price changed a little and the Change column says `—` | Moves of 1% or less are treated as noise and not reported, in the column or the movers panel (§3.11). | Nothing. `MIN_CHANGE_PCT` in `web/queries.py` is the knob. |
-| One game shows as two rows in **Games** | A missed merge: the two shops spell it differently enough that the keys differ ("The Legend of Zelda: …" vs "Zelda: …"). Deliberate — the matcher errs towards splitting (§3.18). | Add `{"one title": "the other title"}` to `matches.local.json` in the data dir, then run `switch-tracker match`. |
-| **Games** is empty but **Every listing** is not | The listings were never grouped: nothing has run the matcher since they were collected. | Restart the dashboard (it groups once on startup), or run `switch-tracker match`. |
-| A watched game is under target but not marked **at target** | Its cheapest offer is out of stock. A hit needs an offer you can actually buy (§4.6). | Nothing. Expand the game's row to see the out-of-stock offer. |
-| The daily collection didn't run | It catches up the next time the PC is on, but skips if a collection already succeeded since that day's scheduled time (§3.19). Or the stores were never checked, so `collect-now` exits with code 2. A task registered *before* the catch-up change has no catch-up; run `schedule --at` again to replace it. | In *Task Scheduler*, find "switch-tracker daily collection" and read its *Last Run Result* (`0x2` means not checked yet). Press **Check stores** once if needed. |
-| `This dashboard only answers to its own address` or `Changes can only be made from the dashboard page itself` (403) | The cross-site guard (§1.4) refused the request. You opened the dashboard under an address it doesn't recognise, or something other than the dashboard page sent the change. | Open it as `http://127.0.0.1:<port>` or `http://localhost:<port>`, with the port the console printed. |
-| `A run is already going` (409) | One run at a time, enforced in the database, not the UI (§3.12). | Wait for it, or restart the app — a dead worker's run is reaped on startup. |
-| `'collect' is started by the dashboard, not run directly` | You ran a worker by hand without `--run-id`. Workers report into an existing run. | Use the dashboard, or `scripts/scrape_check.py` for one store. |
-| `Address already in use` on startup | Something else has port 4173 — often an earlier copy still running. | `PORT=4174 uv run python -m switch_tracker`, or close the other copy. |
-| `Executable doesn't exist … playwright install` | The browser engine was never downloaded. It is a ~400 MB download, not a Python package (§1.8). | `uv run playwright install chromium` |
-| `ModuleNotFoundError` | Packages not installed, or you ran `python` instead of `uv run python`. | `uv sync`, then prefix commands with `uv run`. |
-| A warning about OneDrive | Real hazard, not pedantry: the sync client locks the database mid-write and can corrupt it. | Move the folder, or set `TRACKER_DATA_DIR` to a local path. |
-| You deleted `tracker.db` and it still behaves oddly | The database is **three** files (§1.6). | Delete `tracker.db-wal` and `tracker.db-shm` too. |
-| Something is stuck and you want a clean slate | Nothing in the project folder holds state (§0.4). | Delete the data directory, or just use a fresh `TRACKER_DATA_DIR`. |
-
-Still stuck? `uv run python -m switch_tracker spike` checks the four things that break
-only after packaging — certificates, bundled templates, the web server, and the
-Playwright driver — and prints where it stopped.
+Moved to [`troubleshooting.md`](troubleshooting.md): every symptom with its cause and fix, plus every command that validates the stores, the collected data and a build.
