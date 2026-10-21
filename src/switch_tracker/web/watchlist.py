@@ -18,6 +18,7 @@ from __future__ import annotations
 import json
 import os
 import threading
+import time
 from typing import Any
 
 from switch_tracker import paths
@@ -79,7 +80,9 @@ def _write(items: list[dict[str, Any]]) -> None:
             # read() saw this file as empty -- broken JSON, or valid JSON that is
             # not a list. Writing now would replace a hand-edited file with one
             # entry, so set it aside rather than over it.
-            path.replace(path.with_suffix(".json.bad"))
+            # Uniquely named (ns clock; sorts oldest first), so a second bad
+            # edit never overwrites the first.
+            path.replace(path.with_suffix(f".json.bad-{time.time_ns()}"))
     # Write-then-rename, so a reader never sees a truncated file: os.replace is
     # atomic on the same volume, where write_text empties the file first.
     temp = path.with_suffix(".json.tmp")
@@ -87,9 +90,20 @@ def _write(items: list[dict[str, Any]]) -> None:
     os.replace(temp, path)
 
 
+#: Each watched game costs the dashboard one query per page load, so an
+#: unbounded list is a way to make it crawl. Far above any real watchlist.
+MAX_ITEMS = 500
+
+
+class WatchlistFull(Exception):
+    """Adding one more would exceed MAX_ITEMS."""
+
+
 def upsert(game: str, platform: str, target: float | None) -> list[dict[str, Any]]:
     with _LOCK:
         items = [i for i in read() if (i["game"], i["platform"]) != (game, platform)]
+        if len(items) >= MAX_ITEMS:
+            raise WatchlistFull(f"The watchlist is limited to {MAX_ITEMS} games.")
         items.append({"game": game, "platform": platform, "target": target})
         _write(items)
         return items

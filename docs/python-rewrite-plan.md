@@ -270,7 +270,8 @@ triggered, region/SW2/pre-owned/out-of-stock tags inline on listing rows.
 
 ### CLI / menu
 
-A single interactive menu (`bun run src/menu.ts`, also the default with no
+A single interactive menu (`bun run src/menu.ts` -- that file now lives at
+`legacy/typescript/src/menu.ts` -- also the default with no
 arguments) that reads the database before drawing itself, so the
 recommended next action reflects what's actually happened rather than a
 fixed tutorial order (the common mistake it exists to prevent: collecting

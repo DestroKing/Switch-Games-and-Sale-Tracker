@@ -27,11 +27,25 @@ class Settings:
     headful: bool = False
 
 
-def _as_int(value: object, fallback: int) -> int:
+def _as_port(value: object, fallback: int) -> int:
+    """A usable TCP port, or the fallback.
+
+    Validated rather than just converted: port 0 binds a RANDOM port while the
+    dashboard prints ":0", and the cross-site guard builds its allowed Host
+    and Origin from this number -- so a bad value would lock the real page out
+    of its own dashboard while looking configured.
+    """
     try:
-        return int(str(value))
+        port = int(str(value))
     except (TypeError, ValueError):
         return fallback
+    return port if 1 <= port <= 65535 else fallback
+
+
+def _as_bool(value: object, fallback: bool) -> bool:
+    """Only a real JSON boolean counts. ``bool("false")`` is True, so a
+    hand-typed ``"headful": "false"`` used to switch the setting ON."""
+    return value if isinstance(value, bool) else fallback
 
 
 def load() -> Settings:
@@ -45,22 +59,7 @@ def load() -> Settings:
             data = {}
 
     return Settings(
-        port=_as_int(os.environ.get("PORT") or data.get("port"), 4173),
-        collect_on_launch=bool(data.get("collect_on_launch", True)),
-        headful=os.environ.get("HEADFUL") == "1" or bool(data.get("headful", False)),
-    )
-
-
-def save(settings: Settings) -> None:
-    (paths.data_dir() / _FILE).write_text(
-        json.dumps(
-            {
-                "port": settings.port,
-                "collect_on_launch": settings.collect_on_launch,
-                "headful": settings.headful,
-            },
-            indent=2,
-        )
-        + "\n",
-        encoding="utf-8",
+        port=_as_port(os.environ.get("PORT") or data.get("port"), 4173),
+        collect_on_launch=_as_bool(data.get("collect_on_launch"), True),
+        headful=os.environ.get("HEADFUL") == "1" or _as_bool(data.get("headful"), False),
     )

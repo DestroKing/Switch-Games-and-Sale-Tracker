@@ -11,7 +11,13 @@ check-stores.log
 # --- build output
 dist/
 build/
-node_modules/
+
+# --- personal editor settings
+.idea/
+
+# --- correction/watchlist files belong in the DATA dir, never the repo. A stray
+# --- copy here is never read by the app and only misleads diagnosis.
+/*.local.json
 
 # --- python
 .venv/

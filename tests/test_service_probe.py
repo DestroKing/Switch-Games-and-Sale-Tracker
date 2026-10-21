@@ -134,7 +134,7 @@ class TestApplyingCorrections:
     async def test_never_writes_a_kind_that_has_no_adapter(self, service, server, data_dir) -> None:
         """The bug that converted working stores into skipped ones.
 
-        The original concluded JSON_API from the mere presence of ld+json on a
+        An earlier version concluded JSON_API from the mere presence of ld+json on a
         homepage -- which nearly every shop publishes -- and there was no
         JSON_API adapter, so collect silently skipped those stores.
         """
@@ -150,11 +150,22 @@ class TestApplyingCorrections:
         assert "kind" not in written
         assert written.get("enabled") is False
 
-    async def test_disables_an_unreachable_store_with_a_readable_reason(self, service, data_dir) -> None:
-        await service.run([store_at("http://127.0.0.1:9", id="dead")])
-        written = overrides.read()["dead"]
-        assert written["enabled"] is False
-        assert "unreachable" in written["note"].lower()
+    async def test_an_unreachable_store_is_left_enabled(self, service, data_dir) -> None:
+        """A failed connection is about the network, not the store: one probe on a
+        filtered network used to disable 10 of 23 shops that were working fine."""
+        report = await service.run([store_at("http://127.0.0.1:9", id="blip")])
+        assert "blip" not in overrides.read()  # nothing written
+        assert any("could not be reached" in line for line in report.lines)
+
+    async def test_a_store_an_earlier_probe_disabled_as_unreachable_is_re_enabled(
+        self, service, server, data_dir
+    ) -> None:
+        base, recorder = server
+        recorder.plan(SHOPIFY_PATH, ok_json('{"products":[]}'))
+        stale = store_at(base, id="back", kind=AdapterKind.SHOPIFY, enabled=False)
+        stale = replace(stale, note="unreachable when probed")
+        await service.run([stale])
+        assert overrides.read()["back"]["enabled"] is True
 
     async def test_leaves_a_correct_store_alone(self, service, server, data_dir) -> None:
         base, recorder = server

@@ -10,6 +10,7 @@ run.  Everywhere else, "did we get everything" is inference.
 
 from __future__ import annotations
 
+import html
 import json
 from typing import Any
 from urllib.parse import quote
@@ -63,9 +64,9 @@ class WooAdapter:
             suffix = f"&category={quote(category)}" if category else ""
             # Read ONCE per category query, not once per page.
             #
-            # woocommerce.ts accumulates this inside the page loop, so a
-            # 213-item category over three pages reports 639 expected and
-            # labels a complete fetch "partial" on every run. The header
+            # Accumulating this inside the page loop (an earlier bug) made a
+            # 213-item category over three pages report 639 expected and
+            # label a complete fetch "partial" on every run. The header
             # states the total for the QUERY, not for the page.
             category_total: int | None = None
 
@@ -165,8 +166,15 @@ class WooAdapter:
         minor_unit = prices.get("currency_minor_unit")
         price = parsed / (10 ** (minor_unit if isinstance(minor_unit, int) else 2))
 
-        name = str(product.get("name", ""))
-        categories = " ".join(str(c.get("name", "")) for c in (product.get("categories") or []))
+        # The Store API returns names HTML-ENCODED ("Batman: Arkham Trilogy
+        # &#8211; Nintendo Switch", found on a live run). Stored raw, the
+        # entity reaches the dashboard as literal text and the matcher reads
+        # "8211" as a word, splitting the game from every other shop's copy.
+        # Category names come back the same way and feed classification.
+        name = html.unescape(str(product.get("name", "")))
+        categories = " ".join(
+            html.unescape(str(c.get("name", ""))) for c in (product.get("categories") or [])
+        )
         context = f"{name} {categories}"
 
         result = classify(context, store.platform_hint)

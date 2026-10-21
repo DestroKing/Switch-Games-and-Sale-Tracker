@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import sqlite3
 from collections.abc import Mapping, Sequence
+from urllib.parse import urlsplit
 
 from switch_tracker.adapters.base import Adapter
 from switch_tracker.core import matcher
@@ -18,6 +19,11 @@ from switch_tracker.core.db import now_iso
 from switch_tracker.core.models import AdapterKind, Failed, Ok, Partial, RawListing, StoreConfig
 from switch_tracker.events.writer import EventWriter
 from switch_tracker.fx.rates import FxService
+
+
+def _is_web_url(url: str) -> bool:
+    """Only an http(s) link may become an href on the dashboard (see _persist)."""
+    return urlsplit(url).scheme.lower() in ("http", "https")
 
 
 def select_stores(stores: Sequence[StoreConfig], only: tuple[str, ...]) -> list[StoreConfig]:
@@ -210,6 +216,11 @@ class CollectService:
             )
             return
 
+        unlinked = sum(1 for item in outcome.listings if not _is_web_url(item.url))
+        if unlinked:
+            # _persist drops these; say so, or a store whose links all broke
+            # would quietly report fewer listings with nothing to explain why.
+            events.warning(f"{store.id}: skipped {unlinked} listing(s) with no http(s) link")
         saved = self._persist(run_id, store, outcome.listings)
         status = "ok" if isinstance(outcome, Ok) else "partial"
         detail = outcome.reason if isinstance(outcome, Partial) else None
@@ -242,6 +253,14 @@ class CollectService:
         self._conn.execute("BEGIN")
         try:
             for item in listings:
+                # Only web links get stored. Every adapter's output funnels
+                # through here, and a store's own data decides this URL: a
+                # WooCommerce `permalink` is saved as received, and urljoin()
+                # keeps a `javascript:` scheme intact. Rendered as an href on
+                # the dashboard's origin, that is script running past every
+                # other protection the dashboard has.
+                if not _is_web_url(item.url):
+                    continue
                 row = self._conn.execute(
                     "INSERT INTO listing (store_id, sku, url, raw_title, platform, region, "
                     "condition, image_url, first_seen, last_seen) "

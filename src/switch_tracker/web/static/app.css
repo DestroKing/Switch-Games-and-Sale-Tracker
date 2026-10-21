@@ -688,6 +688,8 @@ tr.is-deal td:first-child { box-shadow: inset 3px 0 0 var(--drop); }
 button.expand {
   background: none; border-color: transparent; color: var(--ink-3);
   padding: 2px var(--s1); font-family: var(--mono);
+  /* 24x24 is WCAG 2.2's minimum target (2.5.8); the glyph alone was 17x20. */
+  min-width: 24px; min-height: 24px;
 }
 button.expand::before { content: "▸"; }
 button.expand[aria-expanded="true"]::before { content: "▾"; }
@@ -709,6 +711,9 @@ table.offers th { position: static; }
 .spark circle { fill: var(--info); }
 
 /* ============================================================== watchlist */
+
+.watch-note { font-size: var(--t-sm); color: var(--ink-2); }
+.watch-note .linkish { margin-left: var(--s1); text-decoration: underline; }
 
 #watch input.target { width: 8.5em; text-align: right; font-family: var(--mono); padding: var(--s1) var(--s2); }
 #watch .tablewrap { max-height: none; }
@@ -756,5 +761,8 @@ button.watch[aria-pressed="true"] { color: var(--warn); }
 }
 @media (max-width: 560px) {
   .strip { grid-template-columns: 1fr; }
+  /* The popover is wider than the screen here (measured 446px at 390px), so
+     anchor it to the viewport edges instead of its button. */
+  details.filter-group .pop { position: fixed; left: var(--s3); right: var(--s3); width: auto; }
   .toolbar input[type="search"] { flex-basis: 100%; }
 }

@@ -6,7 +6,6 @@
 <meta name="color-scheme" content="dark">
 <title>Switch cartridge prices</title>
 <link rel="stylesheet" href="/static/app.css?v={{ asset_version }}">
-<script src="/static/htmx.min.js" defer></script>
 </head>
 <body>
 <a class="skip-link" href="#listingsHead">Skip to listings</a>
@@ -70,6 +69,7 @@
       <option value="">Fix a broken store…</option>
       {% for store in fixable %}<option value="{{ store.id }}">{{ store.name }}</option>{% endfor %}
     </select>
+    <button id="fixOpen" class="js-run-control" type="button" disabled>Open</button>
     {% endif %}
     <span class="divider" aria-hidden="true"></span>
     <button class="danger" data-action="reset-corrections"
@@ -120,7 +120,11 @@
   <section class="section" aria-labelledby="watchHead">
     <div class="section-head">
       <h2 id="watchHead">Watchlist</h2>
-      <span class="sub" id="watchSub" aria-live="polite"></span>
+      <span class="sub" id="watchSub"></span>
+      <!-- Feedback for the last watchlist action ("Saved", "Undo"). Its own
+           live region, so a confirmation is announced without re-reading the
+           count beside it. -->
+      <span class="watch-note" id="watchNote" role="status" aria-live="polite"></span>
     </div>
     <div id="watch"></div>
   </section>

@@ -386,9 +386,8 @@ async def _alternates(store: StoreConfig, slug: str, cat: object) -> None:
 def history(store_id: str, limit: int) -> None:
     """Where this store's settings REALLY come from, and every outcome on record.
 
-    Written because a diagnosis went wrong on exactly this point. The repo also
-    contains a ``stores.local.json`` at its root, left over from the TypeScript
-    version's bare relative path -- and the application never reads it.
+    Written because a diagnosis went wrong on exactly this point: a stray
+    ``stores.local.json`` in the repo root, which the application never reads.
     :func:`paths.overrides_path` resolves under the DATA directory
     (``%LOCALAPPDATA%/switch-tracker`` on Windows), so reading the checked-in
     copy and reasoning about it gives a confidently wrong answer about which

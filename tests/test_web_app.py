@@ -20,6 +20,9 @@ from switch_tracker.web import deps
 from switch_tracker.web.app import create_app
 from switch_tracker.web.runs import PidLock, RunLauncher
 
+PAGE_HOST = "127.0.0.1:4173"
+PAGE_ORIGIN = f"http://{PAGE_HOST}"
+
 
 @pytest.fixture
 def spawned() -> list[list[str]]:
@@ -52,11 +55,13 @@ def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, spawned) -> Iterator
 
     launcher = RunLauncher(conn, PidLock(tmp_path / "run.lock"), spawn=fake_spawn)
 
-    app = create_app()
+    app = create_app(4173)
     app.dependency_overrides[deps.get_conn] = lambda: conn
     app.dependency_overrides[deps.get_launcher] = lambda: launcher
 
-    with TestClient(app) as test_client:
+    # Exactly what the real dashboard page sends: its own Host, and its own
+    # Origin on every request. No switch turns the guard off for tests.
+    with TestClient(app, base_url=f"http://{PAGE_HOST}", headers={"Origin": PAGE_ORIGIN}) as test_client:
         yield test_client
 
     deps.reset()
@@ -78,12 +83,16 @@ class TestDashboardPage:
     def test_offers_the_broken_store_picker(self, client: TestClient) -> None:
         assert 'id="fixStore"' in client.get("/").text
 
-    def test_serves_htmx_from_disk_not_a_cdn(self, client: TestClient) -> None:
-        """An offline exe pointing at a CDN loses all interactivity, silently."""
+    def test_serves_its_script_from_disk_not_a_cdn(self, client: TestClient) -> None:
+        """An offline exe pointing at a CDN loses all interactivity, silently.
+
+        (Was a check on a vendored htmx.min.js, removed: loaded on every page,
+        used by nothing. app.js is now the only script, and the rule is the same.)
+        """
         body = client.get("/").text
-        assert "/static/htmx.min.js" in body
-        assert "cdn." not in body and "unpkg" not in body
-        assert client.get("/static/htmx.min.js").status_code == 200
+        assert "/static/app.js" in body
+        assert "cdn." not in body and "unpkg" not in body and "://" not in body.split("<body>")[0]
+        assert client.get("/static/app.js").status_code == 200
 
 
 class TestDataEndpoints:
@@ -106,6 +115,124 @@ class TestDataEndpoints:
 
     def test_games_works_on_an_empty_database(self, client: TestClient) -> None:
         assert client.get("/api/games?sort=offers&dir=desc").json()["total"] == 0
+
+
+class TestCrossSiteGuard:
+    """Any page the user visits can make the browser POST here, and a rebound
+    hostname can READ here. Both must be refused before anything runs."""
+
+    @pytest.mark.parametrize(
+        "origin",
+        [
+            "https://evil.example",
+            "null",
+            "",
+            "http://127.0.0.1:9999",  # wrong port
+            "https://127.0.0.1:4173",  # wrong scheme
+            "http://127.0.0.1:4173.evil.com",  # suffix trick
+            "http://127.0.0.1:4173/",  # not an exact origin
+            "http://localhost:4173",  # valid host, but not THIS request's host
+        ],
+    )
+    def test_a_foreign_origin_cannot_start_a_run(self, client: TestClient, spawned, origin: str) -> None:
+        response = client.post("/actions/collect", headers={"Origin": origin})
+        assert response.status_code == 403
+        assert spawned == []  # nothing ran
+        assert "error" in response.json()
+
+    def test_a_foreign_origin_cannot_touch_the_watchlist(self, client: TestClient) -> None:
+        item = {"game": "x", "platform": "SWITCH", "target": 1}
+        assert (
+            client.put("/api/watchlist", json=item, headers={"Origin": "https://evil.example"}).status_code
+            == 403
+        )
+        assert not paths.watchlist_path().exists()
+
+    def test_a_cross_site_fetch_is_refused_even_with_a_matching_origin(
+        self, client: TestClient, spawned
+    ) -> None:
+        response = client.post("/actions/collect", headers={"Sec-Fetch-Site": "cross-site"})
+        assert response.status_code == 403 and spawned == []
+
+    def test_the_page_itself_still_works_on_both_addresses(self, client: TestClient, spawned) -> None:
+        assert client.post("/actions/fx").status_code == 200  # 127.0.0.1 + its own Origin
+        response = client.post(
+            "/actions/probe",
+            headers={
+                "Host": "localhost:4173",
+                "Origin": "http://localhost:4173",
+                "Sec-Fetch-Site": "same-origin",
+            },
+        )
+        assert response.status_code != 403
+
+    def test_a_rebound_hostname_cannot_read_the_api(self, client: TestClient) -> None:
+        assert client.get("/api/summary", headers={"Host": "evil.example:4173"}).status_code == 403
+        assert client.get("/", headers={"Host": "evil.example:4173"}).status_code == 403
+
+    def test_a_plain_navigation_with_no_origin_is_fine(self, client: TestClient) -> None:
+        assert client.get("/api/summary", headers={"Origin": ""}).status_code == 200
+
+    def test_a_forged_post_to_an_unknown_path_gets_403_not_404(self, client: TestClient) -> None:
+        assert (
+            client.post("/actions/nonexistent", headers={"Origin": "https://evil.example"}).status_code == 403
+        )
+
+    def test_never_grants_cors(self, client: TestClient) -> None:
+        for response in (client.get("/api/summary"), client.options("/api/summary")):
+            assert "access-control-allow-origin" not in response.headers
+
+    def test_every_state_changing_route_is_guarded(self, client: TestClient, spawned) -> None:
+        """Walks every route, so a route added later is covered by default.
+
+        Via the OpenAPI schema rather than ``app.routes``: this FastAPI nests
+        included routers, so a flat walk of ``app.routes`` sees none of them
+        and the test would pass while checking nothing.
+        """
+        changing = [
+            (method.upper(), path.replace("{store_id}", "nistore"))
+            for path, operations in create_app(4173).openapi()["paths"].items()
+            for method in operations
+            if method.upper() not in {"GET", "HEAD", "OPTIONS"}
+        ]
+        assert len(changing) >= 7  # the 5 actions + watchlist PUT and DELETE
+        for method, path in changing:
+            response = client.request(method, path, headers={"Origin": "https://evil.example"})
+            assert response.status_code == 403, (method, path)
+        assert spawned == []
+
+
+class TestGuardRules:
+    """The decision itself, including the cases a real HTTP client cannot send."""
+
+    hosts = frozenset({"127.0.0.1:4173", "localhost:4173"})
+
+    def test_a_missing_origin_on_a_post_is_refused(self) -> None:
+        from switch_tracker.web.guard import check
+
+        assert check("POST", {"host": "127.0.0.1:4173"}, self.hosts) is not None
+
+    def test_a_missing_or_portless_host_is_refused(self) -> None:
+        from switch_tracker.web.guard import check
+
+        assert check("GET", {}, self.hosts) is not None
+        assert check("GET", {"host": "127.0.0.1"}, self.hosts) is not None
+
+    def test_on_port_80_the_portless_host_a_browser_sends_is_allowed(self) -> None:
+        """Browsers drop the default port, so the page sends Host: 127.0.0.1."""
+        from switch_tracker.web.guard import allowed_hosts, check
+
+        hosts = allowed_hosts(80)
+        assert check("POST", {"host": "127.0.0.1", "origin": "http://127.0.0.1"}, hosts) is None
+        assert check("GET", {"host": "evil.example"}, hosts) is not None
+        # ...and only on 80: elsewhere a portless Host is still refused.
+        assert check("GET", {"host": "127.0.0.1"}, allowed_hosts(4173)) is not None
+
+    def test_host_and_origin_compare_case_insensitively(self) -> None:
+        from switch_tracker.web.guard import check
+
+        headers = {"host": "LOCALHOST:4173", "origin": "http://localhost:4173"}
+        assert check("POST", headers, self.hosts) is None
 
 
 class TestWatchlist:
@@ -146,7 +273,28 @@ class TestWatchlist:
     def test_valid_json_that_is_not_a_list_is_also_set_aside(self, client: TestClient) -> None:
         paths.watchlist_path().write_text('{"hand": "edited"}', encoding="utf-8")
         client.put("/api/watchlist", json={"game": "x", "platform": "SWITCH"})
-        assert "hand" in paths.watchlist_path().with_suffix(".json.bad").read_text(encoding="utf-8")
+        assert "hand" in _set_aside()[0].read_text(encoding="utf-8")
+
+    def test_a_second_bad_edit_never_overwrites_the_first(self, client: TestClient) -> None:
+        for text in ("{first", "{second"):
+            paths.watchlist_path().write_text(text, encoding="utf-8")
+            client.put("/api/watchlist", json={"game": text, "platform": "SWITCH"})
+        assert sorted(p.read_text(encoding="utf-8") for p in _set_aside()) == ["{first", "{second"]
+
+    def test_the_list_is_capped(self, client: TestClient) -> None:
+        from switch_tracker.web import watchlist
+
+        for i in range(watchlist.MAX_ITEMS):
+            watchlist.upsert(f"game {i}", "SWITCH", None)
+        response = client.put("/api/watchlist", json={"game": "one too many", "platform": "SWITCH"})
+        assert response.status_code == 400 and "limited" in response.json()["error"]
+        # Retargeting an EXISTING entry is not an addition, so it still works.
+        assert (
+            client.put(
+                "/api/watchlist", json={"game": "game 0", "platform": "SWITCH", "target": 9}
+            ).status_code
+            == 200
+        )
 
     def test_concurrent_adds_lose_nothing(self, client: TestClient) -> None:
         """Sync endpoints run on a thread pool: unlocked read-modify-write dropped entries."""
@@ -161,9 +309,30 @@ class TestWatchlist:
     def test_a_corrupt_file_is_set_aside_not_overwritten(self, client: TestClient) -> None:
         paths.watchlist_path().write_text("[{hand-edited, broken", encoding="utf-8")
         client.put("/api/watchlist", json={"game": "x", "platform": "SWITCH"})
-        assert (
-            paths.watchlist_path().with_suffix(".json.bad").read_text(encoding="utf-8").startswith("[{hand")
+        assert _set_aside()[0].read_text(encoding="utf-8").startswith("[{hand")
+
+
+def _set_aside() -> list[Path]:
+    """Watchlist files moved aside as unreadable, oldest first."""
+    return sorted(paths.watchlist_path().parent.glob("watchlist.local.json.bad-*"))
+
+
+class TestErrorResponses:
+    def test_a_crash_does_not_leak_its_detail_to_the_page(self, tmp_path: Path) -> None:
+        """Exception text carries local paths; the page gets a generic message."""
+        import asyncio
+
+        from starlette.requests import Request
+
+        from switch_tracker.web.errors import json_error_handler
+
+        secret = r"C:\Users\someone\AppData\Local\switch-tracker\tracker.db"
+        request = Request(
+            {"type": "http", "method": "GET", "path": "/api/x", "headers": [], "query_string": b""}
         )
+        response = asyncio.run(json_error_handler(request, OSError(f"cannot open {secret}")))
+        assert response.status_code == 500
+        assert secret not in response.body.decode() and "OSError" in response.body.decode()
 
 
 class TestActions:

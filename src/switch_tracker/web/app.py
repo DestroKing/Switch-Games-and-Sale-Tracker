@@ -21,6 +21,7 @@ from switch_tracker.config import overrides
 from switch_tracker.core import db
 from switch_tracker.web import deps, queries
 from switch_tracker.web.errors import json_error_handler
+from switch_tracker.web.guard import LocalOnly
 from switch_tracker.web.routers import actions, data, events, pages, watch
 
 
@@ -74,11 +75,15 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     yield
 
 
-def create_app() -> FastAPI:
+def create_app(port: int) -> FastAPI:
+    """``port`` has no default on purpose: the guard's allowed Host and Origin
+    are built from it, and a default that differed from the bound port would
+    lock the real page out while looking configured."""
     # Fail loudly at startup rather than racing quietly under load.
     db.assert_threadsafe()
 
     app = FastAPI(title="switch-tracker", docs_url=None, redoc_url=None, lifespan=_lifespan)
+    app.add_middleware(LocalOnly, port=port)
 
     app.mount("/static", StaticFiles(directory=str(resources.static_dir())), name="static")
     app.include_router(pages.router)
@@ -95,7 +100,7 @@ def serve(collect_on_launch: bool | None = None) -> int:
     import uvicorn
 
     config = settings.load()
-    app = create_app()
+    app = create_app(config.port)
 
     # A database collected before matching existed has listings and no games.
     # Group it once here, so the Games view works now rather than after the

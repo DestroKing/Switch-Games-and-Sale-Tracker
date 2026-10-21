@@ -1,7 +1,7 @@
-"""Port-critical: these encode the TypeScript implementation's OBSERVED behaviour.
+"""These pin the parser's OBSERVED, known-good behaviour.
 
-Every expected value here was read out of src/core/parse.ts, not invented. A
-failure means the port diverged from the system it replaces -- which for a
+Every expected value here was measured, not invented. A failure means the
+parser's behaviour changed -- which for a
 price tracker is silent data corruption, not a visible crash.
 """
 
@@ -52,7 +52,7 @@ class TestParsePrice:
 
     @pytest.mark.parametrize(("raw", "expected"), [("Rs. 4499", 4499.0), ("Rs. 4,499", 4499.0)])
     def test_the_period_in_rs_is_not_a_decimal_point(self, raw: str, expected: float) -> None:
-        """Fixes a defect in parse.ts, which produced 0.4499 and 4.499 here.
+        """Pins the fix for a defect that produced 0.4499 and 4.499 here.
 
         The period in "Rs." is inside its [^\\d.,] allow-list, so it survived
         the strip and was read as a decimal point -- silently, and reachable

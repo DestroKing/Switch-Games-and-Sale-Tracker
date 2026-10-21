@@ -106,8 +106,8 @@ class TestToInr:
     def test_refuses_to_invent_a_conversion_when_no_rate_is_stored(self, conn, client) -> None:
         """The fix.
 
-        rates.ts returns the NATIVE figure with no rate date when no rate
-        exists, so $59.99 is recorded as if it were 59.99 rupees -- silently,
+        Returning the NATIVE figure with no rate date when no rate exists (an
+        earlier behaviour) records $59.99 as if it were 59.99 rupees -- silently,
         and permanently, in a table whose whole purpose is price history.
         Recording no number is correct; recording a wrong one is not.
         """

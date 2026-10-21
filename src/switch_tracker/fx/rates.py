@@ -81,8 +81,8 @@ class FxService:
         """Derive the rupee figure, or decline to.
 
         When no rate is stored this returns (None, None) and the caller writes
-        NULL. rates.ts returns the NATIVE price with no rate date instead, so
-        $59.99 lands in inr_price as though it were 59.99 rupees -- silently,
+        NULL. Returning the NATIVE price with no rate date instead (an earlier
+        behaviour) lands $59.99 in inr_price as though it were 59.99 rupees -- silently,
         in the one table the entire project exists to accumulate. A missing
         number is recoverable; a wrong one is indistinguishable from a real
         price forever after.

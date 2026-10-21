@@ -119,6 +119,25 @@ class TestGames:
             rows = queries.games(shelf, queries.ListingQuery(sort="price", direction=direction))["rows"]
             assert rows[-1]["game"] == "kirby air riders", direction
 
+    def test_a_game_is_named_after_a_new_copy_not_the_cheapest(self, shelf) -> None:
+        """The cheapest offer is often used; the row must not read "- Pre-Owned"."""
+        add_listing(
+            shelf, 7, "amazon", "Kirby Air Riders - Pre-Owned", platform="SWITCH2", condition="PRE_OWNED"
+        )
+        add_price(shelf, 7, 1, 2999, at="2026-01-01T00:00:00Z")
+        matcher.rematch(shelf)
+        kirby = queries.games(shelf, queries.ListingQuery(q="kirby"))["rows"][0]
+        assert (kirby["best_price"], kirby["title"]) == (2999, "Kirby Air Riders")
+
+    def test_a_game_sold_only_used_is_still_named(self, shelf) -> None:
+        add_listing(shelf, 8, "amazon", "Pikmin 1+2 (Pre-Owned)", condition="PRE_OWNED")
+        add_price(shelf, 8, 1, 2499, at="2026-01-01T00:00:00Z")
+        matcher.rematch(shelf)
+        assert (
+            queries.games(shelf, queries.ListingQuery(q="pikmin"))["rows"][0]["title"]
+            == "Pikmin 1+2 (Pre-Owned)"
+        )
+
     def test_sorts_titles_as_displayed_not_by_match_key(self, shelf) -> None:
         """By key, "The Legend of Zelda" files under L. Readers look under T."""
         add_listing(shelf, 5, "nistore", "The Legend of Zelda: Echoes of Wisdom")

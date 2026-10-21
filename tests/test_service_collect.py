@@ -102,6 +102,20 @@ class TestPersistence:
         await service(conn, adapters).run([store("s1")])
         assert conn.execute("SELECT finished_at FROM run").fetchone()["finished_at"] is not None
 
+    async def test_only_web_links_are_ever_stored(self, conn) -> None:
+        """A store's own data sets this URL; a javascript: href is script on the dashboard."""
+        hostile = [
+            replace(listing("X1"), url="javascript:alert(document.domain)"),
+            replace(listing("X2"), url="JavaScript://%0aalert(1)"),
+            replace(listing("X3"), url="data:text/html,<script>alert(1)</script>"),
+        ]
+        adapters = {AdapterKind.SHOPIFY: FakeAdapter(AdapterKind.SHOPIFY, Ok((listing("A"), *hostile)))}
+        await service(conn, adapters).run([store("s1")])
+        assert [r["url"] for r in conn.execute("SELECT url FROM listing")] == ["https://shop.in/p/A"]
+        # ...and the skip is reported, not silent.
+        warnings = [r["detail"] for r in conn.execute("SELECT detail FROM run_event WHERE kind = 'warning'")]
+        assert any("skipped 3 listing(s) with no http(s) link" in (w or "") for w in warnings)
+
     async def test_groups_listings_into_games_at_the_end_of_a_run(self, conn) -> None:
         both = Ok((listing("A", store="s1"), replace(listing("B", store="s2"), title="Game A")))
         adapters = {AdapterKind.SHOPIFY: FakeAdapter(AdapterKind.SHOPIFY, both)}

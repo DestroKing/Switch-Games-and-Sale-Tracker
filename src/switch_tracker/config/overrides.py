@@ -6,9 +6,9 @@ silently corrupts the store list; a separate file keeps the shipped defaults
 intact and makes "what did I change" a one-line diff.
 
 The path comes from :mod:`switch_tracker.paths`, never from a bare relative
-string.  The TypeScript version used ``"stores.local.json"`` unqualified, so
-it resolved against the current working directory -- fine for a CLI started in
-the project folder, wrong for a double-clicked exe.
+string.  An unqualified ``"stores.local.json"`` resolves against the current
+working directory -- fine for a CLI started in the project folder, wrong for a
+double-clicked exe.
 """
 
 from __future__ import annotations
