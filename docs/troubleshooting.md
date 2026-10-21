@@ -130,7 +130,8 @@ link (walkthrough §3.16).
 ## 3. After a collection: checking the data
 
 `check_stores.py` asks "does each shop still scrape?". This asks "is what was saved
-right?":
+right?". `check_stores.py` saves nothing, so run this after the dashboard's **Collect
+prices** (or the daily scheduled run), not after `check_stores.py`:
 
 ```
 uv run python scripts/check_data.py

@@ -49,3 +49,10 @@ def test_exit_code_flags_cut_titles_and_bad_prices(
     monkeypatch.setenv("TRACKER_DATA_DIR", str(tmp_path))  # an empty watchlist, not the real one
     seed(tmp_path / "t.db", title, price)
     assert check_data.main(["--db", str(tmp_path / "t.db")]) == code
+
+
+def test_missing_database_is_reported_not_created(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    missing = tmp_path / "nope.db"
+    assert check_data.main(["--db", str(missing)]) == 1
+    assert not missing.exists()
+    assert str(missing) in capsys.readouterr().out

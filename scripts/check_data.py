@@ -15,11 +15,22 @@ Exit code 1 when something needs looking at, so it can gate a release.
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from pathlib import Path
 
+from switch_tracker import paths
 from switch_tracker.core import db, matcher
 from switch_tracker.web import queries, watchlist
+
+#: The usual cause: this window still has troubleshooting.md section 1's scratch
+#: folder set, so it reads a different database from the dashboard's.
+_WHICH_DB = (
+    "\nIf the dashboard does show prices, this window is pointed elsewhere: close it, or clear"
+    "\nTRACKER_DATA_DIR / TRACKER_DB (Command Prompt: set TRACKER_DATA_DIR=), or pass --db."
+    if os.environ.get("TRACKER_DATA_DIR") or os.environ.get("TRACKER_DB")
+    else ""
+)
 
 # The newest price per listing: what the dashboard shows today.
 _PER_STORE = """
@@ -61,11 +72,23 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--db", type=Path, help="default: the app's own database")
     args = parser.parse_args(argv)
 
-    conn = db.connect(args.db)
+    target = args.db or paths.db_path()
+    print(f"Database: {target}\n")
+    # Read-only: never create a database here; an empty one would only hide the mistake.
+    if not target.exists():
+        print(
+            "No database at that path -- start the dashboard and press Collect prices"
+            " (check_stores.py only tests the shops; it saves nothing)." + _WHICH_DB
+        )
+        return 1
+    conn = db.connect(target)
     db.ensure_schema(conn)
     rows = conn.execute(_PER_STORE).fetchall()
     if not rows:
-        print("No listings yet -- collect first.")
+        print(
+            "No listings in it yet -- press Collect prices in the dashboard first"
+            " (check_stores.py only tests the shops; it saves nothing)." + _WHICH_DB
+        )
         return 1
 
     print(f"{'store':16}{'listings':>9}{'cut':>6}{'bad price':>11}{'no INR':>8}{'ungrouped':>11}")
