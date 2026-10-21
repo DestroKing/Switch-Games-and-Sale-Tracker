@@ -257,9 +257,7 @@ class BrowserAdapter:
                         struck[page_number] = f"{type(exc).__name__}: {exc}"
                         nav_failures += 1
                         if nav_failures >= _MAX_NAV_FAILURES:
-                            problems.append(
-                                f"gave up after {nav_failures} consecutive navigation failures"
-                            )
+                            problems.append(f"gave up after {nav_failures} consecutive navigation failures")
                             break
                         continue
 
@@ -272,9 +270,7 @@ class BrowserAdapter:
                         claimed_total = read_claimed_total(await _body_text(page))
 
                     raw_seen += len(rows)
-                    new_on_page, kept_on_page = self._absorb(
-                        store, profile, rows, listings, seen_skus
-                    )
+                    new_on_page, kept_on_page = self._absorb(store, profile, rows, listings, seen_skus)
 
                     sink.page(store.id, page_number, len(listings))
 
@@ -365,9 +361,7 @@ class BrowserAdapter:
                 # that got everything back leaves `problems` empty, so the
                 # store reports Ok -- which is what actually happened.
                 if struck and recovered:
-                    problems.append(
-                        "second pass recovered p" + ", p".join(str(n) for n in recovered)
-                    )
+                    problems.append("second pass recovered p" + ", p".join(str(n) for n in recovered))
 
                 if out_of_time:
                     break
@@ -488,11 +482,13 @@ class BrowserAdapter:
         def record(response: Response) -> None:
             request = response.request
             if request.is_navigation_request() and request.frame == page.main_frame and len(redirects) < 40:
-                redirects.append({
-                    "url": response.url,
-                    "status": response.status,
-                    "location": response.headers.get("location", ""),
-                })
+                redirects.append(
+                    {
+                        "url": response.url,
+                        "status": response.status,
+                        "location": response.headers.get("location", ""),
+                    }
+                )
 
         page.on("response", record)
         try:
@@ -500,12 +496,18 @@ class BrowserAdapter:
         except Exception as exc:
             with contextlib.suppress(Exception):
                 output = paths.diagnostics_dir() / f"flipkart-p{number}-navigation.json"
-                output.write_text(json.dumps({
-                    "requested_url": url,
-                    "final_url": page.url,
-                    "error": str(exc),
-                    "redirects": redirects,
-                }, indent=2), encoding="utf-8")
+                output.write_text(
+                    json.dumps(
+                        {
+                            "requested_url": url,
+                            "final_url": page.url,
+                            "error": str(exc),
+                            "redirects": redirects,
+                        },
+                        indent=2,
+                    ),
+                    encoding="utf-8",
+                )
             raise
         finally:
             page.remove_listener("response", record)
@@ -576,9 +578,7 @@ class BrowserAdapter:
                 await page.wait_for_timeout(profile.scroll_settle_ms)
         await page.wait_for_timeout(self._render_ms_for(profile))
 
-    def _to_listing(
-        self, store: StoreConfig, profile: StoreProfile, row: Extracted
-    ) -> RawListing | None:
+    def _to_listing(self, store: StoreConfig, profile: StoreProfile, row: Extracted) -> RawListing | None:
         result = classify(row.title, profile.platform_hint or store.platform_hint)
         if result.kind is not ProductKind.GAME or result.platform is Platform.UNKNOWN:
             return None
@@ -646,11 +646,7 @@ def _canonical_url(split: SplitResult, keep_params: tuple[str, ...]) -> str:
     if not keep_params:
         return base
     found = parse_qs(split.query)
-    kept = [
-        (name, found[name][0])
-        for name in keep_params
-        if found.get(name) and found[name][0]
-    ]
+    kept = [(name, found[name][0]) for name in keep_params if found.get(name) and found[name][0]]
     return f"{base}?{urlencode(kept)}" if kept else base
 
 

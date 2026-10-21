@@ -107,9 +107,7 @@ class TestPersistence:
         await service(conn, adapters).run([store("s1")])
         assert conn.execute("SELECT name FROM store WHERE id='s1'").fetchone()["name"] == "S1"
 
-    async def test_a_second_run_appends_history_rather_than_duplicating_the_listing(
-        self, conn
-    ) -> None:
+    async def test_a_second_run_appends_history_rather_than_duplicating_the_listing(self, conn) -> None:
         """The property the entire project exists for.
 
         The same cartridge seen twice must be ONE listing with TWO price
@@ -238,9 +236,7 @@ class TestPools:
             http_concurrency=8,
             browser_concurrency=2,
         )
-        stores = [store(f"h{i}") for i in range(8)] + [
-            store(f"b{i}", AdapterKind.BROWSER) for i in range(6)
-        ]
+        stores = [store(f"h{i}") for i in range(8)] + [store(f"b{i}", AdapterKind.BROWSER) for i in range(6)]
         await svc.run(stores)
         assert browser.peak <= 2
         assert http.peak > 2
@@ -262,9 +258,7 @@ class TestProgressEvents:
     async def test_emits_a_terminal_event_per_store(self, conn) -> None:
         adapters = {AdapterKind.SHOPIFY: FakeAdapter(AdapterKind.SHOPIFY, Ok((listing("A"),)))}
         await service(conn, adapters).run([store("s1")])
-        row = conn.execute(
-            "SELECT status, count FROM run_event WHERE kind='store_finished'"
-        ).fetchone()
+        row = conn.execute("SELECT status, count FROM run_event WHERE kind='store_finished'").fetchone()
         assert (row["status"], row["count"]) == ("ok", 1)
 
 
@@ -348,4 +342,3 @@ class TestBrowserProviderGate:
     def test_the_default_path_is_unchanged(self) -> None:
         stores = [store("shop1"), replace(store("parked", AdapterKind.BROWSER), enabled=False)]
         assert self._needs_browser(stores, ()) is False
-

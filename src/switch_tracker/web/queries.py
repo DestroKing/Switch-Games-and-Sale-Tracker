@@ -105,9 +105,7 @@ def health(conn: sqlite3.Connection) -> dict[str, Any]:
     tracker over time, so its absence is recorded and displayed exactly as
     loudly as an exception would be.
     """
-    run = conn.execute(
-        "SELECT id, started_at, finished_at FROM run ORDER BY id DESC LIMIT 1"
-    ).fetchone()
+    run = conn.execute("SELECT id, started_at, finished_at FROM run ORDER BY id DESC LIMIT 1").fetchone()
     if run is None:
         return {"run": None, "stores": []}
 
@@ -213,16 +211,9 @@ def listings(conn: sqlite3.Connection, query: ListingQuery) -> dict[str, Any]:
         # NULL means there is no previous observation yet. Keep those rows at the
         # bottom in both directions rather than letting SQLite put them first
         # when sorting ascending.
-        order_by = (
-            f"change_pct IS NULL ASC, "
-            f"change_pct {query.sort_direction()}, "
-            f"l.id ASC"
-        )
+        order_by = f"change_pct IS NULL ASC, change_pct {query.sort_direction()}, l.id ASC"
     else:
-        order_by = (
-            f"{sort_column} {query.sort_direction()}, "
-            f"l.id ASC"
-        )
+        order_by = f"{sort_column} {query.sort_direction()}, l.id ASC"
 
     rows = _rows(
         conn.execute(

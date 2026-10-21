@@ -19,9 +19,7 @@ from switch_tracker.events.writer import EventWriter
 from switch_tracker.fx.rates import FxService
 
 
-def select_stores(
-    stores: Sequence[StoreConfig], only: tuple[str, ...]
-) -> list[StoreConfig]:
+def select_stores(stores: Sequence[StoreConfig], only: tuple[str, ...]) -> list[StoreConfig]:
     """Which stores are in scope for a run.
 
     ONE definition, deliberately module-level rather than a method. The worker
@@ -170,30 +168,27 @@ class CollectService:
         if adapter is None:
             self._record(run_id, store.id, "skipped", 0, elapsed_ms(), f"no adapter for {store.kind}")
             events.store_finished(
-                store.id, status="skipped", count=0, duration_ms=elapsed_ms(),
+                store.id,
+                status="skipped",
+                count=0,
+                duration_ms=elapsed_ms(),
                 detail=f"no adapter for {store.kind}",
             )
             return
 
-        deadline = (
-            self.browser_deadline_s if store.kind is AdapterKind.BROWSER else self.http_deadline_s
-        )
+        deadline = self.browser_deadline_s if store.kind is AdapterKind.BROWSER else self.http_deadline_s
 
         try:
             outcome = await asyncio.wait_for(adapter.fetch(store, events), timeout=deadline)
         except TimeoutError:
             reason = f"gave up after {int(deadline)}s ({store.id})"
             self._record(run_id, store.id, "failed", 0, elapsed_ms(), reason)
-            events.store_finished(
-                store.id, status="failed", count=0, duration_ms=elapsed_ms(), detail=reason
-            )
+            events.store_finished(store.id, status="failed", count=0, duration_ms=elapsed_ms(), detail=reason)
             return
         except Exception as exc:  # noqa: BLE001 - an adapter fault is a store fault, not a run fault
             reason = f"{type(exc).__name__}: {exc}"
             self._record(run_id, store.id, "failed", 0, elapsed_ms(), reason)
-            events.store_finished(
-                store.id, status="failed", count=0, duration_ms=elapsed_ms(), detail=reason
-            )
+            events.store_finished(store.id, status="failed", count=0, duration_ms=elapsed_ms(), detail=reason)
             return
 
         if isinstance(outcome, Failed):
@@ -207,9 +202,7 @@ class CollectService:
         status = "ok" if isinstance(outcome, Ok) else "partial"
         detail = outcome.reason if isinstance(outcome, Partial) else None
         self._record(run_id, store.id, status, saved, elapsed_ms(), detail)
-        events.store_finished(
-            store.id, status=status, count=saved, duration_ms=elapsed_ms(), detail=detail
-        )
+        events.store_finished(store.id, status=status, count=saved, duration_ms=elapsed_ms(), detail=detail)
 
     def _sync_store_table(self, stores: Sequence[StoreConfig]) -> None:
         """Config is the source of truth; the table is a projection of it."""
@@ -246,8 +239,16 @@ class CollectService:
                     "region=excluded.region, condition=excluded.condition, "
                     "last_seen=excluded.last_seen RETURNING id",
                     (
-                        store.id, item.sku, item.url, item.title, str(item.platform),
-                        str(item.region), str(item.condition), item.image_url, now, now,
+                        store.id,
+                        item.sku,
+                        item.url,
+                        item.title,
+                        str(item.platform),
+                        str(item.region),
+                        str(item.condition),
+                        item.image_url,
+                        now,
+                        now,
                     ),
                 ).fetchone()
                 if row is None:
@@ -262,8 +263,14 @@ class CollectService:
                     "INSERT INTO price_point (listing_id, run_id, captured_at, native_currency, "
                     "native_price, inr_price, fx_rate_date, in_stock) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                     (
-                        row["id"], run_id, now, item.native_currency, item.native_price,
-                        inr, rate_date, 1 if item.in_stock else 0,
+                        row["id"],
+                        run_id,
+                        now,
+                        item.native_currency,
+                        item.native_price,
+                        inr,
+                        rate_date,
+                        1 if item.in_stock else 0,
                     ),
                 )
                 saved += 1

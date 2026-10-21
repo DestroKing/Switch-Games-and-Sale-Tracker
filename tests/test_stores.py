@@ -202,9 +202,7 @@ class TestTheAddedBatch:
 
 
 class TestOverrides:
-    def test_the_overrides_file_lives_in_the_data_dir_not_the_working_directory(
-        self, data_dir: Path
-    ) -> None:
+    def test_the_overrides_file_lives_in_the_data_dir_not_the_working_directory(self, data_dir: Path) -> None:
         """The bug this design removes.
 
         The TypeScript version used a bare relative path, so the file resolved

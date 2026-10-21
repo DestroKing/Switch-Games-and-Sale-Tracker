@@ -21,8 +21,12 @@ URL = "https://www.play-asia.com/en/search/nintendo+switch+games"
 #: The shipped profile's card list, in order. from_selectors() takes the FIRST
 #: one that yields rows, so the order is what decides which is actually used.
 CARD_SELECTORS = [
-    ".product-item", ".search-item", "div.item",
-    ".item-list-view .item", ".item", "[class*='product']",
+    ".product-item",
+    ".search-item",
+    "div.item",
+    ".item-list-view .item",
+    ".item",
+    "[class*='product']",
 ]
 
 PAGER_PROBE = """
@@ -139,14 +143,17 @@ async def main() -> str:
         # legitimately differ from what the collector sees.
         ctx = await browser.new_context(
             user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                       "(KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
-            locale="en-IN", timezone_id="Asia/Kolkata",
+            "(KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
+            locale="en-IN",
+            timezone_id="Asia/Kolkata",
             viewport={"width": 1440, "height": 960},
         )
-        await ctx.add_cookies([
-            {"name": "currency", "value": "INR", "domain": ".play-asia.com", "path": "/"},
-            {"name": "country", "value": "IN", "domain": ".play-asia.com", "path": "/"},
-        ])
+        await ctx.add_cookies(
+            [
+                {"name": "currency", "value": "INR", "domain": ".play-asia.com", "path": "/"},
+                {"name": "country", "value": "IN", "domain": ".play-asia.com", "path": "/"},
+            ]
+        )
         page = await ctx.new_page()
 
         print(f"\n  engine: {engine}\n  loading {URL}")
@@ -180,8 +187,7 @@ async def main() -> str:
             print("    NONE - no numeric/next control found. Likely infinite scroll.")
         for c in probe["candidates"][:30]:
             vis = "" if c["visible"] else "   [HIDDEN]"
-            print(f"    {c['text']!r:7} {c['tag']:6} class={c['cls']!r:42} "
-                  f"href={c['href'][:45]!r}{vis}")
+            print(f"    {c['text']!r:7} {c['tag']:6} class={c['cls']!r:42} href={c['href'][:45]!r}{vis}")
 
         # The best outcome: real page links mean the fix is putting {p} in the
         # store's search_urls, not writing a better clicker.

@@ -71,9 +71,7 @@ def check_tls() -> Check:
         # follow_redirects is NOT httpx's default. The TypeScript client sets
         # redirect:"follow" (http.ts:47); Frankfurter answers 301 via Cloudflare.
         # Omitting this makes every redirecting store fail with an unparseable body.
-        r = httpx.get(
-            "https://api.frankfurter.app/latest?from=USD&to=INR", timeout=20, follow_redirects=True
-        )
+        r = httpx.get("https://api.frankfurter.app/latest?from=USD&to=INR", timeout=20, follow_redirects=True)
         rate = r.json()["rates"]["INR"]
         return Check("TLS / certifi", True, f"Frankfurter USD->INR = {rate}")
     except Exception as e:  # noqa: BLE001 - a spike reports every failure shape
@@ -92,9 +90,7 @@ def check_templates() -> Check:
 def check_uvicorn() -> Check:
     """3. uvicorn under freeze. Uses the app OBJECT, never the string-import form."""
     port = _free_port()
-    server = uvicorn.Server(
-        uvicorn.Config(build_app(), host="127.0.0.1", port=port, log_level="warning")
-    )
+    server = uvicorn.Server(uvicorn.Config(build_app(), host="127.0.0.1", port=port, log_level="warning"))
     thread = threading.Thread(target=server.run, daemon=True)
     thread.start()
     try:

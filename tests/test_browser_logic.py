@@ -109,7 +109,6 @@ class TestProfiles:
     def test_url_paginated_stores_declare_no_next_control(self) -> None:
         assert not PROFILES["amazon_in"].next_page
 
-
     def test_play_asia_pins_an_inr_session(self) -> None:
         """What makes StoreConfig.currency='INR' true rather than asserted.
 
@@ -126,7 +125,6 @@ class TestProfiles:
     def test_no_other_store_pins_cookies(self) -> None:
         """The seam is opt-in; a shared session setting would leak everywhere."""
         assert [k for k, v in PROFILES.items() if v.cookies] == ["playasia"]
-
 
     #: field -> the stores allowed to depart from its default, and nothing else.
     #:
@@ -586,9 +584,7 @@ class TestPagingPathSelection:
         from switch_tracker.core.models import AdapterKind
 
         chosen = {
-            store.id: "click"
-            if uses_click_paging(PROFILES[store.id], store.search_urls[0])
-            else "url"
+            store.id: "click" if uses_click_paging(PROFILES[store.id], store.search_urls[0]) else "url"
             for store in STORES
             if store.kind is AdapterKind.BROWSER
         }
@@ -663,4 +659,3 @@ class TestStoreOrdering:
 
         browser = [s.id for s in STORES if s.kind is AdapterKind.BROWSER]
         assert browser[0] == "playasia", browser
-

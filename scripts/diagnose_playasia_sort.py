@@ -86,14 +86,17 @@ async def main() -> str:
             browser = await p.chromium.launch(headless=True)
         ctx = await browser.new_context(
             user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                       "(KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
-            locale="en-IN", timezone_id="Asia/Kolkata",
+            "(KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
+            locale="en-IN",
+            timezone_id="Asia/Kolkata",
             viewport={"width": 1440, "height": 960},
         )
-        await ctx.add_cookies([
-            {"name": "currency", "value": "INR", "domain": ".play-asia.com", "path": "/"},
-            {"name": "country", "value": "IN", "domain": ".play-asia.com", "path": "/"},
-        ])
+        await ctx.add_cookies(
+            [
+                {"name": "currency", "value": "INR", "domain": ".play-asia.com", "path": "/"},
+                {"name": "country", "value": "IN", "domain": ".play-asia.com", "path": "/"},
+            ]
+        )
         page = await ctx.new_page()
 
         print(f"\n  loading {URL}")
@@ -131,17 +134,20 @@ async def main() -> str:
         print(f"                  {before['text']}")
 
         target = next(
-            (s for s in ui["selects"]
-             if s["visible"] and any(
-                 "price" in o["text"].lower() or "sort" in s["label"].lower()
-                 for o in s["options"])),
+            (
+                s
+                for s in ui["selects"]
+                if s["visible"]
+                and any("price" in o["text"].lower() or "sort" in s["label"].lower() for o in s["options"])
+            ),
             None,
         )
         if target is None:
             print("\n  NO usable sort <select> found - cannot test URL behaviour.")
         else:
-            option = next((o for o in target["options"]
-                           if "price" in o["text"].lower()), target["options"][-1])
+            option = next(
+                (o for o in target["options"] if "price" in o["text"].lower()), target["options"][-1]
+            )
             print(f"\n  selecting {option['text']!r} ...")
             try:
                 await page.select_option("select", value=option["value"])

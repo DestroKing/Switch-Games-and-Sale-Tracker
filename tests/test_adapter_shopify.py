@@ -106,9 +106,7 @@ class TestClassificationContext:
         assert isinstance(result, Ok)
         assert result.listings[0].platform is Platform.SWITCH
 
-    async def test_a_pre_owned_category_reaches_the_condition_inference(
-        self, adapter, server
-    ) -> None:
+    async def test_a_pre_owned_category_reaches_the_condition_inference(self, adapter, server) -> None:
         base, recorder = server
         recorder.plan("/products.json", page(product(1, "Zelda", ptype="Pre-Owned Games")))
         result = await adapter.fetch(store_at(base), NullSink())
@@ -137,9 +135,7 @@ class TestClassificationContext:
 
 
 class TestPagination:
-    async def test_stops_when_a_page_returns_fewer_than_the_page_size(
-        self, adapter, server
-    ) -> None:
+    async def test_stops_when_a_page_returns_fewer_than_the_page_size(self, adapter, server) -> None:
         """Shopify's real stopping signal. No separate completeness check needed."""
         base, recorder = server
         recorder.plan("/products.json", page(product(1, "Zelda")))

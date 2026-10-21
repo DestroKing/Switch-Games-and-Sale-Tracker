@@ -114,8 +114,10 @@ async def _report(
 
     ld = await page.evaluate(_LD_COUNTS)
     ld_rows = await from_json_ld(page)
-    print(f"      json-ld    : {ld['blocks']} block(s), {ld['products']} Product node(s)"
-          f" -> layer 1 yields {len(ld_rows)} row(s)")
+    print(
+        f"      json-ld    : {ld['blocks']} block(s), {ld['products']} Product node(s)"
+        f" -> layer 1 yields {len(ld_rows)} row(s)"
+    )
 
     print("      card selectors:")
     for selector, count in await _counts_per_card_selector(page, profile):
@@ -127,8 +129,10 @@ async def _report(
     rows, method = await extract(page, store.id, profile)
     print(f"      EXTRACT WINS WITH: {method}  ({len(rows)} rows)")
     if ld_rows and sel_rows and len(ld_rows) < len(sel_rows):
-        print(f"      *** JSON-LD short-circuits extract() and is SMALLER than the DOM "
-              f"({len(ld_rows)} vs {len(sel_rows)}) ***")
+        print(
+            f"      *** JSON-LD short-circuits extract() and is SMALLER than the DOM "
+            f"({len(ld_rows)} vs {len(sel_rows)}) ***"
+        )
 
     kept = 0
     dropped_kind: list[str] = []
@@ -191,8 +195,7 @@ async def _jsonld_lockstep_probe(page: Page, profile: StoreProfile, template: st
         ld = await page.evaluate(_LD_COUNTS)
         cards = await page.locator(profile.card[0]).count() if profile.card else -1
         print(
-            f"      after {click_number} click(s): "
-            f"json-ld {ld['products']:>3} product(s)   cards {cards:>3}"
+            f"      after {click_number} click(s): json-ld {ld['products']:>3} product(s)   cards {cards:>3}"
         )
 
 
@@ -218,9 +221,7 @@ async def run(store_id: str, url_index: int, headful: bool) -> int:
             prints: list[str] = []
             for page_number in (1, 2):
                 url = template.replace("{p}", str(page_number))
-                prints.append(
-                    await _report(adapter, page, store, profile, url, wait_until)
-                )
+                prints.append(await _report(adapter, page, store, profile, url, wait_until))
             if prints[0] and prints[0] == prints[1]:
                 print("\n      *** PAGE 1 AND PAGE 2 ARE IDENTICAL -- the page parameter is inert ***")
             elif prints[0] and prints[1]:

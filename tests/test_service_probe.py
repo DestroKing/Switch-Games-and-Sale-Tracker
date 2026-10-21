@@ -64,9 +64,7 @@ class TestDetection:
         result = await service.detect(store_at(base))
         assert result is Finding.SHOPIFY
 
-    async def test_an_html_page_mentioning_products_is_not_shopify(
-        self, service, server, data_dir
-    ) -> None:
+    async def test_an_html_page_mentioning_products_is_not_shopify(self, service, server, data_dir) -> None:
         """The bug that mis-detected HG World for a month.
 
         A WordPress 404 answers 200, and its inline JS carries the literal
@@ -152,9 +150,7 @@ class TestApplyingCorrections:
         assert "kind" not in written
         assert written.get("enabled") is False
 
-    async def test_disables_an_unreachable_store_with_a_readable_reason(
-        self, service, data_dir
-    ) -> None:
+    async def test_disables_an_unreachable_store_with_a_readable_reason(self, service, data_dir) -> None:
         await service.run([store_at("http://127.0.0.1:9", id="dead")])
         written = overrides.read()["dead"]
         assert written["enabled"] is False
@@ -166,9 +162,7 @@ class TestApplyingCorrections:
         await service.run([store_at(base, id="pssales", kind=AdapterKind.SHOPIFY)])
         assert "pssales" not in overrides.read()
 
-    async def test_does_not_re_disable_an_already_disabled_store(
-        self, service, data_dir
-    ) -> None:
+    async def test_does_not_re_disable_an_already_disabled_store(self, service, data_dir) -> None:
         """Otherwise every run rewrites the same correction forever."""
         await service.run([store_at("http://127.0.0.1:9", id="parked", enabled=False)])
         assert "parked" not in overrides.read()
@@ -204,9 +198,7 @@ class TestCategoryDiscovery:
         assert line.index("switch-games") < line.index("c0")
         assert "+41 more" in line
 
-    async def test_skips_discovery_for_an_already_scoped_store(
-        self, service, server, data_dir
-    ) -> None:
+    async def test_skips_discovery_for_an_already_scoped_store(self, service, server, data_dir) -> None:
         """A one-time aid, not a per-run cost."""
         base, recorder = server
         recorder.plan(SHOPIFY_PATH, ok_json('{"products":[]}'))

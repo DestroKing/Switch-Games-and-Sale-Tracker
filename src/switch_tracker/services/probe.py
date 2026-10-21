@@ -166,8 +166,7 @@ class ProbeService:
         if kind is AdapterKind.WOOCOMMERCE:
             for page in range(1, MAX_CATEGORY_PAGES + 1):
                 data = await self._client.get_json(
-                    f"{store.base_url}/wp-json/wc/store/v1/products/categories"
-                    f"?per_page=100&page={page}"
+                    f"{store.base_url}/wp-json/wc/store/v1/products/categories?per_page=100&page={page}"
                 )
                 if not isinstance(data, list) or not data:
                     break

@@ -108,7 +108,11 @@ class TestCollecting:
         base, recorder = server
         recorder.plan_pages(
             "/shop",
-            (200, f"<html><body>{card('Zelda TotK', '₹4,299', '/product/zelda-totk?ref=x')}</body></html>", {}),  # noqa: E501
+            (
+                200,
+                f"<html><body>{card('Zelda TotK', '₹4,299', '/product/zelda-totk?ref=x')}</body></html>",
+                {},
+            ),
             (200, "<html><body></body></html>", {}),
         )
         result = await adapter.fetch(shop_store(base), NullSink())
@@ -144,9 +148,8 @@ class TestRegionDisambiguation:
         self, provider: BrowserProvider, server
     ) -> None:
         base, recorder = server
-        body = (
-            card("Zelda (Asia English)", "Rs. 4499", "/p/zelda-shared")
-            + card("Zelda (Japan)", "Rs. 4299", "/p/zelda-shared")
+        body = card("Zelda (Asia English)", "Rs. 4499", "/p/zelda-shared") + card(
+            "Zelda (Japan)", "Rs. 4299", "/p/zelda-shared"
         )
         recorder.plan_pages(
             "/shop", (200, f"<html><body>{body}</body></html>", {}), (200, "<html></html>", {})
@@ -161,6 +164,7 @@ class TestRegionDisambiguation:
         assert isinstance(result, Ok)
         assert len(result.listings) == 2
         assert {listing.region for listing in result.listings} == {Region.ASIA_EN, Region.JP}
+
 
 class TestPagination:
     async def test_follows_the_url_template_across_pages(self, adapter, server) -> None:
@@ -305,19 +309,13 @@ class TestSessionCookies:
                 cookie_domain="127.0.0.1",
             )
 
-        adapter = BrowserAdapter(
-            provider, profile_for=profile_for, settle_ms=(0, 0), render_ms=0
-        )
-        outcome = await adapter.fetch(
-            shop_store(base, search_urls=(f"{base}/shop",)), NullSink()
-        )
+        adapter = BrowserAdapter(provider, profile_for=profile_for, settle_ms=(0, 0), render_ms=0)
+        outcome = await adapter.fetch(shop_store(base, search_urls=(f"{base}/shop",)), NullSink())
 
         assert isinstance(outcome, (Ok, Partial)), outcome
         assert "currency=INR" in outcome.listings[0].title
 
-    async def test_a_profile_without_cookies_sets_none(
-        self, provider: BrowserProvider, server
-    ) -> None:
+    async def test_a_profile_without_cookies_sets_none(self, provider: BrowserProvider, server) -> None:
         """The seam must stay opt-in; every other store gets a clean session."""
         base, recorder = server
         html = (
@@ -331,12 +329,8 @@ class TestSessionCookies:
         )
         recorder.plan("/shop", (200, html, {"content-type": "text/html; charset=utf-8"}))
 
-        adapter = BrowserAdapter(
-            provider, profile_for=_test_profile, settle_ms=(0, 0), render_ms=0
-        )
-        outcome = await adapter.fetch(
-            shop_store(base, search_urls=(f"{base}/shop",)), NullSink()
-        )
+        adapter = BrowserAdapter(provider, profile_for=_test_profile, settle_ms=(0, 0), render_ms=0)
+        outcome = await adapter.fetch(shop_store(base, search_urls=(f"{base}/shop",)), NullSink())
 
         assert isinstance(outcome, (Ok, Partial)), outcome
         assert "[]" in outcome.listings[0].title
@@ -365,9 +359,9 @@ LIVE_PAGER = (
     "<script>document.getElementById('p2').addEventListener('click', (e) => {"
     "  e.preventDefault();"
     "  document.querySelector('.results').innerHTML = Array.from({length: 4}, (_, i) =>"
-    "    `<div class=\"card\"><h3 class=\"name\">Switch Game p2-${i}</h3>`"
-    "    + `<span class=\"cost\">Rs. ${2500 + i}</span>`"
-    "    + `<a class=\"more\" href=\"/p/page2-${i}\">buy</a></div>`).join('');"
+    '    `<div class="card"><h3 class="name">Switch Game p2-${i}</h3>`'
+    '    + `<span class="cost">Rs. ${2500 + i}</span>`'
+    '    + `<a class="more" href="/p/page2-${i}">buy</a></div>`).join(\'\');'
     "});</script></body></html>"
 )
 
@@ -398,12 +392,8 @@ class TestClickPagination:
             def page(self, store_id: str, page: int, count: int) -> None:
                 seen.append((page, count))
 
-        adapter = BrowserAdapter(
-            provider, profile_for=_paging_profile, settle_ms=(0, 0), render_ms=0
-        )
-        outcome = await adapter.fetch(
-            shop_store(base, search_urls=(f"{base}/shop",)), Sink()
-        )
+        adapter = BrowserAdapter(provider, profile_for=_paging_profile, settle_ms=(0, 0), render_ms=0)
+        outcome = await adapter.fetch(shop_store(base, search_urls=(f"{base}/shop",)), Sink())
 
         assert isinstance(outcome, (Ok, Partial)), outcome
         assert len(outcome.listings) == 6
@@ -419,12 +409,8 @@ class TestClickPagination:
         base, recorder = server
         recorder.plan("/shop", (200, LIVE_PAGER, {"content-type": "text/html"}))
 
-        adapter = BrowserAdapter(
-            provider, profile_for=_paging_profile, settle_ms=(0, 0), render_ms=0
-        )
-        outcome = await adapter.fetch(
-            shop_store(base, search_urls=(f"{base}/shop",)), NullSink()
-        )
+        adapter = BrowserAdapter(provider, profile_for=_paging_profile, settle_ms=(0, 0), render_ms=0)
+        outcome = await adapter.fetch(shop_store(base, search_urls=(f"{base}/shop",)), NullSink())
 
         assert isinstance(outcome, (Ok, Partial)), outcome
         titles = {listing.title for listing in outcome.listings}
@@ -476,9 +462,7 @@ class TestBrowserFallback:
         assert browser == "bundled-chromium"
         assert instance.launched_channel == "chromium"
 
-    async def test_prefers_real_chrome_when_it_is_available(
-        self, provider: BrowserProvider
-    ) -> None:
+    async def test_prefers_real_chrome_when_it_is_available(self, provider: BrowserProvider) -> None:
         await provider.browser()
         assert provider.launched_channel in {"chrome", "chromium"}
 
@@ -486,9 +470,7 @@ class TestBrowserFallback:
 class TestPerStorePageMechanics:
     """The three knobs, exercised through the real adapter."""
 
-    async def test_scroll_pattern_follows_the_profile(
-        self, provider: BrowserProvider, server
-    ) -> None:
+    async def test_scroll_pattern_follows_the_profile(self, provider: BrowserProvider, server) -> None:
         """Observed in the browser, not mocked in our own code.
 
         The page counts real scroll events and writes the tally into the card
@@ -511,12 +493,8 @@ class TestPerStorePageMechanics:
         recorder.plan("/shop", (200, html, {"content-type": "text/html"}))
 
         async def title_after(profile_for) -> str:  # type: ignore[no-untyped-def]
-            adapter = BrowserAdapter(
-                provider, profile_for=profile_for, settle_ms=(0, 0), render_ms=150
-            )
-            outcome = await adapter.fetch(
-                shop_store(base, search_urls=(f"{base}/shop",)), NullSink()
-            )
+            adapter = BrowserAdapter(provider, profile_for=profile_for, settle_ms=(0, 0), render_ms=150)
+            outcome = await adapter.fetch(shop_store(base, search_urls=(f"{base}/shop",)), NullSink())
             assert isinstance(outcome, (Ok, Partial)), outcome
             return outcome.listings[0].title
 
@@ -543,9 +521,7 @@ class TestPerStorePageMechanics:
             return replace(_test_profile(store_id), wait_until="networkidle")
 
         adapter = BrowserAdapter(provider, profile_for=idle, settle_ms=(0, 0), render_ms=0)
-        outcome = await adapter.fetch(
-            shop_store(base, search_urls=(f"{base}/shop",)), NullSink()
-        )
+        outcome = await adapter.fetch(shop_store(base, search_urls=(f"{base}/shop",)), NullSink())
         assert isinstance(outcome, (Ok, Partial)), outcome
         assert len(outcome.listings) == 1
 
@@ -581,18 +557,14 @@ class TestPerStorePageMechanics:
         monkey = adapter_module._GOTO_TIMEOUT_MS
         adapter_module._GOTO_TIMEOUT_MS = 2500
         try:
-            outcome = await adapter.fetch(
-                shop_store(base, search_urls=(f"{base}/shop",)), NullSink()
-            )
+            outcome = await adapter.fetch(shop_store(base, search_urls=(f"{base}/shop",)), NullSink())
         finally:
             adapter_module._GOTO_TIMEOUT_MS = monkey
 
         assert isinstance(outcome, (Ok, Partial)), outcome
         assert len(outcome.listings) == 1, "fallback did not salvage the page"
 
-    async def test_a_rejected_url_never_becomes_a_listing(
-        self, provider: BrowserProvider, server
-    ) -> None:
+    async def test_a_rejected_url_never_becomes_a_listing(self, provider: BrowserProvider, server) -> None:
         base, recorder = server
         html = (
             "<html><body>"
@@ -611,9 +583,7 @@ class TestPerStorePageMechanics:
             )
 
         adapter = BrowserAdapter(provider, profile_for=filtered, settle_ms=(0, 0), render_ms=0)
-        outcome = await adapter.fetch(
-            shop_store(base, search_urls=(f"{base}/shop",)), NullSink()
-        )
+        outcome = await adapter.fetch(shop_store(base, search_urls=(f"{base}/shop",)), NullSink())
 
         assert isinstance(outcome, (Ok, Partial)), outcome
         titles = [listing.title for listing in outcome.listings]
@@ -653,9 +623,7 @@ class TestPerStorePageMechanics:
             )
 
         adapter = BrowserAdapter(provider, profile_for=filtered, settle_ms=(0, 0), render_ms=0)
-        outcome = await adapter.fetch(
-            shop_store(base, search_urls=(f"{base}/shop?page={{p}}",)), Sink()
-        )
+        outcome = await adapter.fetch(shop_store(base, search_urls=(f"{base}/shop?page={{p}}",)), Sink())
 
         assert isinstance(outcome, (Ok, Partial)), outcome
         assert len(outcome.listings) == 2
@@ -676,30 +644,24 @@ class TestNumericPagerMechanism:
         self, provider: BrowserProvider, server
     ) -> None:
         base, recorder = server
-        cards = "".join(
-            card(f"Switch Game {i}", "Rs. 4499", f"/p/g-{i}") for i in range(3)
-        )
+        cards = "".join(card(f"Switch Game {i}", "Rs. 4499", f"/p/g-{i}") for i in range(3))
         html = (
             f"<html><body><div class='results'>{cards}</div>"
             "<div class='pager'><a href='#'>1</a><a href='#' id='n'>2</a></div>"
             "<script>document.getElementById('n').addEventListener('click', (e) => {"
             "  e.preventDefault();"
             "  document.querySelector('.results').innerHTML = Array.from({length: 2}, (_, i) =>"
-            "    `<div class=\"card\"><h3 class=\"name\">Switch Game p2-${i}</h3>`"
-            "    + `<span class=\"cost\">Rs. 2500</span>`"
-            "    + `<a class=\"more\" href=\"/p/page2-${i}\">buy</a></div>`).join('');"
+            '    `<div class="card"><h3 class="name">Switch Game p2-${i}</h3>`'
+            '    + `<span class="cost">Rs. 2500</span>`'
+            '    + `<a class="more" href="/p/page2-${i}">buy</a></div>`).join(\'\');'
             "  document.getElementById('n').remove();"
             "});</script></body></html>"
         )
         recorder.plan("/search", (200, html, {"content-type": "text/html"}))
 
         # next_page empty -- exactly Play-Asia's shipped profile.
-        adapter = BrowserAdapter(
-            provider, profile_for=_test_profile, settle_ms=(0, 0), render_ms=0
-        )
-        outcome = await adapter.fetch(
-            shop_store(base, search_urls=(f"{base}/search",)), NullSink()
-        )
+        adapter = BrowserAdapter(provider, profile_for=_test_profile, settle_ms=(0, 0), render_ms=0)
+        outcome = await adapter.fetch(shop_store(base, search_urls=(f"{base}/search",)), NullSink())
 
         assert isinstance(outcome, (Ok, Partial)), outcome
         titles = {listing.title for listing in outcome.listings}
@@ -725,17 +687,21 @@ class TestTimeBudget:
         recorder.plan_pages(
             "/shop",
             (200, f"<html><body>{page1}</body></html>", {"content-type": "text/html"}),
-            (200, "<html><body>" + card("Switch Game X", "Rs. 4499", "/p/gx") + "</body></html>",
-             {"content-type": "text/html"}),
+            (
+                200,
+                "<html><body>" + card("Switch Game X", "Rs. 4499", "/p/gx") + "</body></html>",
+                {"content-type": "text/html"},
+            ),
         )
 
         adapter = BrowserAdapter(
-            provider, profile_for=_test_profile, settle_ms=(0, 0), render_ms=0,
+            provider,
+            profile_for=_test_profile,
+            settle_ms=(0, 0),
+            render_ms=0,
             time_budget_s=0.0,
         )
-        outcome = await adapter.fetch(
-            shop_store(base, search_urls=(f"{base}/shop?page={{p}}",)), NullSink()
-        )
+        outcome = await adapter.fetch(shop_store(base, search_urls=(f"{base}/shop?page={{p}}",)), NullSink())
 
         # Partial, not Failed -- Failed makes CollectService record zero and
         # discard four perfectly good listings.
@@ -744,17 +710,17 @@ class TestTimeBudget:
         assert "time budget" in outcome.reason
         assert not any(listing.title[-1] == "X" for listing in outcome.listings)
 
-    async def test_max_pages_caps_the_walk_per_search_url(
-        self, provider: BrowserProvider, server
-    ) -> None:
+    async def test_max_pages_caps_the_walk_per_search_url(self, provider: BrowserProvider, server) -> None:
         """The guard that keeps a deep catalogue inside the budget."""
         base, recorder = server
         pages = [
-            (200,
-             "<html><body>"
-             + "".join(card(f"Switch Game p{n}-{i}", "Rs. 4499", f"/p/p{n}-{i}") for i in range(3))
-             + "</body></html>",
-             {"content-type": "text/html"})
+            (
+                200,
+                "<html><body>"
+                + "".join(card(f"Switch Game p{n}-{i}", "Rs. 4499", f"/p/p{n}-{i}") for i in range(3))
+                + "</body></html>",
+                {"content-type": "text/html"},
+            )
             for n in range(1, 8)
         ]
         recorder.plan_pages("/shop", *pages)
@@ -769,9 +735,7 @@ class TestTimeBudget:
             return replace(_test_profile(store_id), max_pages=3)
 
         adapter = BrowserAdapter(provider, profile_for=capped, settle_ms=(0, 0), render_ms=0)
-        outcome = await adapter.fetch(
-            shop_store(base, search_urls=(f"{base}/shop?page={{p}}",)), Sink()
-        )
+        outcome = await adapter.fetch(shop_store(base, search_urls=(f"{base}/shop?page={{p}}",)), Sink())
 
         assert isinstance(outcome, (Ok, Partial)), outcome
         assert seen == [1, 2, 3], seen
@@ -1022,9 +986,7 @@ class TestGamePookie:
             "Metroid Dread", "/product-page/metroid", "₹3,499"
         )
         recorder.plan("/category/nintendo-switch", (200, f"<html><body>{body}</body></html>", {}))
-        result = await adapter.fetch(
-            local_store("gamepookie", base, "/category/nintendo-switch"), NullSink()
-        )
+        result = await adapter.fetch(local_store("gamepookie", base, "/category/nintendo-switch"), NullSink())
 
         assert isinstance(result, Ok)
         assert {listing.title for listing in result.listings} == {"Zelda TotK", "Metroid Dread"}
@@ -1067,9 +1029,7 @@ class TestGamePookie:
             "});</script></body></html>"
         )
         recorder.plan("/category/nintendo-switch", (200, page, {}))
-        result = await adapter.fetch(
-            local_store("gamepookie", base, "/category/nintendo-switch"), NullSink()
-        )
+        result = await adapter.fetch(local_store("gamepookie", base, "/category/nintendo-switch"), NullSink())
 
         assert isinstance(result, Ok)
         assert {listing.title for listing in result.listings} == {
@@ -1103,13 +1063,13 @@ class TestGamePookie:
             '"url": "/product-page/hades", "offers": {"price": "3299"}}'
             "</script>"
         )
-        body = json_ld + pookie_card("Hades", "/product-page/hades", "₹3,299") + pookie_card(
-            "Metroid Dread", "/product-page/metroid", "₹3,499"
+        body = (
+            json_ld
+            + pookie_card("Hades", "/product-page/hades", "₹3,299")
+            + pookie_card("Metroid Dread", "/product-page/metroid", "₹3,499")
         )
         recorder.plan("/category/nintendo-switch", (200, f"<html><body>{body}</body></html>", {}))
-        result = await adapter.fetch(
-            local_store("gamepookie", base, "/category/nintendo-switch"), NullSink()
-        )
+        result = await adapter.fetch(local_store("gamepookie", base, "/category/nintendo-switch"), NullSink())
 
         assert isinstance(result, Ok)
         assert {listing.title for listing in result.listings} == {"Hades", "Metroid Dread"}

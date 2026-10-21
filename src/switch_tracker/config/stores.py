@@ -348,7 +348,9 @@ STORES: tuple[StoreConfig, ...] = (
         tier=1,
         enabled=True,
         platform_hint=Platform.SWITCH,
-        search_urls=("https://gamenation.in/PlayStation/?platform=nintendoSwitch%2CnintendoSwitch2&page={p}",),
+        search_urls=(
+            "https://gamenation.in/PlayStation/?platform=nintendoSwitch%2CnintendoSwitch2&page={p}",
+        ),
         note=(
             "The /PlayStation/ path is misleading -- it is the general catalogue filtered by a "
             "platform query param. Pagination is click-based; the page param does nothing."
@@ -376,9 +378,7 @@ STORES: tuple[StoreConfig, ...] = (
         enabled=True,
         platform_hint=Platform.SWITCH,
         search_urls=("https://e2zstore.com/category/nintendo-games/page/{p}/",),
-        note=(
-            "Uses /category/ structure matching working test script."
-        ),
+        note=("Uses /category/ structure matching working test script."),
     ),
     StoreConfig(
         id="gameland",
