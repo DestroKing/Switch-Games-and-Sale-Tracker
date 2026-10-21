@@ -153,6 +153,7 @@ class TestClassifyExclusions:
             "Nintendo Switch Lite Console",
             "Nintendo Switch Joy-Con Pair",
             "Nintendo Switch Docking Station",
+            "Nintendo Switch 2 Online Game Bundled With Pokemon Pokopia",
         ],
     )
     def test_hardware_is_excluded(self, title: str) -> None:
@@ -196,6 +197,25 @@ class TestClassifyExclusions:
         assert classify("Nintendo OLED game loading service").kind is ProductKind.SERVICE
 
 
+def test_exclusions_read_the_title_when_one_is_given() -> None:
+    """Tags say what a product is compatible with; the title says what it is."""
+    context = "Mario Kart 8 Deluxe Nintendo Switch NINTENDO SWITCH OLED SWITCH LITE"
+    assert classify(context).kind is ProductKind.HARDWARE  # context alone: the old behaviour
+    assert classify(context, title="Mario Kart 8 Deluxe Nintendo Switch").kind is ProductKind.GAME
+    # The platform still comes from the whole context.
+    assert (
+        classify("Hogwarts Legacy Nintendo Switch Games", title="Hogwarts Legacy").platform is Platform.SWITCH
+    )
+
+
+def test_a_game_sold_as_a_bundle_of_games_is_still_a_game() -> None:
+    """Flipkart, live: "Bundle with" in marketing for a real game collection."""
+    title = (
+        "Final Fantasy I-VI Collection Nintendo Switch | Classic JRPG Bundle with Six Final Fantasy Titles"
+    )
+    assert classify(title).kind is ProductKind.GAME
+
+
 class TestClassifyPlatform:
     def test_a_terse_title_is_kept_when_the_store_hints_switch_only(self) -> None:
         result = classify("Hogwarts Legacy", Platform.SWITCH)
@@ -223,6 +243,14 @@ class TestClassifyPlatform:
     )
     def test_other_consoles_are_not_switch(self, title: str) -> None:
         assert classify(title, Platform.SWITCH).platform is Platform.UNKNOWN
+
+    def test_another_console_beats_the_ordinary_word_switch(self) -> None:
+        """HG World, live: a PS4 game whose marketing says "Seamless Switch"."""
+        title = "The Crew 2 PS4 | Open-World Motorsports | Land, Sea, Air Vehicles | Seamless Switch | Online"
+        assert classify(title, Platform.SWITCH).platform is Platform.UNKNOWN
+
+    def test_an_explicit_nintendo_switch_still_wins(self) -> None:
+        assert classify("Minecraft Nintendo Switch | also on PS4").platform is Platform.SWITCH
 
     @pytest.mark.parametrize("title", ["Mario Kart World Switch 2", "Zelda NS2", "Metroid Nintendo Switch 2"])
     def test_switch_2_is_detected(self, title: str) -> None:

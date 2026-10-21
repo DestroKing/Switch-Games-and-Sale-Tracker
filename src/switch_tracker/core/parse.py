@@ -131,6 +131,10 @@ HARDWARE = _patterns(
     r"\bpro\s*controller\b",
     r"\bdock(ing)?\s*(station|set)?\b",
     r"\bhandheld\b.*\bsystem\b",
+    # A console sold WITH a game: designinfo, live, "Nintendo Switch 2 Online
+    # Game Bundled With Pokemon Pokopia" at Rs 59,999. "Bundled", not "bundle":
+    # Flipkart writes "Classic JRPG Bundle with Six ... Titles" into a real game.
+    r"\bbundled\s+with\b",
 )
 
 ACCESSORY = _patterns(
@@ -188,7 +192,11 @@ SWITCH2 = _patterns(r"switch\s*2\b", r"\bns2\b", r"\bswitch\s*two\b", r"\bninten
 # Switch markers, loosest last.  "NS" and "NSW" are genuinely used by Indian
 # importers in terse titles ("Hogwarts Legacy NSW"), which is exactly the case
 # that made stores look empty before.
-SWITCH = _patterns(r"\bnintendo\s*switch\b", r"\bswitch\b", r"\bnsw\b", r"\bns\b", r"\bnintendo\b")
+SWITCH = _patterns(r"\bnintendo\s*switch\b", r"\bnsw\b")
+#: Checked only AFTER other consoles: a bare "switch" is also an ordinary word.
+#: HG World, live: "The Crew 2 PS4 | ... | Seamless Switch | Online" came out
+#: as a Switch game because "switch" was matched before "PS4" was looked for.
+SWITCH_LOOSE = _patterns(r"\bswitch\b", r"\bns\b", r"\bnintendo\b")
 
 # An explicit marker for a DIFFERENT console must beat store_hint.  A hint
 # means "assume Switch when the text says nothing about a console", not
@@ -227,23 +235,34 @@ def platform_of(text: str, hint: Platform | None = None) -> Platform:
     # PS4/Xbox/etc. title through as a false Switch match.
     if _any(OTHER_CONSOLE, text):
         return Platform.UNKNOWN
+    if _any(SWITCH_LOOSE, text):
+        return Platform.SWITCH
     # No console named at all. Trust the store's context if it has one -- a
     # title pulled from a Switch-games collection is a Switch game.
     return hint if hint is not None else Platform.UNKNOWN
 
 
-def classify(context: str, store_hint: Platform | None = None) -> Classification:
+def classify(context: str, store_hint: Platform | None = None, *, title: str | None = None) -> Classification:
     """Classify a listing from everything the store gives us.
 
     ``context`` should be title + product type + tags + categories +
     breadcrumbs.  Passing only the title is what made terse-titled stores
     report near-zero.
 
+    ``title``, when given, is the ONLY text the exclusions (console, accessory,
+    digital, service) are checked against; the platform still comes from the
+    whole context. Tags and categories say what a product is compatible with,
+    not what it is: consolegarage tags every Switch game "NINTENDO SWITCH OLED"
+    and "SWITCH LITE", and checked against tags the console rule threw out 58 of
+    its games -- Mario Kart 8 Deluxe among them. Leave it out (the browser
+    stores, which have only a title) and the context is used, as before.
+
     ``store_hint`` lets a store known to contain only Switch games assert
     that, so "Hogwarts Legacy" in a "Switch Games" collection is kept instead
     of dropped for not naming its console.
     """
     text = _WHITESPACE.sub(" ", context)
+    product = text if title is None else _WHITESPACE.sub(" ", title)
 
     # Order matters. Exclusions first, or hardware wins on a platform match.
     for patterns, kind in (
@@ -252,7 +271,7 @@ def classify(context: str, store_hint: Platform | None = None) -> Classification
         (HARDWARE, ProductKind.HARDWARE),
         (ACCESSORY, ProductKind.ACCESSORY),
     ):
-        if _any(patterns, text):
+        if _any(patterns, product):
             return Classification(platform_of(text, store_hint), kind)
 
     platform = platform_of(text, store_hint)

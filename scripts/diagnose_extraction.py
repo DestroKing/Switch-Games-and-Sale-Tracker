@@ -23,6 +23,7 @@ It answers four things a collection run never tells you:
 
     uv run python scripts/diagnose_extraction.py gamepookie
     uv run python scripts/diagnose_extraction.py cex_in --url 2 --headful
+    uv run python scripts/diagnose_extraction.py playasia --at "https://www.play-asia.com/en/search/nintendo+switch+games#fc=p:99"
 
 Drives the SHIPPED profile and the SHIPPED extraction layers, for the reason
 scrape_check.py gives at length: a diagnostic carrying its own private copy of
@@ -199,7 +200,7 @@ async def _jsonld_lockstep_probe(page: Page, profile: StoreProfile, template: st
         )
 
 
-async def run(store_id: str, url_index: int, headful: bool) -> int:
+async def run(store_id: str, url_index: int, headful: bool, at: str | None = None) -> int:
     store = _store(store_id)
     profile = effective_profile(store_id)
     if profile is None:
@@ -207,28 +208,42 @@ async def run(store_id: str, url_index: int, headful: bool) -> int:
     if not store.search_urls:
         raise SystemExit(f"{store_id}: no search_urls")
 
-    template = store.search_urls[url_index - 1]
+    template = at or store.search_urls[url_index - 1]
     print(f"\n{store.name} ({store.id})")
-    print(f"  template   : {template}")
+    print(f"  {'address' if at else 'template'}   : {template}")
 
     provider = BrowserProvider(headless=not headful)
     try:
         context = await provider.new_context()
+        if profile.cookies and profile.cookie_domain:
+            # As the collector does: Play-Asia quotes INR only with these set.
+            await context.add_cookies(
+                [
+                    {"name": n, "value": v, "domain": profile.cookie_domain, "path": "/"}
+                    for n, v in profile.cookies
+                ]
+            )
         page = await context.new_page()
         adapter = BrowserAdapter(provider, render_ms=0)
         for wait_until in (profile.wait_until, "networkidle"):
             print(f"\n================ wait_until={wait_until} ================")
-            prints: list[str] = []
-            for page_number in (1, 2):
-                url = template.replace("{p}", str(page_number))
-                prints.append(await _report(adapter, page, store, profile, url, wait_until))
-            if prints[0] and prints[0] == prints[1]:
-                print("\n      *** PAGE 1 AND PAGE 2 ARE IDENTICAL -- the page parameter is inert ***")
-            elif prints[0] and prints[1]:
-                print("\n      page 1 and page 2 differ: URL paging works")
+            if at:
+                # One given page (e.g. a click-paged store's page 99, reached
+                # by its own address fragment), so no page-2 comparison.
+                await _report(adapter, page, store, profile, at, wait_until)
+            else:
+                prints: list[str] = []
+                for page_number in (1, 2):
+                    url = template.replace("{p}", str(page_number))
+                    prints.append(await _report(adapter, page, store, profile, url, wait_until))
+                if prints[0] and prints[0] == prints[1]:
+                    print("\n      *** PAGE 1 AND PAGE 2 ARE IDENTICAL -- the page parameter is inert ***")
+                elif prints[0] and prints[1]:
+                    print("\n      page 1 and page 2 differ: URL paging works")
             if profile.wait_until == "networkidle":
                 break
-        await _jsonld_lockstep_probe(page, profile, template)
+        if not at:
+            await _jsonld_lockstep_probe(page, profile, template)
         await context.close()
     finally:
         await provider.close()
@@ -243,8 +258,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("store_id")
     parser.add_argument("--url", type=int, default=1, help="which search_url (1-based)")
     parser.add_argument("--headful", action="store_true")
+    parser.add_argument("--at", help="diagnose this exact address instead of a search_url (e.g. a deep page)")
     args = parser.parse_args(argv)
-    return asyncio.run(run(args.store_id, args.url, args.headful))
+    return asyncio.run(run(args.store_id, args.url, args.headful, args.at))
 
 
 if __name__ == "__main__":

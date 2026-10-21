@@ -18,6 +18,7 @@ collector failed on the same site, which has already happened here once.
     uv run python scripts/check_stores.py flipkart --pages 3 --headful
     uv run python scripts/check_stores.py hgworld --probe     # isolate an HTTP refusal
     uv run python scripts/check_stores.py hgworld --list      # every listing it returned
+    uv run python scripts/check_stores.py designinfo --rejected  # every product dropped, and why
     uv run python scripts/check_stores.py --jobs 1            # one store at a time
 
 Stores are checked several at a time (``--jobs``, default 6; at most 3 browser
@@ -218,7 +219,29 @@ def _echo_html(path: pathlib.Path) -> None:
     print(f"        text starts: {text[:300]!r}")
 
 
-async def run_store(store: StoreConfig, *, pages: int, headful: bool, list_all: bool = False) -> bool:
+def _rejected_line(store: StoreConfig, product: dict[str, object]) -> str:
+    """One product the adapter turned down, with what the classifier made of it."""
+    import html
+
+    from switch_tracker.core.parse import classify
+
+    if store.kind is AdapterKind.WOOCOMMERCE:
+        name = html.unescape(str(product.get("name", "")))
+        extra = " ".join(html.unescape(str(c.get("name", ""))) for c in product.get("categories") or [])  # type: ignore[attr-defined]
+        price = (product.get("prices") or {}).get("price")  # type: ignore[attr-defined]
+    else:
+        name = str(product.get("title", ""))
+        extra = " ".join([str(product.get("product_type") or ""), *map(str, product.get("tags") or [])])  # type: ignore[call-overload]
+        variants = product.get("variants") or [{}]
+        price = variants[0].get("price") if variants else None  # type: ignore[index]
+    verdict = classify(f"{name} {extra}", store.platform_hint, title=name)
+    why = "no price" if price in (None, "") else f"{verdict.kind.value} / {verdict.platform.value}"
+    return f"      {why:22} {name}"
+
+
+async def run_store(
+    store: StoreConfig, *, pages: int, headful: bool, list_all: bool = False, rejected: bool = False
+) -> bool:
     """Collect one store for real. True when it came back usable."""
     client = PoliteClient()
     provider = None
@@ -265,6 +288,23 @@ async def run_store(store: StoreConfig, *, pages: int, headful: bool, list_all: 
             browser_module._flipkart_page_url = traced  # type: ignore[assignment]
             restore = (browser_module, "_flipkart_page_url")
 
+        # --rejected: record every product the SHIPPED conversion turns down, by
+        # wrapping it on this one adapter instance -- the same trick as the
+        # Flipkart pager trace above, so the adapter's logic decides as usual.
+        dropped: list[dict[str, object]] = []
+        if rejected and store.kind in (AdapterKind.WOOCOMMERCE, AdapterKind.SHOPIFY):
+            convert = adapter._to_listing  # type: ignore[attr-defined]
+
+            def recording(cfg: StoreConfig, product: dict[str, object]) -> RawListing | None:
+                listing: RawListing | None = convert(cfg, product)
+                if listing is None:
+                    dropped.append(product)
+                return listing
+
+            adapter._to_listing = recording  # type: ignore[attr-defined]
+        elif rejected:
+            print(f"    --rejected covers feed stores; {store.id} is {store.kind.value}")
+
         sink = PrintSink()
         started = time.perf_counter()
         wall_start = time.time()
@@ -299,8 +339,14 @@ async def run_store(store: StoreConfig, *, pages: int, headful: bool, list_all: 
             stock = "in stock" if x.in_stock else "OUT"
             print(
                 f"      {x.native_price:>9.0f} {x.platform.value:7} {x.condition.value:9} {stock:8} "
-                f"{x.title[:90]}"
+                # In full: a platform or edition word that decides a row can sit
+                # anywhere in a long marketing title.
+                f"{x.title}"
             )
+    if dropped:
+        print(f"    dropped as not a game: {len(dropped)} (what the classifier made of each)")
+        for line in sorted(_rejected_line(store, p) for p in dropped):
+            print(line)
     _echo_diagnostics(store.id, wall_start)
     return isinstance(outcome, (Ok, Partial)) and bool(listings)
 
@@ -498,6 +544,11 @@ async def main() -> int:
     parser.add_argument("--limit", type=int, default=15, help="how many runs --history shows")
     parser.add_argument("--list", action="store_true", help="print every listing each store returned")
     parser.add_argument(
+        "--rejected",
+        action="store_true",
+        help="feed stores: print every product dropped as not a game, and why",
+    )
+    parser.add_argument(
         "--jobs",
         type=int,
         default=6,
@@ -552,7 +603,9 @@ async def main() -> int:
             token = _buffer.set(buffer)
             try:
                 print(f"\n== {store.id} ({store.kind.value}) {store.base_url}")
-                return await run_store(store, pages=args.pages, headful=args.headful, list_all=args.list)
+                return await run_store(
+                    store, pages=args.pages, headful=args.headful, list_all=args.list, rejected=args.rejected
+                )
             except Exception as exc:  # noqa: BLE001 - one bad store must not end the sweep
                 print(f"    RAISED {type(exc).__name__}: {exc}")
                 return False

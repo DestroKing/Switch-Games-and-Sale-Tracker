@@ -102,7 +102,7 @@ class ShopifyAdapter:
                 " ".join(str(t) for t in (product.get("tags") or [])),
             ]
         )
-        result = classify(context, store.platform_hint)
+        result = classify(context, store.platform_hint, title=str(product.get("title", "")))
 
         # Only cartridges belong in a cartridge price history.
         if result.kind is not ProductKind.GAME or result.platform is Platform.UNKNOWN:

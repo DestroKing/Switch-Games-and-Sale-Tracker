@@ -75,6 +75,7 @@ requests; the speed-up only comes from checking *different* shops at the same ti
 | Fewer pages, in a visible browser | `uv run python scripts/check_stores.py flipkart --pages 3 --headful` |
 | Where a store's settings come from, and its recorded run outcomes | `uv run python scripts/check_stores.py flipkart --history` |
 | Every listing a store returned: spot a non-game (a joystick, a console) that got through | `uv run python scripts/check_stores.py hgworld --list` |
+| Every product a feed store DROPPED, and what the filter took it for: spot a real game thrown out | `uv run python scripts/check_stores.py designinfo --rejected` |
 | More or fewer stores at once (`--jobs 1` = one at a time, easiest to follow live) | `uv run python scripts/check_stores.py --jobs 10` |
 
 Afterwards, press **Check stores** once in the dashboard. An older version of it switched
