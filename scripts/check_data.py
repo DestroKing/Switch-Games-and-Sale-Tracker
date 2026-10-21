@@ -98,6 +98,18 @@ def main(argv: list[str] | None = None) -> int:
             f"{r['no_rupee_price']:>8}{r['ungrouped']:>11}"
         )
 
+    # Not a failure, but these never reach Games: their title keyed to nothing.
+    ungrouped = conn.execute(
+        "SELECT store_id, raw_title FROM listing WHERE game_id IS NULL AND platform != 'UNKNOWN'"
+        " ORDER BY store_id, raw_title"
+    ).fetchall()
+    if ungrouped:
+        print("\nUngrouped (shown in Every listing, never in Games):")
+        for r in ungrouped[:30]:
+            print(f"  {r['store_id']:16}{r['raw_title']!r}")
+        if len(ungrouped) > 30:
+            print(f"  ... and {len(ungrouped) - 30} more")
+
     shared = conn.execute(
         """SELECT COUNT(*) FROM (
              SELECT g.canonical_title, g.platform FROM game g JOIN listing l ON l.game_id = g.id
