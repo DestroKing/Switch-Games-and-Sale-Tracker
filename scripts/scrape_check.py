@@ -154,6 +154,29 @@ async def _walk(store: StoreConfig, profile: StoreProfile, *, max_pages: int, he
     return 0
 
 
+#: selector -> {"tag#id.class > tag.class > ...": number of matches inside it}.
+#: Walks up from each match and names the first three ancestors that carry an
+#: id or a class, nearest first, so the grid and any carousel come out as
+#: different lines.
+_CARD_ANCESTORS = """
+(selector) => {
+  const name = (el) => {
+    const cls = [...el.classList].slice(0, 3).join('.');
+    return el.tagName.toLowerCase() + (el.id ? '#' + el.id : '') + (cls ? '.' + cls : '');
+  };
+  const groups = {};
+  for (const card of document.querySelectorAll(selector)) {
+    const named = [];
+    for (let el = card.parentElement; el && named.length < 3; el = el.parentElement) {
+      if (el.id || el.classList.length) named.push(name(el));
+    }
+    const key = named.join('  <  ') || '(no named ancestor)';
+    groups[key] = (groups[key] || 0) + 1;
+  }
+  return groups;
+}
+"""
+
 _PAGER_PROBE = """
 () => {
   const out = { candidates: [], hrefsWithPage: [], cardCounts: {} };
@@ -216,6 +239,15 @@ async def diagnose_pager(store_id: str, *, headful: bool) -> int:
             except Exception as exc:  # noqa: BLE001
                 n = f"error: {type(exc).__name__}"
             print(f"    {selector!r:34} -> {n}")
+
+        # Which containers the FIRST card selector's matches sit in, as text. A
+        # product grid and a "recommended" strip often share one card class --
+        # Play-Asia's does -- and the container is what tells them apart, so a
+        # selector can be scoped to the grid without anyone sending a file.
+        print(f"\n  where {profile.card[0]!r} matches sit (nearest 3 named ancestors -> count):")
+        groups = await page.evaluate(_CARD_ANCESTORS, profile.card[0])
+        for path, count in sorted(groups.items(), key=lambda kv: -kv[1])[:12]:
+            print(f"    {count:>4}  {path}")
 
         print("\n  distinct product hrefs on this page:")
         hrefs = await page.evaluate(
