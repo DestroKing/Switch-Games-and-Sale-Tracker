@@ -83,6 +83,11 @@ class _PerStoreStdout:
     def flush(self) -> None:
         self._real.flush()
 
+    def live(self, text: str) -> None:
+        """Straight to the console, past the store's buffer: progress, as it happens."""
+        self._real.write(text + "\n")
+        self._real.flush()
+
     def __getattr__(self, name: str) -> object:
         return getattr(self._real, name)
 
@@ -95,7 +100,13 @@ class PrintSink:
 
     def page(self, store_id: str, page: int, count: int) -> None:
         self.last_raw = count
-        print(f"      p{page}: {count} listings so far")
+        # In a parallel sweep the store's block waits until it finishes; its
+        # progress should not, so that goes out live, named.
+        out = sys.stdout
+        if isinstance(out, _PerStoreStdout) and _buffer.get() is not None:
+            out.live(f"  [{store_id}] p{page}: {count} listings so far")
+        else:
+            print(f"      p{page}: {count} listings so far")
 
 
 def audit(store: StoreConfig, listings: tuple[RawListing, ...], raw: int) -> list[str]:
@@ -592,7 +603,10 @@ async def main() -> int:
     if jobs > 1:
         sys.stdout = _PerStoreStdout(sys.stdout)  # type: ignore[assignment]
         if len(stores) > 1:
-            print(f"Checking {len(stores)} stores, up to {jobs} at a time; each prints when it finishes.")
+            print(
+                f"Checking {len(stores)} stores, up to {jobs} at a time; "
+                "page progress shows live, each store's details when it finishes."
+            )
 
     async def check(store: StoreConfig) -> bool:
         browser = store.kind is AdapterKind.BROWSER
