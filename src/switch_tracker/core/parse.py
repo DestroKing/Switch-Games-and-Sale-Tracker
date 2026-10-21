@@ -134,6 +134,9 @@ HARDWARE = _patterns(
     # Game Bundled With Pokemon Pokopia" at Rs 59,999. "Bundled", not "bundle":
     # Flipkart writes "Classic JRPG Bundle with Six ... Titles" into a real game.
     r"\bbundled\s+with\b",
+    # The console under its bare name, region notes at most: nekavo and nistore,
+    # live, "Nintendo Switch 2"; Play-Asia "Nintendo Switch 2 (US)".
+    r"^\s*nintendo\s+switch(\s*2)?\s*(\([^)]*\)\s*)*$",
 )
 
 ACCESSORY = _patterns(
