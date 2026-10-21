@@ -253,7 +253,7 @@ def _rejected_line(store: StoreConfig, product: dict[str, object]) -> str:
 async def run_store(
     store: StoreConfig, *, pages: int, headful: bool, list_all: bool = False, rejected: bool = False
 ) -> bool:
-    """Collect one store for real. True when it came back usable."""
+    """Fetch one store for real, through the real adapter; nothing is saved. True when usable."""
     client = PoliteClient()
     provider = None
     try:
