@@ -185,7 +185,7 @@ consoles — even on stores that file them all under one category.
 
 ```bash
 uv sync                              # dependencies
-uv run pytest                        # 695 tests
+uv run pytest                        # 704 tests, in parallel on every core
 uv run ruff check src tests scripts  # lint
 uv run mypy                          # types (strict)
 uv run python -m switch_tracker spike   # packaging self-check

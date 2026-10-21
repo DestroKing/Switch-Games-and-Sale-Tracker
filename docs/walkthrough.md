@@ -2702,12 +2702,16 @@ land here from anywhere.
 Nothing is "done" until all four are green. Run them from the project root.
 
 ```bash
-uv run pytest                           # 695 tests, about four minutes
+uv run pytest                           # 704 tests, about 1.5 minutes in parallel
 uv run ruff check src tests scripts     # lint
 uv run ruff format src tests scripts    # formatting (rewrites files)
 uv run mypy                             # types, strict mode
 uv run python -m switch_tracker spike   # the packaging self-check (§3.17)
 ```
+
+`pytest` runs the tests **in parallel**, one worker per CPU core (pytest-xdist, set in
+`pyproject.toml`): about 1.5 minutes on 8 cores, against 4.5 one at a time. To debug a
+test with `print` output or `--pdb`, run it with `-n 0`, which runs one at a time.
 
 `pytest` never touches the network and never touches your real database — every test
 gets a throwaway one from a fixture (§1.12). It is safe to run constantly.

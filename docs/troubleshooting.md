@@ -15,7 +15,7 @@ For *how* any of this works, see [`walkthrough.md`](walkthrough.md). References 
 1. [Before you start](#1-before-you-start)
 2. [Validating the stores](#2-validating-the-stores)
 3. [After a collection: checking the data](#3-after-a-collection-checking-the-data)
-4. [Checking a build](#4-checking-a-build)
+4. [Checking a build](#4-checking-a-build), and the code's own tests
 5. [When it doesn't work](#5-when-it-doesnt-work)
 
 ---
@@ -192,6 +192,20 @@ certificate check fails the same way from source and from the exe.
 For a built app, double-click **`CHECK.bat`**. It runs the packaged app's self-check and
 keeps the window open. (Double-clicking the exe itself makes the window flash and vanish
 when it exits. That's Windows closing the console, not a crash.)
+
+**The code's own tests** need no network and never touch your data:
+
+```
+uv run pytest
+```
+
+They run in parallel, one worker per CPU core: about 1.5 minutes on 8 cores, against 4.5
+one at a time. If a single test misbehaves only in parallel, or you want to see its
+`print` output, run it on its own with `-n 0`:
+
+```
+uv run pytest tests/test_parse.py -n 0 -s
+```
 
 If the exe shows a bug that's fixed in the source, the build is older than the source.
 Run `scripts/check_stores.py <store>` from source; if that passes, rebuild with
