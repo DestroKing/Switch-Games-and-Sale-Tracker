@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import sqlite3
 from collections import Counter
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
@@ -46,6 +47,9 @@ class ListingQuery:
     stores: tuple[str, ...] = ()
     regions: tuple[str, ...] = ()
     in_stock_only: bool = False
+    #: A game key (``game.canonical_title``): only that game's listings, across
+    #: every region it was matched in. How a Games row expands into its offers.
+    game: str = ""
     sort: str = "price"
     direction: str = "asc"
     limit: int = 100
@@ -151,7 +155,9 @@ _PREVIOUS_ID = _NTH_LATEST_ID.format(n=1)
 _CHANGE_PCT = "((latest.inr_price - previous.inr_price) / previous.inr_price) * 100.0"
 
 
-def listings(conn: sqlite3.Connection, query: ListingQuery) -> dict[str, Any]:
+def _filters(query: ListingQuery) -> tuple[list[str], list[Any]]:
+    """WHERE terms shared by listings() and games(), so the two views can never
+    disagree about what a filter means. Expects aliases ``l`` and ``latest``."""
     where: list[str] = []
     params: list[Any] = []
 
@@ -182,6 +188,14 @@ def listings(conn: sqlite3.Connection, query: ListingQuery) -> dict[str, Any]:
             params.extend(values)
     if query.in_stock_only:
         where.append("latest.in_stock = 1")
+    if query.game:
+        where.append("l.game_id IN (SELECT id FROM game WHERE canonical_title = ?)")
+        params.append(query.game)
+    return where, params
+
+
+def listings(conn: sqlite3.Connection, query: ListingQuery) -> dict[str, Any]:
+    where, params = _filters(query)
     if query.sort == "change":
         # Sorting by movement is most useful as a view of actual movers.
         # Apply this before COUNT and LIMIT so pagination stays consistent.
@@ -234,6 +248,112 @@ def listings(conn: sqlite3.Connection, query: ListingQuery) -> dict[str, Any]:
         )
     )
     return {"total": total, "rows": rows, "offset": query.safe_offset(), "limit": query.safe_limit()}
+
+
+#: Whitelisted for the same reason as SORT_COLUMNS: they land in SQL text.
+#: "title" sorts the DISPLAYED title, not the match key -- by key, "The Legend
+#: of Zelda" filed under L and "Pokémon" under "pokemon", neither where a
+#: reader would look. "price" is special-cased in games(); see there.
+GAME_SORT_COLUMNS = {"price": "best_price", "title": "title COLLATE NOCASE", "offers": "offers"}
+
+#: Sorts in-stock offers ahead of every out-of-stock one, then by price. An
+#: out-of-stock ₹999 is not "the cheapest copy" of anything you can buy; it is
+#: still shown when it is the ONLY offer, which is why this ranks rather than
+#: filters.
+_BEST_RANK = "(1 - latest.in_stock) * 1e9 + latest.inr_price"
+
+
+def games(conn: sqlite3.Connection, query: ListingQuery) -> dict[str, Any]:
+    """One row per matched game: its best offer, and how many shops carry it.
+
+    Grouped by title + platform and NOT region, deliberately. The game table
+    keys region (Play-Asia's regional SKUs are genuinely different products),
+    but "where is this cheapest" is a question ACROSS regions -- an import is
+    exactly the alternative being compared. Each row still names its best
+    offer's region, so nothing is hidden.
+
+    The best_* columns rely on SQLite's documented bare-column rule: in an
+    aggregate query with EXACTLY ONE min() or max(), the other selected columns
+    come from the row that produced it. That is what makes "the store and URL
+    of the cheapest offer" one pass instead of a second self-join -- and why
+    there is no MAX() here: adding one (a price range, say) silently voids the
+    rule, and best_store starts naming an arbitrary row. A test pins it.
+    """
+    where, params = _filters(query)
+    # Offers with NO rupee price (no exchange rate yet) are deliberately NOT
+    # filtered out: they still count as offers, so this row's "Offers" agrees
+    # with the list its ▸ expands to (listings() keeps them too). MIN() skips
+    # their NULL rank, so they can never be chosen as the best offer.
+    clause = f"WHERE {' AND '.join(where)}" if where else ""
+    grouped = f"""
+        SELECT g.canonical_title AS game, l.platform,
+               MIN({_BEST_RANK}) AS best_rank,
+               latest.inr_price AS best_price, latest.in_stock AS best_in_stock,
+               l.raw_title AS title, l.url AS best_url, l.region AS best_region,
+               l.condition AS best_condition, s.name AS best_store,
+               COUNT(*) AS offers, COUNT(DISTINCT l.store_id) AS stores
+        FROM listing l
+        JOIN store s ON s.id = l.store_id
+        JOIN game g ON g.id = l.game_id
+        JOIN price_point latest ON latest.id = {_LATEST_ID}
+        {clause}
+        GROUP BY g.canonical_title, l.platform
+    """
+    total = conn.execute(f"SELECT COUNT(*) AS n FROM ({grouped})", params).fetchone()["n"]
+    column = GAME_SORT_COLUMNS.get(query.sort, GAME_SORT_COLUMNS["price"])
+    # Games you can buy come first in BOTH price directions. Ordering by
+    # best_rank alone did that ascending only: descending, its +1e9 offset put
+    # every out-of-stock-only game at the very top of "most expensive first".
+    # A game with no rupee price at all goes last too: SQLite would otherwise
+    # sort its NULL price FIRST ascending, above every real one.
+    in_stock_first = "best_price IS NULL, best_in_stock DESC, " if column == "best_price" else ""
+    rows = _rows(
+        conn.execute(
+            f"SELECT * FROM ({grouped}) "
+            f"ORDER BY {in_stock_first}{column} {query.sort_direction()}, game ASC, platform ASC "
+            "LIMIT ? OFFSET ?",
+            [*params, query.safe_limit(), query.safe_offset()],
+        )
+    )
+    for row in rows:
+        del row["best_rank"]
+        row["best_in_stock"] = bool(row["best_in_stock"])
+    return {"total": total, "rows": rows, "offset": query.safe_offset(), "limit": query.safe_limit()}
+
+
+def watch_status(
+    conn: sqlite3.Connection, items: list[dict[str, Any]], aliases: Mapping[str, str] | None = None
+) -> list[dict[str, Any]]:
+    """Each watched game with its current best offer, and whether it hit target.
+
+    A hit needs the best offer to be IN STOCK: "₹2,999, sold out" is not a
+    price anyone can act on, and alerting on it would train the user to ignore
+    the alert.
+
+    ``aliases`` is the matcher's map (match key -> key it groups under). A key
+    watched BEFORE an alias was added is resolved through it, or adding the
+    alias that fixes a split would silently orphan the watch.
+    """
+    aliases = aliases or {}
+    # ponytail: one games() query per watched item. Watchlists are tens of
+    # games, not thousands; batch into one query if that ever stops being true.
+    out = []
+    for item in items:
+        key = aliases.get(item["game"], item["game"])
+        found = games(conn, ListingQuery(game=key, platform=item["platform"], limit=1))["rows"]
+        best = found[0] if found else None
+        target = item.get("target")
+        hit = bool(
+            best
+            and best["best_in_stock"]
+            and best["best_price"] is not None  # no rupee price yet: nothing to compare
+            and target is not None
+            and best["best_price"] <= target
+        )
+        out.append({**item, "best": best, "hit": hit})
+    # Hits first: they are the reason the panel exists.
+    out.sort(key=lambda r: (not r["hit"], (r["best"] or {}).get("title") or r["game"]))
+    return out
 
 
 def movers(conn: sqlite3.Connection) -> list[dict[str, Any]]:

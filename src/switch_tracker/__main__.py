@@ -6,6 +6,9 @@
     fx        worker: refresh exchange rates
     inspect   worker: the click-to-pick tool, in a VISIBLE window
     spike     the packaging self-check
+    match     regroup listings into games (after editing matches.local.json)
+    collect-now  start a collection and wait for it -- what a scheduled task runs
+    schedule  register/remove the daily scheduled collection (--at HH:MM | --off)
 
 The UI process must never import Playwright or an adapter, so every worker
 import lives INSIDE its own branch and never at module level.
@@ -80,8 +83,10 @@ def _parse(argv: list[str]) -> argparse.Namespace:
         "command",
         nargs="?",
         default="serve",
-        choices=["serve", *WORKERS, "spike"],
+        choices=["serve", *WORKERS, "spike", "match", "collect-now", "schedule"],
     )
+    parser.add_argument("--at", default=None, help="for 'schedule': daily time, HH:MM (24h)")
+    parser.add_argument("--off", action="store_true", help="for 'schedule': remove the daily collection")
     parser.add_argument("store_id", nargs="?", help="for 'inspect': which store to open")
     parser.add_argument("--run-id", type=int, default=None, help="internal: the run to report into")
     parser.add_argument(
@@ -122,6 +127,23 @@ def _dispatch(args: argparse.Namespace) -> int:
         from switch_tracker.spike import run
 
         return run()
+
+    if args.command == "match":
+        from switch_tracker.core import db, matcher
+
+        conn = db.connect()
+        db.ensure_schema(conn)
+        matched = matcher.rematch(conn, matcher.load_aliases())
+        games = conn.execute("SELECT COUNT(DISTINCT canonical_title || platform) FROM game").fetchone()[0]
+        print(f"Grouped {matched} listings into {games} games.")
+        return 0
+
+    if args.command in ("collect-now", "schedule"):
+        from switch_tracker import schedule
+
+        if args.command == "collect-now":
+            return schedule.collect_now()
+        return schedule.unregister() if args.off else schedule.register(args.at)
 
     if args.command == "serve":
         from switch_tracker.web.app import serve

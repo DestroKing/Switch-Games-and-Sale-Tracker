@@ -115,6 +115,16 @@
 
   <dl class="stats" id="stats"></dl>
 
+  <!-- Above the collector on purpose: "has anything I want got cheap?" is the
+       question most visits are for, and a hit is worth more than a health tile. -->
+  <section class="section" aria-labelledby="watchHead">
+    <div class="section-head">
+      <h2 id="watchHead">Watchlist</h2>
+      <span class="sub" id="watchSub" aria-live="polite"></span>
+    </div>
+    <div id="watch"></div>
+  </section>
+
   <section class="section" aria-labelledby="collectorHead">
     <div class="section-head">
       <h2 id="collectorHead">Collector</h2>
@@ -142,12 +152,18 @@
 
   <section class="section" aria-labelledby="listingsHead">
     <div class="section-head">
-      <h2 id="listingsHead">All listings</h2>
+      <h2 id="listingsHead">Games</h2>
       <span class="spacer"></span>
       <span class="sub count" id="count"></span>
     </div>
 
     <div class="toolbar">
+      <!-- Games first: one row per game, cheapest buyable copy first, is the
+           question this tool exists to answer. Listings is the raw view. -->
+      <div class="seg" id="view" role="group" aria-label="Show">
+        <button data-v="games" aria-pressed="true">Games</button>
+        <button data-v="listings" aria-pressed="false">Every listing</button>
+      </div>
       <div class="searchwrap">
         <input type="search" id="q" aria-label="Search titles"
                placeholder="Search titles — try zelda, mario, pokemon">

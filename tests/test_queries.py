@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from switch_tracker.core import db
+from switch_tracker.core import db, matcher
 from switch_tracker.web import queries
 
 
@@ -70,6 +70,138 @@ def add_price(
         "inr_price, in_stock) VALUES (?,?,?,?,?,?,?)",
         (listing_id, run_id, at, currency, inr, inr, in_stock),
     )
+
+
+@pytest.fixture
+def shelf(conn: sqlite3.Connection) -> sqlite3.Connection:
+    """One game at three offers -- the cheapest OUT of stock -- plus a second game."""
+    add_listing(conn, 1, "nistore", "Metroid Prime 4 Beyond")
+    add_listing(conn, 2, "amazon", "Metroid Prime 4: Beyond - Nintendo Switch")
+    add_listing(conn, 3, "amazon", "Metroid Prime 4 Beyond (Asia)", region="ASIA_EN")
+    add_listing(conn, 4, "nistore", "Kirby Air Riders", platform="SWITCH2")
+    add_price(conn, 1, 1, 4999, at="2026-01-01T00:00:00Z")
+    add_price(conn, 2, 1, 4499, at="2026-01-01T00:00:00Z")
+    add_price(conn, 3, 1, 3999, at="2026-01-01T00:00:00Z", in_stock=0)
+    add_price(conn, 4, 1, 5999, at="2026-01-01T00:00:00Z")
+    matcher.rematch(conn)
+    return conn
+
+
+class TestGames:
+    def test_one_row_per_game_across_stores_and_regions(self, shelf) -> None:
+        result = queries.games(shelf, queries.ListingQuery())
+        assert result["total"] == 2
+        metroid = next(r for r in result["rows"] if r["game"] == "metroid prime 4 beyond")
+        assert (metroid["offers"], metroid["stores"]) == (3, 2)
+
+    def test_the_best_offer_is_the_cheapest_one_you_can_buy(self, shelf) -> None:
+        """The ₹3,999 copy is out of stock, so ₹4,499 is the real best -- and its
+        store and URL are reported with it, not the out-of-stock row's."""
+        metroid = queries.games(shelf, queries.ListingQuery(q="metroid"))["rows"][0]
+        assert (metroid["best_price"], metroid["best_store"], metroid["best_url"]) == (
+            4499,
+            "Amazon",
+            "https://x/2",
+        )
+
+    def test_an_out_of_stock_only_game_still_shows_its_price(self, shelf) -> None:
+        shelf.execute("UPDATE price_point SET in_stock = 0 WHERE listing_id = 4")
+        kirby = queries.games(shelf, queries.ListingQuery(q="kirby"))["rows"][0]
+        assert (kirby["best_price"], kirby["best_in_stock"]) == (5999, False)
+
+    def test_takes_the_same_filters_as_listings(self, shelf) -> None:
+        only_ni = queries.games(shelf, queries.ListingQuery(stores=("nistore",), q="metroid"))["rows"][0]
+        assert (only_ni["best_price"], only_ni["offers"]) == (4999, 1)
+
+    def test_out_of_stock_only_games_sort_last_in_both_price_directions(self, shelf) -> None:
+        shelf.execute("UPDATE price_point SET in_stock = 0 WHERE listing_id = 4")  # Kirby: nothing in stock
+        for direction in ("asc", "desc"):
+            rows = queries.games(shelf, queries.ListingQuery(sort="price", direction=direction))["rows"]
+            assert rows[-1]["game"] == "kirby air riders", direction
+
+    def test_sorts_titles_as_displayed_not_by_match_key(self, shelf) -> None:
+        """By key, "The Legend of Zelda" files under L. Readers look under T."""
+        add_listing(shelf, 5, "nistore", "The Legend of Zelda: Echoes of Wisdom")
+        add_price(shelf, 5, 1, 3999, at="2026-01-01T00:00:00Z")
+        matcher.rematch(shelf)
+        titles = [r["title"] for r in queries.games(shelf, queries.ListingQuery(sort="title"))["rows"]]
+        assert titles == sorted(titles, key=str.lower)
+
+    def test_sorts_by_offers(self, shelf) -> None:
+        rows = queries.games(shelf, queries.ListingQuery(sort="offers", direction="desc"))["rows"]
+        assert [r["offers"] for r in rows] == [3, 1]
+
+    def test_a_game_key_narrows_listings_to_that_games_offers(self, shelf) -> None:
+        result = queries.listings(shelf, queries.ListingQuery(game="metroid prime 4 beyond"))
+        assert {r["id"] for r in result["rows"]} == {1, 2, 3}
+
+
+class TestOffersWithNoRupeePrice:
+    """An offer with no exchange rate yet still counts -- as listings() counts it."""
+
+    @pytest.fixture
+    def unpriced(self, shelf):
+        add_listing(shelf, 9, "nistore", "Metroid Prime 4 Beyond (US)", region="US")
+        shelf.execute(
+            "INSERT INTO price_point (listing_id, run_id, captured_at, native_currency, native_price, "
+            "inr_price, in_stock) VALUES (9, 1, '2026-01-01T00:00:00Z', 'USD', 59.99, NULL, 1)"
+        )
+        matcher.rematch(shelf)
+        return shelf
+
+    def test_offers_count_matches_the_expanded_list(self, unpriced) -> None:
+        game = "metroid prime 4 beyond"
+        row = queries.games(unpriced, queries.ListingQuery(q="metroid"))["rows"][0]
+        offers = queries.listings(unpriced, queries.ListingQuery(game=game, platform="SWITCH"))
+        assert row["offers"] == offers["total"] == 4
+        assert row["best_price"] == 4499  # an unpriced offer is never "best"
+
+    def test_a_game_with_only_unpriced_offers_sorts_last_and_never_hits(self, unpriced) -> None:
+        add_listing(unpriced, 10, "amazon", "Hades II")
+        unpriced.execute(
+            "INSERT INTO price_point (listing_id, run_id, captured_at, native_currency, native_price, "
+            "inr_price, in_stock) VALUES (10, 1, '2026-01-01T00:00:00Z', 'USD', 29.99, NULL, 1)"
+        )
+        matcher.rematch(unpriced)
+        for direction in ("asc", "desc"):
+            rows = queries.games(unpriced, queries.ListingQuery(sort="price", direction=direction))["rows"]
+            assert rows[-1]["game"] == "hades ii", direction
+        [status] = queries.watch_status(unpriced, [{"game": "hades ii", "platform": "SWITCH", "target": 9e9}])
+        assert status["hit"] is False
+
+
+class TestWatchStatus:
+    def test_a_watch_follows_its_game_through_an_alias(self, shelf) -> None:
+        """Adding the alias that fixes a split must not orphan a watch on the old key."""
+        aliases = {"metroid prime 4": "metroid prime 4 beyond"}
+        [status] = queries.watch_status(
+            shelf, [{"game": "metroid prime 4", "platform": "SWITCH", "target": 4500}], aliases
+        )
+        assert (status["game"], status["hit"]) == ("metroid prime 4", True)  # stored key kept for DELETE
+
+    def test_hits_only_at_or_below_target_and_in_stock(self, shelf) -> None:
+        status = queries.watch_status(
+            shelf,
+            [
+                {"game": "metroid prime 4 beyond", "platform": "SWITCH", "target": 4500},
+                {"game": "kirby air riders", "platform": "SWITCH2", "target": 5000},
+            ],
+        )
+        assert [(s["game"], s["hit"]) for s in status] == [
+            ("metroid prime 4 beyond", True),  # hits sort first
+            ("kirby air riders", False),
+        ]
+
+    def test_a_cheap_but_sold_out_offer_is_not_a_hit(self, shelf) -> None:
+        """₹3,999 is under target but out of stock; ₹4,499 is the best you can buy."""
+        [status] = queries.watch_status(
+            shelf, [{"game": "metroid prime 4 beyond", "platform": "SWITCH", "target": 4000}]
+        )
+        assert status["hit"] is False
+
+    def test_a_game_with_no_offers_left_reports_none_rather_than_vanishing(self, shelf) -> None:
+        [status] = queries.watch_status(shelf, [{"game": "gone", "platform": "SWITCH", "target": 1}])
+        assert (status["best"], status["hit"]) == (None, False)
 
 
 class TestSummary:

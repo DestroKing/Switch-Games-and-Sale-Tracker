@@ -72,17 +72,21 @@ cross-reference looks like §3.4 — so skipping around is safe.
   - [3.15 Collecting once, not every launch](#315-collecting-once-not-every-launch)
   - [3.16 The self-repair tools](#316-the-self-repair-tools)
   - [3.17 Shipping it as an .exe](#317-shipping-it-as-an-exe)
+  - [3.18 Matching one game across shops](#318-matching-one-game-across-shops)
+  - [3.19 Collecting on a schedule](#319-collecting-on-a-schedule)
 - **[Part 4 — The interface, feature by feature](#part-4--the-interface-feature-by-feature)**
   - [4.1 The design system](#41-the-design-system)
   - [4.2 Status, and why colour is never alone](#42-status-and-why-colour-is-never-alone)
   - [4.3 The dashboard, top to bottom](#43-the-dashboard-top-to-bottom)
   - [4.4 The listings table](#44-the-listings-table)
-  - [4.5 Filters](#45-filters)
-  - [4.6 Every state a view can be in](#46-every-state-a-view-can-be-in)
-  - [4.7 Accessibility, measured](#47-accessibility-measured)
-  - [4.8 What was deliberately NOT done](#48-what-was-deliberately-not-done)
+  - [4.5 Games, offers and price history](#45-games-offers-and-price-history)
+  - [4.6 The watchlist](#46-the-watchlist)
+  - [4.7 Filters](#47-filters)
+  - [4.8 Every state a view can be in](#48-every-state-a-view-can-be-in)
+  - [4.9 Accessibility, measured](#49-accessibility-measured)
+  - [4.10 What was deliberately NOT done](#410-what-was-deliberately-not-done)
 - **[Part 5 — The five ideas that recur](#part-5--the-five-ideas-that-recur)**
-- **[Part 6 — What is deliberately not built](#part-6--what-is-deliberately-not-built)**
+- **[Part 6 — What is still not built](#part-6--what-is-still-not-built)**
   - [Where to start reading](#where-to-start-reading)
 - **[Appendix A — Glossary](#appendix-a--glossary)**
 - **[Appendix B — Working on the code](#appendix-b--working-on-the-code)**
@@ -149,7 +153,7 @@ If something goes wrong, jump to **Appendix C — when it doesn't work**.
 ## 0.3 Where the code lives
 
 `uv run python -m switch_tracker` runs `src/switch_tracker/__main__.py`. Start there; it
-is 150 lines and it decides everything else. The rest of the tree:
+is 180 lines and it decides everything else. The rest of the tree:
 
 ```
 src/switch_tracker/
@@ -159,6 +163,7 @@ src/switch_tracker/
 ├── selection.py        Encode/decode "collect only these stores" (§3.14).
 ├── resources.py        Reads BUNDLED read-only files, works frozen or not (§3.17).
 ├── spike.py            Self-check for the four things that break only after packaging.
+├── schedule.py         collect-now, and the daily scheduled task (§3.19).
 │
 ├── config/             WHICH SHOPS EXIST
 │   ├── stores.py         The twenty-four shops, hand-written (§3.1).
@@ -195,6 +200,7 @@ src/switch_tracker/
 │   └── inspect.py        The click-to-pick repair tool, in a visible window (§3.16).
 │
 ├── fx/rates.py         USD->INR, and the null it refuses to fake (§3.10).
+├── core/matcher.py     Groups listings into games, across shops (§3.18).
 ├── events/             LIVE PROGRESS: writer appends rows, reader tails them (§3.13).
 │
 └── web/                THE DASHBOARD  (this half never scrapes)
@@ -203,7 +209,8 @@ src/switch_tracker/
     ├── queries.py        Every SELECT the page needs (§3.11).
     ├── runs.py           Starts workers; guarantees only one at a time (§3.12).
     ├── errors.py         One shape for every error response.
-    ├── routers/          The URLs: pages, data, actions, events.
+    ├── watchlist.py      Reads/writes watchlist.local.json (§4.6).
+    ├── routers/          The URLs: pages, data, actions, events, watch.
     ├── templates/        The HTML, with Jinja placeholders (§1.5).
     └── static/           app.js, app.css, and a vendored copy of htmx (§1.9).
 ```
@@ -212,7 +219,7 @@ And outside `src/switch_tracker/`:
 
 | Path | What it is |
 |---|---|
-| `tests/` | 542 tests. `conftest.py` holds the shared setup ("fixtures", §1.12). |
+| `tests/` | 589 tests. `conftest.py` holds the shared setup ("fixtures", §1.12). |
 | `scripts/check_stores.py` | **The pre-release sweep.** Run any store, of any kind, against the **live** site and get a verdict, not just a count (Appendix B.2). |
 | `scripts/scrape_check.py`, `category_check.py`, `diagnose*.py` | Narrower live-site tools: one browser store's walk, feed stores' category slugs, and "why did N rows become M" (Appendix B.2). |
 | `packaging/`, `switch_tracker.spec` | Turning it into a Windows `.exe` (§3.17). |
@@ -243,6 +250,8 @@ What you'll find in there:
 | `stores.local.json` | Corrections **Check stores** wrote (§3.1). | Yes — rebuilt by pressing **Check stores**. |
 | `profiles.local.json` | Selectors the click-to-pick tool saved (§3.16). | Yes — but you'll have to re-pick them. |
 | `settings.json` | Port, headful, collect-on-launch. | Yes — defaults return. |
+| `watchlist.local.json` | Your watched games and target prices (§4.6). | Only if you mean it — targets are typed by hand. |
+| `matches.local.json` | Your title aliases for the matcher (§3.18). Optional; you create it. | Yes — games regroup without your aliases. |
 | `run.lock` | The pid of a running worker (§3.12). | Yes, when nothing is running. |
 | `diagnostics/` | Screenshots and HTML from stores that returned nothing, plus `flipkart-p<N>-navigation.json` redirect traces (§3.7). | Yes, always. |
 
@@ -294,7 +303,7 @@ Full list in **Appendix A — glossary**. These seven appear immediately:
 - **adapter** — the code that knows *one way* of reading a shop. Three exist: Shopify
   feed, WooCommerce API, real browser (§3.2).
 - **listing** — one product at one shop. "Zelda at nistore" and "Zelda at gameloot" are
-  two listings, and nothing yet connects them (Part 5).
+  two listings. The matcher groups them into one **game** (§3.18).
 - **price point** — one price for one listing at one moment. Listings get *updated*;
   price points only ever get *appended*. That append-only table is the whole point of
   the program.
@@ -522,9 +531,9 @@ program and downloads a ~400 MB browser. That single fact dominates the packagin
 
 | File | Lines | Job |
 |---|---|---|
-| `web/templates/index.html` | ~205 | The shell the server renders once |
-| `web/static/app.css` | ~720 | The design system (Part 4) |
-| `web/static/app.js` | ~810 | Everything that happens after load |
+| `web/templates/index.html` | ~220 | The shell the server renders once |
+| `web/static/app.css` | ~760 | The design system (Part 4) |
+| `web/static/app.js` | ~1,130 | Everything that happens after load |
 
 **Why not React.** React, Vue and Svelte all need a **build step** — a toolchain that
 compiles your source into files a browser can load. That means Node.js, a package
@@ -534,8 +543,12 @@ also why `switch_tracker.spec` can bundle them by copying.
 
 **The trade-off, honestly.** State is managed by hand. `app.js` holds two small state
 objects — `run` (what the current collection is doing) and `state` (what the table is
-filtered to) — and functions that repaint from them. That is a pattern that stops
-scaling somewhere around "several interacting views", and this app has one.
+filtered to), plus the watchlist — and functions that repaint from them. That is a
+pattern that stops scaling somewhere around "several interacting views". This app now
+has two table views, expandable detail rows and a watchlist whose ☆ buttons appear in
+the table, and `app.js` has grown from ~740 to ~1,130 lines. That's still manageable,
+because every one of those reads from one state object and binds one delegated listener
+per container (§4.5). But it is the honest place to reconsider if a third view arrives.
 
 **The rule that keeps it honest.** Every repaint reads from those objects, never from
 the DOM. The temptation in framework-free code is to ask the page what it currently
@@ -696,6 +709,12 @@ argument (`__main__.py`):
 | `fx` | worker: refresh exchange rates |
 | `inspect` | worker: open a visible browser for the click-to-pick tool |
 
+Four more commands are for you rather than for the dashboard, and they aren't workers.
+None of them needs a `--run-id`: `spike` (packaging self-check, §3.17), `match`
+(regroup games, §3.18), and `collect-now` / `schedule` (§3.19). `collect-now` is the
+interesting one, because it doesn't collect anything itself. It asks the same launcher
+the button uses to start a `collect` worker, then waits for it to finish.
+
 When you press a button, the dashboard **starts a second copy of itself** with a different
 argument, then goes straight back to serving pages.
 
@@ -801,7 +820,7 @@ your head.
 with `selection.parse_ids`, and if any id isn't a real store it answers **404 before a
 run row exists** — a typo must not occupy the one active-run slot.
 
-**3. Claiming the slot.** `web/runs.py:RunLauncher.start` (`runs.py:162`) does four
+**3. Claiming the slot.** `web/runs.py:RunLauncher.start` (`runs.py:165`) does four
 things in order:
 
 ```python
@@ -851,7 +870,7 @@ if needs_browser(stores, only):
 An HTTP-only selection never pays to launch Chromium — and `needs_browser` asks the
 **selection**, not the enabled flags, for the reason §3.14 spells out.
 
-**7. The run (`services/collect.py:CollectService.run`, `collect.py:93`).**
+**7. The run (`services/collect.py:CollectService.run`, `collect.py:98`).**
 
 ```python
 active = select_stores(stores, only)     # scope
@@ -868,7 +887,7 @@ Two pools, because eight simultaneous Chrome contexts and eight simultaneous HTT
 requests cost wildly different amounts of memory. Two deadlines for the same reason:
 **180 s** per HTTP store, **600 s** per browser store.
 
-**8. One store (`_process_store`, `collect.py:159`).** This is where failure is
+**8. One store (`_process_store`, `collect.py:171`).** This is where failure is
 *contained*. `adapter.fetch()` is wrapped in `asyncio.wait_for` and in a deliberately
 broad `except Exception`, and every exit — timeout, crash, `Failed`, `Partial`, `Ok` —
 ends the same way: a row in `run_store` and a `store_finished` event.
@@ -877,7 +896,7 @@ ends the same way: a row in `run_store` and a `store_finished` event.
 > still get collected. That containment is why the dashboard can honestly show
 > "22 ok, 1 failed: TimeoutError" instead of nothing at all.
 
-**9. Saving (`_persist`, `collect.py:221`).** Per listing, inside one transaction:
+**9. Saving (`_persist`, `collect.py:233`).** Per listing, inside one transaction:
 
 ```sql
 INSERT INTO listing (...) ON CONFLICT(store_id, sku) DO UPDATE SET ... RETURNING id
@@ -1392,7 +1411,7 @@ Seven tables. The three that carry the value:
 ```
 store   ──< listing ──< price_point
                 │
-              game_id (always NULL — see §5)
+              game_id ──> game     (filled by the matcher, §3.18)
 ```
 
 - **`listing`** — one row per product per shop. `UNIQUE(store_id, sku)`.
@@ -1726,6 +1745,164 @@ fail only after freezing: TLS certificates, template bundling, the web server, a
 Playwright driver. `switch-tracker spike` prints the same output either way — that
 sameness is the whole point.
 
+## 3.18 Matching one game across shops
+
+**Files:** `core/matcher.py`, `services/collect.py`, `web/queries.py:games`
+
+Until this existed, "Metroid Prime 4" at four shops was four unrelated rows, and
+`listing.game_id` (in the schema from the very first TypeScript version) was always
+`NULL`. Matching is what turns *"a list of things shops sell"* into *"where is the
+cheapest copy of X right now"*, which is the question the project exists to answer.
+
+### The key
+
+```python
+match_key("Pokémon Legends: Z-A (Nintendo Switch 2)")   # "pokemon legends z a"
+match_key("Pokemon Legends Z-A - Switch 2")              # "pokemon legends z a"
+```
+
+`match_key` is `normalise_title()` from `core/parse.py` (strip console names, "game",
+"edition", condition words and bracketed regions), plus three fixes found by feeding it
+real titles:
+
+| Fix | Without it |
+|---|---|
+| **Fold accents** (`unicodedata` NFKD) before normalising | `normalise_title` drops non-ASCII, so "Pokémon" became "pok mon" and never met "Pokemon" |
+| **Delete apostrophes** (straight, curly and backtick) | "Luigi's" became "luigi s", split from "Luigis" |
+| A short **stop list**: the, of, and, for, nintendo, and region words such as asia, english, version | Play-Asia writes regions *into* the title ("Asia English"), and "Mario Kart World for Nintendo Switch 2" kept a stray "for" |
+
+What is **not** on the stop list matters more than what is. "a" and "an" were on it at
+first, and the first real title tried showed the problem: "Pokemon Legends Z-A"
+tokenises to "… z a", so dropping the "a" would merge it with any "Legends Z". Single
+letters carry meaning in titles. The test file pins these *must-not-merge* pairs as
+carefully as the must-merge ones: Z-A vs Z, Mario Kart 8 vs 8 Deluxe, Xenoblade 2 vs 3.
+
+> **The asymmetry that decides every rule here.** A missed merge costs one line in an
+> alias file and is visible: two rows that should be one. A **wrong** merge puts two
+> games' prices in one series, and nothing anywhere reports it. So the key errs towards
+> splitting. It's the same asymmetry as `parse_price` returning `None` (§3.4).
+
+### The pass
+
+`rematch(conn, aliases)` recomputes **every** listing's game from `raw_title`,
+`platform` and `region`, all of which are already stored, in one transaction. Games
+nothing points at any more are deleted, so an improved key doesn't leave its old
+spelling behind as an empty game. Three places run it:
+
+| Where | Why |
+|---|---|
+| The end of every collection (`CollectService.run`) | New listings get grouped with no extra step |
+| `serve`, once, if there are listings but no games | A database collected before matching existed works straight away, not after the next 20-minute run |
+| `switch-tracker match` | After editing the alias file, regroup in about a second |
+
+Because it reads only stored columns, **improving the matcher never requires a
+re-scrape**. That was a design rule from the original handoff, and it's why matching is
+a separate pass and not something done while collecting. A failure inside the pass is
+caught and logged as a run warning: the prices are already saved, and grouping is
+derived data.
+
+`UNKNOWN`-platform listings are never matched, because matching them would group a PS5
+title with its Switch namesake.
+
+### Regions: separate in the data, together in the view
+
+The `game` table keys `(canonical_title, platform, region)`. That is the original schema,
+kept on purpose, because Play-Asia's regional editions are genuinely different products
+(§3.9). But the **Games view groups by title and platform only**. "Where is this
+cheapest?" is a question *across* regions, since an import is exactly the alternative
+being compared. Each row still names its best offer's region, so nothing is hidden.
+
+### When it gets one wrong
+
+`matches.local.json`, in the data directory, maps one title onto another:
+
+```json
+{ "Zelda: Tears of the Kingdom": "The Legend of Zelda: Tears of the Kingdom" }
+```
+
+Both sides go through `match_key`, so you can paste titles straight from the dashboard
+without knowing the key format. Then run `switch-tracker match`. A corrupt file is
+ignored with no aliases, the same as `stores.local.json`: degraded, not broken.
+
+There's no "split" override. Merges are the common failure and splits the rare one,
+and because the key errs towards splitting, a wrong merge needs two titles to normalise
+to the *same* string. Add a split mechanism when one is actually seen.
+
+### The query, and the one-MIN() rule
+
+`games()` returns one row per game with its **best offer**, meaning the cheapest you can
+*buy*. In-stock offers rank ahead of every out-of-stock one:
+
+```sql
+MIN((1 - latest.in_stock) * 1e9 + latest.inr_price) AS best_rank,
+latest.inr_price AS best_price, s.name AS best_store, l.url AS best_url, ...
+```
+
+The store and URL come from SQLite's documented **bare-column rule**: in an aggregate
+query with *exactly one* `min()` or `max()`, the other selected columns come from the row
+that produced it. That gives "the cheapest offer, *and where it is*" in one pass, without
+a self-join. The word *exactly* is load-bearing, and it was learned the hard way. The
+first version also selected `MAX(price)` for a price range, which quietly voided the
+rule. `best_store` started naming an arbitrary row, and only the test asserting the
+store *alongside* the price caught it. The range was dropped. It is the clearest example
+in this codebase of a feature that wasn't worth the correctness it cost.
+
+The same WHERE builder, `_filters()`, serves both `listings()` and `games()`. That's how
+the two views can never disagree about what "In stock only" or a store filter means.
+
+## 3.19 Collecting on a schedule
+
+**Files:** `schedule.py`, `__main__.py`
+
+History is the product, and history collected only when someone remembers to press a
+button is sparse. Movers stay mostly empty, and a watchlist target has nothing to fire
+against. Two commands fix that:
+
+```bash
+switch-tracker schedule --at 07:30    # daily Windows scheduled task (prints a cron line elsewhere)
+switch-tracker schedule --off         # remove it
+switch-tracker collect-now            # what the task runs; also fine by hand
+```
+
+From source, prefix them with `uv run python -m`. On Windows, `START.bat` forwards its
+arguments, so `START.bat schedule --at 07:30` from a command prompt in the project folder
+does the same thing. With the packaged build, run `switch-tracker.exe schedule --at 07:30`.
+
+**`collect-now` goes through the same `RunLauncher` as the button.** It doesn't call the
+collector directly, so a scheduled run gets every guard from §3.12: stale-run reaping,
+the one-active-run unique index, and the PID lock that catches a second copy of the app.
+A scheduled task that skipped those would be the one remaining way to start two
+collections at once. If a run is already going, `collect-now` leaves it alone and exits
+0, because the prices are being collected either way.
+
+**It waits for the worker instead of exiting the moment it has spawned one.** Task
+Scheduler considers a task finished when its process exits. A task that "finishes" in
+50 ms while a 20-minute collection runs on unseen has a history that says nothing true,
+and leaves a child process that "End task" can't reach. When the worker is gone,
+`reap_stale()` closes any run it left unfinished with a readable reason, so a crashed
+night doesn't block the next morning.
+
+It refuses with exit code 2 if the stores have never been checked. That's the same rule
+as the launch bootstrap (§3.15), and for the same reason.
+
+`schedule --at` also refuses while `TRACKER_DATA_DIR` or `TRACKER_DB` is set in your
+shell. The task runs in a fresh environment and wouldn't see either, so it would
+quietly collect into the *default* database rather than the one you were pointed at.
+
+The startup regroup in `serve` (§3.18) can meet a scheduled collection mid-write. If the
+database is locked, it prints a note and starts the dashboard anyway, because the
+running collection regroups everything when it finishes. A dashboard that refused to
+start there would be all cost and no gain.
+
+**No console window every morning.** The frozen exe is already built windowless
+(`switch_tracker.spec`). From source, the task runs `pythonw.exe` instead of
+`python.exe` when the venv has one.
+
+The known gap, marked with a `ponytail:` comment: a plain DAILY trigger skips the day
+if the PC is off at that time. "Run as soon as possible after a missed start" needs a
+task XML (`StartWhenAvailable`), not `schtasks` flags. It's worth adding if missed days
+turn out to matter.
+
 ---
 
 # Part 4 — The interface, feature by feature
@@ -1825,7 +2002,11 @@ already do.
 one figure each. Same information, a third of the height. Cards would be right only if
 each figure had its own actions or its own detail view. None of them does.
 
-**4. The collector** — one panel containing a dense list, one line per store:
+**4. The watchlist** — the games you starred, their best price right now, and your
+target. It sits above the collector on purpose. "Has anything I want got cheap?" is
+the question most visits are for, and a hit outranks a health tile (§4.6).
+
+**5. The collector** — one panel containing a dense list, one line per store:
 
 ```
 ✕ Flipkart                    0
@@ -1842,12 +2023,12 @@ wrapping about fifteen characters each — the brightly-coloured dashboard that 
 Healthy stores get one line. Only a store worth investigating spends a second line on its
 reason — a column of two dozen identical "ok"s is noise.
 
-**5. Progress** — hidden until a run exists, because an empty panel is noise. When a run
+**6. Progress** — hidden until a run exists, because an empty panel is noise. When a run
 starts it shows the current store, page, running totals and failure count, with the raw
 log **collapsed inside it**. Diagnostics matter when something breaks and should not
 dominate the page the rest of the time.
 
-**6. Moved since last run.** This shows six rows, then `Show all N changes`, with a
+**7. Moved since last run.** This shows six rows, then `Show all N changes`, with a
 **Store** dropdown above it.
 
 The preview limit is a layout decision. When the backend returned sixty rows, showing
@@ -1871,11 +2052,16 @@ is safe only because the list is now complete: filtering a capped list would ans
 a full fetch on every page load, and that's on the improvement list for when movers
 reach the thousands.)
 
+**8. The table** — Games by default, Every listing one click away. §4.4 covers what both
+views share, and §4.5 covers the Games view and the ▸ detail rows.
+
 ## 4.4 The listings table
 
 **File:** `app.js`, `search()` and `headerCell()`.
 
-This is the part people actually use, so it gets the most attention.
+This is the part people actually use, so it gets the most attention. Everything in this
+section applies to both views (§4.5). The examples use Every listing because it has
+more columns.
 
 **Sorting is keyboard-operable**, which it previously was not:
 
@@ -1948,7 +2134,137 @@ rows and inserts them into the `<tbody>` already on screen. Two details matter:
 - **Sort handlers bind only on a full paint.** On append, the header buttons keep their
   existing DOM nodes, so binding again would make one click sort twice.
 
-## 4.5 Filters
+## 4.5 Games, offers and price history
+
+**Files:** `app.js` (`gameRowHtml`, `offersHtml`, `historyHtml`), `web/queries.py:games`.
+
+The table has two views, chosen by a segmented control at the start of the toolbar:
+**Games** (the default) and **Every listing**. They share every filter, the chips, the
+sort buttons and the "Load more" path. Only the endpoint, the columns and the valid sort
+keys change.
+
+**Games is the default because it answers the question people come with.** "Where is
+Metroid Prime 4 cheapest?" used to mean typing "metroid" and scanning six rows from four
+shops. Now it is one row that already shows the answer:
+
+```
+▸  Metroid Prime 4: Beyond         ₹4,499   Amazon India          3 stores   ☆ Watch
+```
+
+*Best price* is the cheapest offer **you can buy**, so in-stock offers rank ahead of
+out-of-stock ones (§3.18). The store name links straight to that offer. In both price
+directions, games you can buy come first, out-of-stock-only games next, and games with
+no rupee price yet (no exchange rate) come last. An offer with no rupee price still
+counts in *Offers*, because it will appear when you expand the row, but it is never
+chosen as "best".
+*Offers* reads "3 stores" when every offer is at a different shop. It says "4 offers · 3
+stores" only when one shop lists the game twice, usually new and pre-owned. The first
+version printed "1 · 1 store" on every single-shop game, which read like a typo.
+
+Switching views resets the sort only if the new view has no such column. Otherwise a
+"Change" sort would fall back silently on the server and leave a stale ▲ on screen.
+
+**Late replies are dropped.** Every `search()` takes a sequence number, and a reply
+that is no longer the latest is thrown away. Without it, pressing "Load more" in Games
+and switching to Every listing before it answered *appended game rows into the listings
+table*. Any two quick filter changes could also paint the older answer last. The view
+toggle made a long-standing race easy to hit, which is why it was fixed alongside it.
+
+### Expanding a row
+
+The ▸ at the start of every row opens a **detail row** underneath it, in place, without
+leaving the page:
+
+- On a **game**, it lists every offer for that game. The request reuses the current
+  filters (`filterParams()`), so the offers you see are exactly the ones the *Offers*
+  count was computed from. Tick "In stock only" and the expanded list shrinks with it.
+- On a **listing**, including one inside an expanded game, it shows that listing's price
+  history.
+
+```
+▾  Metroid Prime 4 Beyond   NI Gaming Store   ₹4,799
+   ╱╲___╱‾‾╲__•   Now ₹4,799 · lowest ₹4,499 (12 Sep) · highest ₹5,499 · 9 prices since 1 Aug
+```
+
+The history line is one SVG `<polyline>`, with no chart library (§4.10). It is
+**time-scaled**: a three-week gap between collections looks like a gap, instead of being
+squeezed between two neighbouring points. It is also `aria-hidden`. **The sentence next to
+it is the content**, and it is what a screen reader reads: now, lowest-ever with its
+date, highest, and how many observations. The lowest-ever price is the number a buyer
+actually wants, which is why it gets the bold. With only one price recorded, the panel
+says so ("a line appears after the next collection") rather than drawing a dot.
+
+`/api/history` existed from the start with no caller, and its docstring said charting
+would be "built on purpose or not at all". This is that.
+
+**The ▸ is a real `<button>` with `aria-expanded`**, and the CSS draws ▸ or ▾ *from that
+attribute*. What you see and what a screen reader hears can't disagree about whether a row
+is open. Every ▸ on the page, nested ones included, is handled by **one** delegated
+listener on `#list`, bound once at load. A listener per button would be lost on each
+repaint and doubled on each append, which is the same trap as the facet bug in §4.7.
+
+## 4.6 The watchlist
+
+**Files:** `app.js` (`paintWatch`, `notifyNewHits`), `web/watchlist.py`,
+`web/routers/watch.py`, `web/queries.py:watch_status`.
+
+Press **☆ Watch** on a game and it joins the Watchlist panel, which sits near the top of
+the page, above the collector. "Has anything I want got cheap?" is the question most
+visits are for, and a hit is worth more than a health tile. Type the price you would pay
+into *Your target*. It saves when the field loses focus, and you can leave it blank to
+just keep an eye on a game.
+
+```
+Watchlist   3 watched · 1 at or below target
+Metroid Prime 4: Beyond  ✓ at target    ₹4,499   Amazon India   [ 4500 ]   Remove
+Mario Kart World                        ₹6,299   NI Gaming      [ 5500 ]   Remove
+```
+
+**A hit needs the best offer to be in stock.** "₹2,999, sold out" is not a price anyone
+can act on, and an alert that fires on it teaches you to ignore alerts. A test pins
+exactly that case.
+
+How a hit reaches you, from always to most intrusive:
+
+1. **The panel.** Hits sort first, with a green gutter rule plus "✓ at target", so it
+   never relies on colour alone (§4.2).
+2. **The tab title.** It becomes `(1) Switch cartridge prices`, visible from any other tab.
+3. **A desktop notification**, if you allowed one. The browser asks the first time you
+   press ☆, because permission can only be requested from a click. Each hit is announced
+   **once**: the keys of current hits are kept in `localStorage`, so reloading doesn't
+   re-announce, and a game that later drops back under target *is* announced again.
+
+The limitation, stated plainly: notifications fire only while a dashboard tab is open.
+A scheduled collection (§3.19) at 7:30 with no tab open shows its hits the next time you
+open the page. Anything more would need a service outside the machine, which this
+project deliberately doesn't have (Part 6).
+
+**Stored as a file, not a table.** `watchlist.local.json` lives in the data directory
+next to `stores.local.json`. That keeps the dashboard's database writes limited to run
+bookkeeping, and it means the watchlist survives deleting `tracker.db`, which is exactly
+when you would least want to re-enter every target. Entries are keyed by *game key +
+platform*, **not by game id**. An id isn't stable across matcher changes: a key that
+changes means one game deleted and a new one created (§3.18), so a list of ids would
+silently empty itself the first time the matcher improved. Keys can change too, because
+adding an alias renames one. So `watch_status` resolves every watched key **through the
+aliases** before looking it up, and adding the alias that fixes a split never orphans a
+watch on the old spelling.
+
+Three protections around the file, all found by an adversarial review of the first
+version:
+
+- **One lock around every read and write.** FastAPI runs these endpoints on a thread
+  pool, so two quick ☆ clicks are two concurrent read-modify-writes. Measured without
+  the lock: 40 parallel adds kept **2**, and 32 failed outright, because on Windows
+  `os.replace` raises `PermissionError` while another thread has the file open.
+- **Write to a temp file, then rename.** A reader never sees a truncated file, which a
+  plain `write_text` (empty the file first, then fill it) would show for a moment.
+- **A file `read()` can't use is renamed to `.json.bad`** before anything is written
+  over it. That covers broken JSON *and* valid JSON that isn't a list, so a hand-edit
+  with a typo is set aside rather than destroyed. A non-numeric target such as `"4000"`
+  is read as "no target" instead of crashing the panel.
+
+## 4.7 Filters
 
 Search, two segmented controls, two checkbox popovers, a stock toggle, and a reset.
 
@@ -1966,11 +2282,23 @@ operation and screen-reader state for free. The only thing JavaScript adds is
 click-outside and Escape to close, because that is the one behaviour `<details>` does not
 have and every other menu on the platform does (Jakob's Law).
 
+**The store and region boxes are rebuilt after every collection**, because a run can add
+stores and regions. Two things follow, and the first was a real bug:
+
+- **Their listeners are bound once, at load, on the containers.** The binding used to
+  live inside `loadFacets()`, which `boot()` reruns when a collection finishes. Each run
+  stacked one more listener, so after five runs a single tick fired five searches. That
+  is invisible until the network panel is open, and it gets worse the more you use the
+  app.
+- **Rebuilt boxes are re-ticked from `state`.** Otherwise the summary would still say
+  "Store (2)" over a popover with nothing ticked, with the filter still applied and no
+  visible way to see which stores it was.
+
 **`/` focuses the search box** and Escape clears it — the convention every search-bearing
 app shares. The handler ignores the keypress while you are typing in a field, or the
 character could never be typed *into* one.
 
-## 4.6 Every state a view can be in
+## 4.8 Every state a view can be in
 
 A view that can load has a **loading** state, a view that can be empty has an **empty**
 state, and anything that can fail has an **error** state. Each is built, not left to
@@ -1989,7 +2317,7 @@ The skeleton matters more than it looks. A spinner occupies no space, so when re
 content arrives the page lurches downward — the metric for that is Cumulative Layout
 Shift, and a skeleton of roughly the right height keeps it near zero.
 
-## 4.7 Accessibility, measured
+## 4.9 Accessibility, measured
 
 Not asserted — measured, with a script driving the real rendered page.
 
@@ -2017,7 +2345,7 @@ to carry that contrast alone.
 **Reflow.** No horizontal scrolling on the page body at any width from 1920px down to
 320px (WCAG 1.4.10).
 
-## 4.8 What was deliberately NOT done
+## 4.10 What was deliberately NOT done
 
 Worth recording, because these are the things a redesign reaches for by default:
 
@@ -2059,26 +2387,26 @@ is the point at which it starts to bite (§3.9).
 
 **5. Record why, especially when the reason is a bug you already hit.**
 Nearly every non-obvious line has a comment naming the failure that motivated it. That is
-why the two price-parsing bugs are still fixed, and why nobody will "simplify" the
+why the three price-parsing bugs are still fixed, and why nobody will "simplify" the
 classifier's ordering back into breaking.
 
 ---
 
-# Part 6 — What is deliberately not built
+# Part 6 — What is still not built
 
-Two features, and they are the reason the project exists.
+This part used to list two features as "the reason the project exists": the matcher and
+the alert engine. The matcher is now built (§3.18). The alert engine is half built: the
+half you configure yourself exists, and the half that works things out for you does not.
 
-**The matcher.** The same cartridge at four shops is four unrelated rows. Every listing has
-a `game_id` column that is always `NULL`, waiting. Matching them is what turns *"a list of
-things shops sell"* into *"where is the cheapest copy of X right now"*.
-`normalise_title()` in `core/parse.py` is already written and described as "the matcher's
-first pass".
+**Built: targeted alerts.** The watchlist (§4.6) answers *"tell me when X is under ₹Y"*,
+which is a rule you write yourself, against a price you chose.
 
-**The alert engine.** Detect a real price drop against a listing's own trailing median, and
-**suppress it** when it's actually the whole shop repricing or the rupee moving. A currency
-move is not a sale.
+**Not built: detected alerts.** This would spot a real price drop against a listing's
+own trailing median, and **suppress it** when it's actually the whole shop repricing or
+the rupee moving. A currency move is not a sale. It is the difference between "you told
+me to watch Metroid" and "Zelda is 30% under its usual price and you never asked".
 
-That second one explains the data model. Storing the native currency *and* the derived
+That second half explains the data model. Storing the native currency *and* the derived
 rupee figure *and* the exchange rate's publication date looks redundant until you need to
 ask: *"did four hundred prices move by the same ratio on the same day?"* The `movers`
 endpoint already flags that cluster pattern; nothing acts on it yet.
@@ -2086,6 +2414,11 @@ endpoint already flags that cluster pattern; nothing acts on it yet.
 It's also why thinning old data was measured and rejected: collapsing history to weekly
 would delete exactly the same-day resolution that detection depends on — and the
 measurements showed it wouldn't have fixed the speed problem anyway.
+
+**Not built: alerts that reach you with no tab open.** Desktop notifications fire only
+while the dashboard is open in a browser (§4.6). Anything more, such as email, Telegram
+or a phone push, means sending data to a service outside this machine, which this
+project has so far deliberately avoided. It's a real decision to make, not an oversight.
 
 ---
 
@@ -2121,6 +2454,7 @@ land here from anywhere.
 | **fixture** | Named test setup that a test asks for by naming a parameter. `def test_x(self, conn)` gets a fresh database (§1.12). |
 | **frozen** | Running as the packaged `.exe` rather than from source. `sys.frozen` is how the code tells (§3.17). |
 | **FX** | Foreign exchange — here, the USD→INR rate used to compare Play-Asia with Indian shops (§3.10). |
+| **game** | One title on one platform, grouped across shops by the matcher. The Games view shows one row per game (§3.18, §4.5). |
 | **headful / headless** | Headless = the browser runs invisibly (normal). Headful = you can see the window (debugging, and required by the click-to-pick tool). |
 | **htmx** | A small JavaScript library that lets an HTML element make a request by itself, no custom JavaScript needed (§1.9). |
 | **hydration state** | The raw data a JavaScript page was built from, left embedded in the page (e.g. Flipkart's `__INITIAL_STATE__`). Often more stable than the visible HTML (§3.6). |
@@ -2130,6 +2464,7 @@ land here from anywhere.
 | **listing** | One product at one shop. `UNIQUE(store_id, sku)` (§3.5). |
 | **lock file** | `run.lock`, holding a running worker's process id. Guard layer 3 against two runs at once (§3.12). |
 | **mypy / type checking** | Reads your type annotations and finds mismatches *before* you run the code. Configured `strict` here (§1.14). |
+| **match key** | The normalised form of a title that the matcher groups on: `"Pokémon Legends: Z-A (Switch 2)"` → `"pokemon legends z a"`. Two listings with the same key, platform and region are the same game (§3.18). |
 | **oracle (test)** | A frozen, known-good copy of old behaviour that a rewrite is compared against. Deliberately *not* imported from production, so it can't silently agree with a wrong change (§3.11). |
 | **ORM** | A library that hides SQL behind objects (e.g. SQLAlchemy). Deliberately not used — the SQL *is* the logic here (§1.6). |
 | **overrides / corrections** | Machine-written config that layers on top of the hand-written config, in a *separate file*, because a tool must never rewrite the source it also imports (§3.1). |
@@ -2153,6 +2488,7 @@ land here from anywhere.
 | **template** | HTML with placeholders, filled in by Python. Here: Jinja2 (§1.5). |
 | **transaction** | A group of database writes that either all land or none do. `_persist` wraps a whole store's rows in one. |
 | **upsert** | Insert, or update if the row already exists. `INSERT … ON CONFLICT … DO UPDATE` (§3.11). |
+| **watchlist** | Games you starred, each with an optional target price. A **hit** means the best *in-stock* offer is at or below target (§4.6). |
 | **WAL** | Write-Ahead Logging: SQLite mode where readers and writers work simultaneously. Required here, because the dashboard reads while a worker writes (§1.6). |
 | **worker** | A subprocess doing one job — `collect`, `probe`, `fx`, `inspect` (Part 2). |
 
@@ -2165,7 +2501,7 @@ land here from anywhere.
 Nothing is "done" until all four are green. Run them from the project root.
 
 ```bash
-uv run pytest                           # 542 tests, about four minutes
+uv run pytest                           # 589 tests, about four minutes
 uv run ruff check src tests scripts     # lint
 uv run ruff format src tests scripts    # formatting (rewrites files)
 uv run mypy                             # types, strict mode
@@ -2251,8 +2587,11 @@ TRACKER_DATA_DIR=/tmp/tracker-scratch uv run python scripts/scrape_check.py nist
 | anything under `adapters/browser/` | `test_adapter_browser.py`, `test_browser_extract.py`, `test_browser_logic.py` |
 | the page loop's retry / skip / second pass (§3.7) | `tests/test_flipkart_recovery.py` (mocked page, no browser) |
 | `services/collect.py`, `selection.py` | `tests/test_service_collect.py` |
+| `core/matcher.py` | `tests/test_matcher.py` (must-merge *and* must-not-merge pairs) |
+| `schedule.py` | `tests/test_schedule.py` (never touches the real Task Scheduler) |
+| `web/watchlist.py`, `routers/watch.py` | `tests/test_web_app.py` (`TestWatchlist`) |
 | `services/probe.py` | `tests/test_service_probe.py` |
-| `web/queries.py` | `tests/test_queries.py` (holds the frozen oracle from §3.11) |
+| `web/queries.py` | `tests/test_queries.py` (holds the frozen oracle from §3.11, plus `TestGames`, `TestWatchStatus`) |
 | `web/runs.py` | `tests/test_runs.py` |
 | `web/app.py`, `web/routers/` | `tests/test_web_app.py` |
 | `events/` | `tests/test_events.py` |
@@ -2372,6 +2711,10 @@ writes to `stores.local.json` — and note that your guess in `stores.py` was ne
 | **Flipkart** logs `ERR_TOO_MANY_REDIRECTS` on a page | A session-level self-redirect, not a bad URL (§3.7). The page is retried after a pause, skipped if that fails too, and retried once more after the walk. | Usually nothing to do. If the store ends **Partial**, read `diagnostics/flipkart-p<N>-navigation.json` for the hop-by-hop trace. |
 | Sorting by **Change** shows far fewer listings | Intended. That sort only lists real movers: listings with a previous price that moved by more than 1% (§3.11). | Sort by anything else to see everything again. |
 | A price changed a little and the Change column says `—` | Moves of 1% or less are treated as noise and not reported, in the column or the movers panel (§3.11). | Nothing. `MIN_CHANGE_PCT` in `web/queries.py` is the knob. |
+| One game shows as two rows in **Games** | A missed merge: the two shops spell it differently enough that the keys differ ("The Legend of Zelda: …" vs "Zelda: …"). Deliberate — the matcher errs towards splitting (§3.18). | Add `{"one title": "the other title"}` to `matches.local.json` in the data dir, then run `switch-tracker match`. |
+| **Games** is empty but **Every listing** is not | The listings were never grouped: nothing has run the matcher since they were collected. | Restart the dashboard (it groups once on startup), or run `switch-tracker match`. |
+| A watched game is under target but not marked **at target** | Its cheapest offer is out of stock. A hit needs an offer you can actually buy (§4.6). | Nothing. Expand the game's row to see the out-of-stock offer. |
+| The daily collection didn't run | A DAILY task skips the day if the PC was off at that time (§3.19). Or the stores were never checked, so `collect-now` exits with code 2. | In *Task Scheduler*, find "switch-tracker daily collection" and read its *Last Run Result* (`0x2` means not checked yet). Press **Check stores** once if needed. |
 | `A run is already going` (409) | One run at a time, enforced in the database, not the UI (§3.12). | Wait for it, or restart the app — a dead worker's run is reaped on startup. |
 | `'collect' is started by the dashboard, not run directly` | You ran a worker by hand without `--run-id`. Workers report into an existing run. | Use the dashboard, or `scripts/scrape_check.py` for one store. |
 | `Address already in use` on startup | Something else has port 4173 — often an earlier copy still running. | `PORT=4174 uv run python -m switch_tracker`, or close the other copy. |

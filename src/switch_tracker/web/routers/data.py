@@ -40,13 +40,56 @@ def facets(conn: Conn) -> dict[str, list[dict[str, object]]]:
 
 @router.get("/history")
 def history(id: int, conn: Conn) -> list[dict[str, object]]:
-    """A single listing's price series.
-
-    Kept, and deliberately not yet consumed by the UI. The TypeScript version
-    has the same endpoint with no caller; charting is a NEW feature rather
-    than a port, so it is built on purpose or not at all.
-    """
+    """A single listing's price series -- the chart under an expanded row."""
     return queries.history(conn, id)
+
+
+def _query(
+    q: str,
+    platform: str,
+    region: str,
+    store: str,
+    condition: str,
+    in_stock: bool,
+    game: str,
+    sort: str,
+    dir: str,
+    limit: int,
+    offset: int,
+) -> queries.ListingQuery:
+    return queries.ListingQuery(
+        q=q,
+        platform=platform,
+        regions=selection.parse_ids(region),
+        stores=selection.parse_ids(store),
+        condition=condition,
+        in_stock_only=in_stock,
+        game=game,
+        sort=sort,
+        direction=dir,
+        limit=limit,
+        offset=offset,
+    )
+
+
+@router.get("/games")
+def games(
+    conn: Conn,
+    q: str = "",
+    platform: str = "",
+    region: str = "",
+    store: str = "",
+    condition: str = "",
+    in_stock: bool = False,
+    sort: str = "price",
+    dir: str = "asc",
+    limit: int = Query(default=100, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+) -> dict[str, object]:
+    """One row per matched game. Takes exactly the filters /listings does."""
+    return queries.games(
+        conn, _query(q, platform, region, store, condition, in_stock, "", sort, dir, limit, offset)
+    )
 
 
 @router.get("/listings")
@@ -62,23 +105,13 @@ def listings(
     store: str = "",
     condition: str = "",
     in_stock: bool = False,
+    #: A game key from /api/games: just that game's offers.
+    game: str = "",
     sort: str = "price",
     dir: str = "asc",
     limit: int = Query(default=100, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
 ) -> dict[str, object]:
     return queries.listings(
-        conn,
-        queries.ListingQuery(
-            q=q,
-            platform=platform,
-            regions=selection.parse_ids(region),
-            stores=selection.parse_ids(store),
-            condition=condition,
-            in_stock_only=in_stock,
-            sort=sort,
-            direction=dir,
-            limit=limit,
-            offset=offset,
-        ),
+        conn, _query(q, platform, region, store, condition, in_stock, game, sort, dir, limit, offset)
     )

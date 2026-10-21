@@ -50,6 +50,14 @@ def profiles_path() -> Path:
     return data_dir() / "profiles.local.json"
 
 
+def matches_path() -> Path:
+    return data_dir() / "matches.local.json"
+
+
+def watchlist_path() -> Path:
+    return data_dir() / "watchlist.local.json"
+
+
 def lock_path() -> Path:
     return data_dir() / "run.lock"
 

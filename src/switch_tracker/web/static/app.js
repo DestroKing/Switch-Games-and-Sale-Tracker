@@ -384,7 +384,8 @@ async function boot() {
   paintMoverStoreFilter();
   paintMovers();
 
-  await loadFacets();
+  // Watchlist before the table: the table's ☆ buttons are painted from it.
+  await Promise.all([loadWatch(), loadFacets()]);
   await search();
 }
 
@@ -472,11 +473,28 @@ $("moversStore").addEventListener("change", (event) => {
 // controls are three-way segments whose first option already means "all".
 const BLANK = { q: "", platform: "", condition: "", region: [], store: [],
                 inStock: false, sort: "price", dir: "asc", offset: 0 };
-const state = { ...BLANK, region: [], store: [] };
+// `view` lives outside BLANK: "Reset all" clears filters, not which view you chose.
+const state = { ...BLANK, region: [], store: [], view: "games" };
 let rows = [];
 let facets = { stores: [], regions: [] };
 
+/** The expand column. Its header is named for screen readers only: a visible
+ *  "Details" label over a column of ▸ glyphs is noise. */
+const EXPAND_COL = { key: null, label: "Details", hideLabel: true };
+
+/** One row per game -- the cheapest copy you can actually buy, and where. */
+const GAME_COLS = [
+  EXPAND_COL,
+  { key: "title", label: "Game", sortable: true },
+  { key: "price", label: "Best price", sortable: true, num: true,
+    hint: "Cheapest in-stock offer; an out-of-stock price only when nothing is in stock" },
+  { key: null, label: "Where" },
+  { key: "offers", label: "Offers", sortable: true, num: true, hint: "Listings across every store" },
+  { key: null, label: "Watch", hideLabel: true },
+];
+
 const COLS = [
+  EXPAND_COL,
   { key: "title", label: "Title", sortable: true },
   { key: "store", label: "Store", sortable: true },
   { key: null, label: "Native", num: true },
@@ -490,7 +508,12 @@ const COLS = [
   },
 ];
 
-function queryString() {
+const colsFor = (view) => (view === "games" ? GAME_COLS : COLS);
+
+/** The filters alone, without sort or paging. Shared by the main table and by
+ *  a game's expanded offers, so expanding a row lists exactly the offers its
+ *  "Offers" count was computed from. */
+function filterParams() {
   const p = new URLSearchParams();
   if (state.q) p.set("q", state.q);
   for (const k of ["platform", "condition"]) if (state[k]) p.set(k, state[k]);
@@ -499,6 +522,11 @@ function queryString() {
   // so old bookmarks keep working.
   for (const k of ["store", "region"]) if (state[k].length) p.set(k, state[k].join(","));
   if (state.inStock) p.set("in_stock", "true");
+  return p;
+}
+
+function queryString() {
+  const p = filterParams();
   p.set("sort", state.sort);
   p.set("dir", state.dir);
   p.set("limit", "100");
@@ -557,18 +585,25 @@ async function loadFacets() {
             facets.stores.map((s) => ({ value: s.id, label: s.name, n: s.n })));
   fillBoxes("regionBoxes", "region",
             facets.regions.map((r) => ({ value: r.region, label: r.region, n: r.n })));
-
-  // Delegated: the boxes are rebuilt whenever facets reload, so a listener
-  // bound to each one would be lost. The container outlives them.
+  // Rebuilt boxes start unticked; re-tick the active filters so a reload after
+  // a collection does not show "Store (2)" over an empty list of ticks.
   for (const [containerId, key] of [["storeBoxes", "store"], ["regionBoxes", "region"]]) {
-    $(containerId).addEventListener("change", () => {
-      state[key] = [...$(containerId).querySelectorAll("input:checked")].map((b) => b.value);
-      syncChosen(key);
-      rerun();
-    });
+    $(containerId).querySelectorAll("input").forEach((b) => { b.checked = state[key].includes(b.value); });
   }
   syncChosen("store");
   syncChosen("region");
+}
+
+// Delegated, and bound ONCE at load. The boxes are rebuilt whenever facets
+// reload, so a listener on each box would be lost -- and binding these inside
+// loadFacets(), which boot() reruns after every collection, stacked one more
+// listener per run: after N runs one tick fired N searches.
+for (const [containerId, key] of [["storeBoxes", "store"], ["regionBoxes", "region"]]) {
+  $(containerId).addEventListener("change", () => {
+    state[key] = [...$(containerId).querySelectorAll("input:checked")].map((b) => b.value);
+    syncChosen(key);
+    rerun();
+  });
 }
 
 function clearFilter(key) {
@@ -582,7 +617,10 @@ function headerCell(col) {
   const cls = col.num ? " num" : "";
   if (!col.sortable) {
     const hint = col.hint ? ` title="${esc(col.hint)}"` : "";
-    return `<th class="plain${cls}" scope="col"${hint}>${esc(col.label)}</th>`;
+    const label = col.hideLabel
+      ? `<span class="visually-hidden">${esc(col.label)}</span>`
+      : esc(col.label);
+    return `<th class="plain${cls}" scope="col"${hint}>${label}</th>`;
   }
   const active = state.sort === col.key;
   const dir = state.dir === "asc" ? "ascending" : "descending";
@@ -590,7 +628,7 @@ function headerCell(col) {
   // control. aria-sort lives on the <th>, which is where assistive technology
   // looks for it.
   return `<th class="${cls.trim()}" scope="col"${active ? ` aria-sort="${dir}"` : ""}>
-    <button class="sort" type="button" data-sort="${col.key}">
+    <button class="sort" type="button" data-sort="${col.key}"${col.hint ? ` title="${esc(col.hint)}"` : ""}>
       <span>${esc(col.label)}</span>
       <span class="arrow" aria-hidden="true">${active ? (state.dir === "asc" ? "▲" : "▼") : ""}</span>
     </button></th>`;
@@ -619,43 +657,91 @@ function deltaCell(row) {
          `${Math.abs(pct) < 0.05 ? "<0.1" : Math.abs(pct).toFixed(1)}%</span></td>`;
 }
 
-async function search(append = false) {
-  if (!append) $("list").innerHTML = `<div class="tablewrap">${skeleton("skel-row", 12)}</div>`;
+const tags = (r) =>
+  (r.platform === "SWITCH2" ? '<span class="tag sw2">Switch 2</span>' : "") +
+  (r.region && r.region !== "IN" ? `<span class="tag">${esc(r.region)}</span>` : "") +
+  (r.condition === "PRE_OWNED" ? '<span class="tag used">pre-owned</span>' : "") +
+  (r.in_stock === false || r.in_stock === 0 ? '<span class="tag oos">out of stock</span>' : "");
 
-  let data;
-  try {
-    data = await api("/api/listings?" + queryString());
-  } catch (err) {
-    $("list").innerHTML =
-      `<div class="notice error" role="alert"><div><b>Could not load listings.</b> ` +
-      `${esc(err.message)}</div></div>`;
-    return;
-  }
-  rows = append ? rows.concat(data.rows) : data.rows;
+/** The ▸ control that opens a detail row under its own row. A real button with
+ *  aria-expanded, so the state is announced and Enter/Space work for free. */
+const expander = (kind, attrs, label) =>
+  `<td class="expand-cell"><button class="expand" type="button" aria-expanded="false" ` +
+  `data-kind="${kind}" ${attrs} aria-label="${esc(label)}"></button></td>`;
 
-  $("count").innerHTML =
-    `<b>${num(rows.length)}</b> of <b>${num(data.total)}</b> — sorted in the database, not on this page`;
-  paintChips();
-
-  const head = COLS.map(headerCell).join("");
-
-  const rowHtml = (r) => {
-    const moved = movementById.get(r.id);
-    const isDeal = moved && moved.pct < 0 && !moved.fx_suspect;
-    return `<tr class="${isDeal ? "is-deal" : ""}">
+function listingRowHtml(r) {
+  const moved = movementById.get(r.id);
+  const isDeal = moved && moved.pct < 0 && !moved.fx_suspect;
+  return `<tr class="${isDeal ? "is-deal" : ""}">
+      ${expander("history", `data-id="${r.id}"`, `Price history for ${r.raw_title} at ${r.store}`)}
       <td class="title-cell"><div class="clamp">
         <a class="name" href="${esc(r.url)}" target="_blank" rel="noopener">${esc(r.raw_title)}</a><span class="meta">${
-          r.platform === "SWITCH2" ? '<span class="tag sw2">Switch 2</span>' : ""}${
-          r.region !== "IN" ? `<span class="tag">${esc(r.region)}</span>` : ""}${
-          r.condition === "PRE_OWNED" ? '<span class="tag used">pre-owned</span>' : ""}${
-          !r.in_stock ? '<span class="tag oos">out of stock</span>' : ""}</span></div></td>
+          tags(r)}</span></div></td>
       <td>${esc(r.store)}</td>
       <td class="num dim">${r.native_currency !== "INR"
         ? esc(r.native_currency) + " " + num(r.native_price) : ""}</td>
       <td class="num price">${inr(r.inr_price)}</td>
       ${deltaCell(r)}
     </tr>`;
-  };
+}
+
+/** "3 stores" when every offer is a different shop -- the common case -- and
+ *  "4 offers · 3 stores" only when one shop lists it twice (new + pre-owned). */
+const offersLabel = (g) => {
+  const stores = `${num(g.stores)} ${g.stores === 1 ? "store" : "stores"}`;
+  return g.offers === g.stores ? stores : `${num(g.offers)} offers<span class="dim"> · ${stores}</span>`;
+};
+
+function gameRowHtml(g) {
+  const watching = watchedKeys().has(watchKey(g.game, g.platform));
+  const best = { platform: g.platform, region: g.best_region, condition: g.best_condition,
+                 in_stock: g.best_in_stock };
+  return `<tr>
+      ${expander("offers", `data-game="${esc(g.game)}" data-platform="${esc(g.platform)}"`,
+                 `Every offer for ${g.title}`)}
+      <td class="title-cell"><div class="clamp">
+        <span class="name">${esc(g.title)}</span><span class="meta">${
+          g.platform === "SWITCH2" ? '<span class="tag sw2">Switch 2</span>' : ""}</span></div></td>
+      <td class="num price">${inr(g.best_price)}</td>
+      <td><a href="${esc(g.best_url)}" target="_blank" rel="noopener">${esc(g.best_store)}</a>` +
+      `<span class="meta">${tags({ ...best, platform: "" })}</span></td>
+      <td class="num">${offersLabel(g)}</td>
+      <td>${watchButton(g.game, g.platform, watching)}</td>
+    </tr>`;
+}
+
+/** Bumped by every search(). A reply whose number is no longer current is
+ *  dropped: without this, a "Load more" for Games that answered AFTER a switch
+ *  to Every listing appended game rows into the listings table, and any two
+ *  quick filter changes could paint the older answer last. */
+let searchSeq = 0;
+
+async function search(append = false) {
+  const seq = ++searchSeq;
+  if (!append) $("list").innerHTML = `<div class="tablewrap">${skeleton("skel-row", 12)}</div>`;
+
+  const games = state.view === "games";
+  let data;
+  try {
+    data = await api(`/api/${games ? "games" : "listings"}?` + queryString());
+    if (seq !== searchSeq) return;
+  } catch (err) {
+    if (seq !== searchSeq) return;
+    $("list").innerHTML =
+      `<div class="notice error" role="alert"><div><b>Could not load ${games ? "games" : "listings"}.</b> ` +
+      `${esc(err.message)}</div></div>`;
+    return;
+  }
+  rows = append ? rows.concat(data.rows) : data.rows;
+
+  $("listingsHead").textContent = games ? "Games" : "All listings";
+  $("count").innerHTML =
+    `<b>${num(rows.length)}</b> of <b>${num(data.total)}</b> ${games ? "games" : "listings"}` +
+    ` — sorted in the database, not on this page`;
+  paintChips();
+
+  const head = colsFor(state.view).map(headerCell).join("");
+  const rowHtml = games ? gameRowHtml : listingRowHtml;
 
   // Appending paints ONLY the new rows, into the <tbody> that is already on
   // screen. Reassigning innerHTML rebuilds every row including the ones you
@@ -706,6 +792,256 @@ async function search(append = false) {
     search(true);
   });
 }
+
+/* ---------------------------------------------------- detail rows (▸) */
+
+const fmtDate = (iso) =>
+  new Date(iso).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
+
+/** A price line drawn from the series, no chart library: one <polyline>.
+ *  Time-scaled on x, so a three-week gap LOOKS like a gap rather than being
+ *  squeezed between two adjacent daily points. */
+function sparkline(points) {
+  const W = 280, H = 48, P = 4;
+  const t = points.map((p) => Date.parse(p.captured_at));
+  const v = points.map((p) => p.inr_price);
+  const [t0, t1] = [Math.min(...t), Math.max(...t)];
+  const [lo, hi] = [Math.min(...v), Math.max(...v)];
+  const x = (i) => P + ((t[i] - t0) / (t1 - t0 || 1)) * (W - 2 * P);
+  const y = (i) => H - P - ((v[i] - lo) / (hi - lo || 1)) * (H - 2 * P);
+  const line = points.map((_, i) => `${x(i).toFixed(1)},${y(i).toFixed(1)}`).join(" ");
+  const last = points.length - 1;
+  return `<svg class="spark" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" aria-hidden="true">` +
+    `<polyline points="${line}"/><circle cx="${x(last)}" cy="${y(last)}" r="2.5"/></svg>`;
+}
+
+/** The chart is decoration; THIS sentence is the content, and it is what a
+ *  screen reader gets. Lowest-ever is the number a buyer actually wants. */
+function historyHtml(series) {
+  const points = series.filter((p) => p.inr_price !== null);
+  if (!points.length) return `<p class="muted">No rupee price recorded yet.</p>`;
+  const last = points[points.length - 1];
+  if (points.length === 1) {
+    return `<p class="muted">One price so far: <b>${inr(last.inr_price)}</b> on ${fmtDate(last.captured_at)}.
+      A line appears after the next collection.</p>`;
+  }
+  const low = points.reduce((a, b) => (b.inr_price < a.inr_price ? b : a));
+  const high = points.reduce((a, b) => (b.inr_price > a.inr_price ? b : a));
+  return `<div class="history">${sparkline(points)}<p>
+      Now <b>${inr(last.inr_price)}</b> · lowest <b>${inr(low.inr_price)}</b> (${fmtDate(low.captured_at)})
+      · highest ${inr(high.inr_price)} · ${num(points.length)} prices since ${fmtDate(points[0].captured_at)}
+    </p></div>`;
+}
+
+async function offersHtml(game, platform) {
+  const p = filterParams();
+  p.set("game", game);
+  p.set("platform", platform);
+  p.set("sort", "price");
+  p.set("dir", "asc");
+  p.set("limit", "100");
+  const data = await api("/api/listings?" + p.toString());
+  if (!data.rows.length) return `<p class="muted">No offers match the current filters.</p>`;
+  return `<table class="offers"><caption class="visually-hidden">Every offer for this game</caption>
+    <thead><tr>${COLS.map((c) => headerCell({ ...c, sortable: false })).join("")}</tr></thead>
+    <tbody>${data.rows.map(listingRowHtml).join("")}</tbody></table>`;
+}
+
+/* One delegated handler for every ▸ on the page, nested ones included.
+   Bound once to a container that outlives every repaint -- per-button
+   listeners would be lost on each paint and doubled on each append. */
+$("list").addEventListener("click", async (e) => {
+  const button = e.target.closest("button.expand");
+  if (!button) return;
+  const row = button.closest("tr");
+  const open = button.getAttribute("aria-expanded") === "true";
+  if (open) {
+    row.nextElementSibling?.classList.contains("detail") && row.nextElementSibling.remove();
+    button.setAttribute("aria-expanded", "false");
+    return;
+  }
+  button.setAttribute("aria-expanded", "true");
+  const span = row.children.length;
+  row.insertAdjacentHTML("afterend",
+    `<tr class="detail"><td colspan="${span}"><p class="muted">Loading…</p></td></tr>`);
+  const cell = row.nextElementSibling.firstElementChild;
+  try {
+    cell.innerHTML = button.dataset.kind === "history"
+      ? historyHtml(await api(`/api/history?id=${encodeURIComponent(button.dataset.id)}`))
+      : await offersHtml(button.dataset.game, button.dataset.platform);
+  } catch (err) {
+    cell.innerHTML = `<p class="bad">Could not load: ${esc(err.message)}</p>`;
+  }
+});
+
+/* ------------------------------------------------------------ watchlist */
+
+let watched = [];
+const watchKey = (game, platform) => `${platform}|${game}`;
+const watchedKeys = () => new Set(watched.map((w) => watchKey(w.game, w.platform)));
+
+const watchButton = (game, platform, on) =>
+  `<button class="watch quiet" type="button" aria-pressed="${on}" data-game="${esc(game)}" ` +
+  `data-platform="${esc(platform)}">${on ? "★ Watching" : "☆ Watch"}</button>`;
+
+async function loadWatch() {
+  try {
+    watched = await api("/api/watchlist");
+  } catch (err) {
+    $("watch").innerHTML = `<div class="notice error" role="alert"><div><b>Could not read the watchlist.</b> ` +
+      `${esc(err.message)}</div></div>`;
+    return;
+  }
+  paintWatch();
+}
+
+function paintWatch() {
+  const hits = watched.filter((w) => w.hit);
+  // The tab title carries the count, so a hit is visible from another tab.
+  document.title = (hits.length ? `(${hits.length}) ` : "") + "Switch cartridge prices";
+  $("watchSub").textContent = watched.length
+    ? `${watched.length} watched` + (hits.length ? ` · ${hits.length} at or below target` : "")
+    : "";
+  // Notifying is an extra; painting the panel is the feature. localStorage
+  // throws in some privacy modes, and that must never leave the panel blank.
+  try { notifyNewHits(hits); } catch { /* the panel below still shows every hit */ }
+
+  if (!watched.length) {
+    $("watch").innerHTML = `<div class="empty compact"><b>Nothing watched yet</b>
+      Press ☆ Watch on a game below, then set the price you would pay.</div>`;
+    return;
+  }
+  $("watch").innerHTML = `<div class="tablewrap"><table>
+    <caption class="visually-hidden">Watched games, best current offer and your target</caption>
+    <thead><tr><th class="plain" scope="col">Game</th><th class="plain num" scope="col">Best now</th>
+      <th class="plain" scope="col">Where</th><th class="plain num" scope="col">Your target</th>
+      <th class="plain" scope="col"><span class="visually-hidden">Remove</span></th></tr></thead>
+    <tbody>${watched.map((w) => {
+      const b = w.best;
+      const title = b ? b.title : w.game;
+      return `<tr class="${w.hit ? "is-deal" : ""}">
+        <td class="title-cell"><div class="clamp"><span class="name">${esc(title)}</span><span class="meta">${
+          w.platform === "SWITCH2" ? '<span class="tag sw2">Switch 2</span>' : ""}${
+          w.hit ? '<span class="status ok">at target</span>' : ""}</span></div></td>
+        <td class="num price">${b ? inr(b.best_price) : "—"}</td>
+        <td>${b ? `<a href="${esc(b.best_url)}" target="_blank" rel="noopener">${esc(b.best_store)}</a>` +
+              `<span class="meta">${tags({ region: b.best_region, condition: b.best_condition,
+                                           in_stock: b.best_in_stock })}</span>`
+            : '<span class="muted">No offers right now</span>'}</td>
+        <td class="num"><input class="target" type="number" inputmode="numeric" min="1" step="1"
+             value="${w.target ?? ""}" placeholder="₹ any" data-game="${esc(w.game)}"
+             data-platform="${esc(w.platform)}" aria-label="Target price for ${esc(title)}"></td>
+        <td><button class="quiet unwatch" type="button" data-game="${esc(w.game)}"
+             data-platform="${esc(w.platform)}" aria-label="Stop watching ${esc(title)}">Remove</button></td>
+      </tr>`;
+    }).join("")}</tbody></table></div>`;
+}
+
+async function saveWatch(game, platform, target) {
+  watched = await api("/api/watchlist", {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ game, platform, target }),
+  });
+  paintWatch();
+}
+
+async function dropWatch(game, platform) {
+  watched = await api(`/api/watchlist?${new URLSearchParams({ game, platform })}`, { method: "DELETE" });
+  paintWatch();
+}
+
+/** Re-label every ☆ for one game wherever it appears, without repainting the
+ *  table -- a repaint would collapse whatever rows the user had opened. */
+function syncWatchButtons() {
+  const keys = watchedKeys();
+  document.querySelectorAll("button.watch").forEach((b) => {
+    const on = keys.has(watchKey(b.dataset.game, b.dataset.platform));
+    b.setAttribute("aria-pressed", String(on));
+    b.textContent = on ? "★ Watching" : "☆ Watch";
+  });
+}
+
+$("list").addEventListener("click", async (e) => {
+  const button = e.target.closest("button.watch");
+  if (!button) return;
+  const { game, platform } = button.dataset;
+  // Asked here, on a click, because browsers only grant it from a user gesture.
+  if ("Notification" in window && Notification.permission === "default") Notification.requestPermission();
+  try {
+    if (button.getAttribute("aria-pressed") === "true") await dropWatch(game, platform);
+    else await saveWatch(game, platform, null);
+  } catch (err) {
+    alert(`Could not update the watchlist: ${err.message}`);
+  }
+  syncWatchButtons();
+});
+
+$("watch").addEventListener("change", async (e) => {
+  const input = e.target.closest("input.target");
+  if (!input) return;
+  // A number field reports "" for text it cannot parse ("4,500", "4k"), which
+  // would read below as "no target" and silently WIPE the saved one.
+  if (input.validity.badInput) {
+    input.setCustomValidity("Enter the price as a plain number, e.g. 4500");
+    input.reportValidity();
+    return;
+  }
+  const value = input.value.trim() === "" ? null : Number(input.value);
+  if (value !== null && !(value > 0)) { input.setCustomValidity("Enter a price above zero"); input.reportValidity(); return; }
+  input.setCustomValidity("");
+  try {
+    await saveWatch(input.dataset.game, input.dataset.platform, value);
+  } catch (err) {
+    input.setCustomValidity(err.message);
+    input.reportValidity();
+  }
+});
+
+$("watch").addEventListener("click", async (e) => {
+  const button = e.target.closest("button.unwatch");
+  if (!button) return;
+  try {
+    await dropWatch(button.dataset.game, button.dataset.platform);
+  } catch (err) {
+    alert(`Could not update the watchlist: ${err.message}`);
+  }
+  syncWatchButtons();
+});
+
+/** A desktop notification for each NEWLY hit target, if the user allowed it.
+ *  "Newly" is remembered across reloads, or every page load would re-announce
+ *  the same hit until it stopped being one. */
+function notifyNewHits(hits) {
+  const seen = new Set(JSON.parse(localStorage.getItem("notifiedHits") || "[]"));
+  const now = hits.map((w) => watchKey(w.game, w.platform));
+  if ("Notification" in window && Notification.permission === "granted") {
+    for (const w of hits) {
+      if (seen.has(watchKey(w.game, w.platform))) continue;
+      new Notification(`${w.best.title}: ${inr(w.best.best_price)}`,
+        { body: `At or below your ${inr(w.target)} target, at ${w.best.best_store}.` });
+    }
+  }
+  // Only CURRENT hits are kept, so a game that drops back under target later
+  // is announced again rather than silenced forever.
+  localStorage.setItem("notifiedHits", JSON.stringify(now));
+}
+
+/* ---------------------------------------------------------- view switch */
+
+$("view").addEventListener("click", (e) => {
+  const button = e.target.closest("button");
+  if (!button || button.dataset.v === state.view) return;
+  $("view").querySelectorAll("button").forEach((b) => b.setAttribute("aria-pressed", String(b === button)));
+  state.view = button.dataset.v;
+  // A sort the other view has no column for would silently fall back on the
+  // server and leave a stale arrow here; reset it visibly instead.
+  if (!colsFor(state.view).some((c) => c.sortable && c.key === state.sort)) {
+    state.sort = "price";
+    state.dir = "asc";
+  }
+  rerun();
+});
 
 function rerun() { state.offset = 0; search(); }
 
