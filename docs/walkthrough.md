@@ -504,6 +504,14 @@ anything get cheaper?** It is three files: `templates/index.html`, `static/app.c
   note confirms it. Unwatching offers **Undo** for 12 seconds, target included.
 - **Any / New only** per game: *New only* ignores pre-owned copies for the price, the
   stock check and the lowest-ever figure alike.
+- **All / India only** per game: *India only* leaves out shops that ship from abroad
+  (`ships_from_abroad` in `config/stores.py`; today only Play-Asia). Their rupee price is
+  before customs and shipping, roughly 30% more, so it would look cheapest and set off
+  alerts it shouldn't. It goes by where the shop ships from, not the game's region: an
+  Indian importer's Japanese copy has already paid duty, so it counts.
+- **Click a watched game's name** to see every offer for it in **Every listing**, at every
+  shop, filtered by its game key (not a text search, so differently spelled copies are
+  included). It shows as a removable "game" chip and survives refresh.
 - **A hit** means the best *in-stock* offer is at or under target. Hits sort first, change
   the tab title, and show a desktop notification once each while a tab is open. A
   scheduled run notifies even with no tab (§3.10).
@@ -624,7 +632,8 @@ groups them, so an import is compared with local stock.
 
 **Why is Play-Asia's price in rupees?**
 Its session cookies ask for INR (`profiles.py`), so the stored figure is the price Play-Asia
-actually quotes in rupees, not a conversion.
+actually quotes in rupees, not a conversion. It does NOT include customs and shipping,
+which you pay on delivery. Set a watch to *India only* to leave it out.
 
 **Why didn't I get a notification?**
 Notifications come from an open dashboard tab, or from the scheduled run. A hit is

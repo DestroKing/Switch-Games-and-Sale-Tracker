@@ -38,6 +38,9 @@ _LOCK = threading.RLock()
 #: (the default); NEW = ignore pre-owned, for someone who only ever buys new
 #: and would otherwise be alerted by a used copy under target.
 CONDITIONS = ("ANY", "NEW")
+#: Which shops count. ALL (the default) or INDIA: leave out shops that ship from
+#: abroad, whose price is before customs and shipping (StoreConfig.ships_from_abroad).
+SHOPS = ("ALL", "INDIA")
 
 
 def _parse(item: Any) -> dict[str, Any] | None:
@@ -56,11 +59,13 @@ def _parse(item: Any) -> dict[str, Any] | None:
     # ANY -- exactly how such an entry already behaved, so nothing changes
     # for a watch the user never touched.
     condition = item.get("condition") if item.get("condition") in CONDITIONS else "ANY"
+    shops = item.get("shops") if item.get("shops") in SHOPS else "ALL"
     return {
         "game": item["game"],
         "platform": item["platform"],
         "target": None if target is None else float(target),
         "condition": condition,
+        "shops": shops,
     }
 
 
@@ -115,10 +120,14 @@ KEEP: Any = object()
 
 
 def upsert(
-    game: str, platform: str, target: float | None = KEEP, condition: str | None = None
+    game: str,
+    platform: str,
+    target: float | None = KEEP,
+    condition: str | None = None,
+    shops: str | None = None,
 ) -> list[dict[str, Any]]:
     """Add or update one watch. A field passed as KEEP (target) or None
-    (condition) keeps the entry's current value.
+    (condition, shops) keeps the entry's current value.
 
     Keep-by-default is what makes the two controls independent. The target box
     sends no condition, so overwriting would reset "New only" to Any on every
@@ -138,7 +147,11 @@ def upsert(
             target = existing["target"] if existing else None
         if condition is None:
             condition = existing["condition"] if existing else "ANY"
-        items.append({"game": game, "platform": platform, "target": target, "condition": condition})
+        if shops is None:
+            shops = existing["shops"] if existing else "ALL"
+        items.append(
+            {"game": game, "platform": platform, "target": target, "condition": condition, "shops": shops}
+        )
         _write(items)
         return items
 

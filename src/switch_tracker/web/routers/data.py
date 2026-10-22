@@ -42,10 +42,11 @@ def facets(
     store: str = "",
     condition: str = "",
     in_stock: bool = False,
+    game: str = "",
 ) -> dict[str, list[dict[str, object]]]:
     """Filter options, counted under the same filters /listings takes."""
     return queries.facets(
-        conn, _query(q, platform, region, store, condition, in_stock, "", "price", "asc", 100, 0)
+        conn, _query(q, platform, region, store, condition, in_stock, game, "price", "asc", 100, 0)
     )
 
 
@@ -101,6 +102,7 @@ def games(
     store: str = "",
     condition: str = "",
     in_stock: bool = False,
+    game: str = "",
     sort: str = "price",
     dir: str = "asc",
     limit: int = Query(default=100, ge=1, le=500),
@@ -108,7 +110,7 @@ def games(
 ) -> dict[str, object]:
     """One row per matched game. Takes exactly the filters /listings does."""
     return queries.games(
-        conn, _query(q, platform, region, store, condition, in_stock, "", sort, dir, limit, offset)
+        conn, _query(q, platform, region, store, condition, in_stock, game, sort, dir, limit, offset)
     )
 
 

@@ -116,6 +116,43 @@ class TestDataEndpoints:
     def test_games_works_on_an_empty_database(self, client: TestClient) -> None:
         assert client.get("/api/games?sort=offers&dir=desc").json()["total"] == 0
 
+    def test_a_game_key_narrows_every_view_to_that_games_offers(
+        self, client: TestClient, tmp_path: Path
+    ) -> None:
+        """What clicking a watched game shows: its offers, at every shop, and nothing else."""
+        from switch_tracker.core import matcher
+
+        seed = db.connect(tmp_path / "tracker.db")
+        seed.execute("INSERT INTO store VALUES ('a','A','https://a','SHOPIFY','INR',2,1)")
+        seed.execute("INSERT INTO store VALUES ('b','B','https://b','SHOPIFY','INR',2,1)")
+        titles = [
+            (1, "a", "Tales of Vesperia Definitive Edition(tbd)"),
+            (2, "b", "NSW™, NSW2™ Tales of Vesperia [Definitive Edition] (Europe)"),
+            (3, "b", "Hades - Nintendo Switch"),
+        ]
+        for lid, store, title in titles:
+            seed.execute(
+                "INSERT INTO listing (id, store_id, sku, url, raw_title, platform, region,"
+                " first_seen, last_seen) VALUES (?, ?, ?, 'https://x', ?, 'SWITCH', 'IN', 't', 't')",
+                (lid, store, f"s{lid}", title),
+            )
+            seed.execute("INSERT OR IGNORE INTO run (id, started_at, finished_at) VALUES (1, 't', 't')")
+            seed.execute(
+                "INSERT INTO price_point (listing_id, run_id, captured_at, native_currency, native_price,"
+                " inr_price, in_stock) VALUES (?, 1, 't', 'INR', 3000, 3000, 1)",
+                (lid,),
+            )
+        matcher.rematch(seed)
+        seed.close()
+
+        key = "game=tales+vesperia+definitive&platform=SWITCH"
+        assert [r["game"] for r in client.get(f"/api/games?{key}").json()["rows"]] == [
+            "tales vesperia definitive"
+        ]
+        assert client.get(f"/api/listings?{key}").json()["total"] == 2
+        stores = {s["id"]: s["n"] for s in client.get(f"/api/facets?{key}").json()["stores"]}
+        assert stores == {"a": 1, "b": 1}  # Hades' store-b offer isn't counted
+
     def test_facets_take_the_listing_filters(self, client: TestClient) -> None:
         r = client.get("/api/facets?q=x&platform=SWITCH2&store=a,b&region=JP&condition=NEW&in_stock=true")
         assert r.status_code == 200
@@ -282,6 +319,29 @@ class TestWatchlist:
             '[{"game": "x", "platform": "SWITCH", "target": 1}]', encoding="utf-8"
         )
         assert client.get("/api/watchlist").json()[0]["condition"] == "ANY"
+
+    def test_the_shops_toggle_and_the_other_controls_never_overwrite_each_other(
+        self, client: TestClient
+    ) -> None:
+        client.put(
+            "/api/watchlist", json={"game": "x", "platform": "SWITCH", "target": 3000, "condition": "NEW"}
+        )
+        [item] = client.put(
+            "/api/watchlist", json={"game": "x", "platform": "SWITCH", "shops": "INDIA"}
+        ).json()
+        assert (item["target"], item["condition"], item["shops"]) == (3000, "NEW", "INDIA")
+        [item] = client.put("/api/watchlist", json={"game": "x", "platform": "SWITCH", "target": 2500}).json()
+        assert (item["target"], item["shops"]) == (2500, "INDIA")
+
+    def test_an_entry_written_before_the_shops_toggle_reads_as_all(self, client: TestClient) -> None:
+        paths.watchlist_path().write_text(
+            '[{"game": "x", "platform": "SWITCH", "target": 1}]', encoding="utf-8"
+        )
+        assert client.get("/api/watchlist").json()[0]["shops"] == "ALL"
+
+    def test_rejects_an_unknown_shops_value(self, client: TestClient) -> None:
+        response = client.put("/api/watchlist", json={"game": "x", "platform": "SWITCH", "shops": "ASIA"})
+        assert response.status_code == 422
 
     def test_rejects_an_unknown_condition(self, client: TestClient) -> None:
         response = client.put("/api/watchlist", json={"game": "x", "platform": "SWITCH", "condition": "USED"})

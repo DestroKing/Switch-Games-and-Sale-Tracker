@@ -14,6 +14,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from typing import Any
 
+from switch_tracker.config.stores import STORES
 from switch_tracker.core.matcher import match_key
 
 # Whitelisted, because these land in SQL TEXT rather than as parameters.
@@ -52,6 +53,9 @@ class ListingQuery:
     #: A game key (``game.canonical_title``): only that game's listings, across
     #: every region it was matched in. How a Games row expands into its offers.
     game: str = ""
+    #: Leave out shops that ship from abroad (StoreConfig.ships_from_abroad):
+    #: a watch set to "Indian shops only".
+    domestic_only: bool = False
     sort: str = "price"
     direction: str = "asc"
     limit: int = 100
@@ -205,7 +209,15 @@ def _filters(query: ListingQuery) -> tuple[list[str], list[Any]]:
     if query.game:
         where.append("l.game_id IN (SELECT id FROM game WHERE canonical_title = ?)")
         params.append(query.game)
+    if query.domestic_only and (abroad := _abroad()):
+        where.append(f"l.store_id NOT IN ({', '.join('?' * len(abroad))})")
+        params.extend(abroad)
     return where, params
+
+
+def _abroad() -> list[str]:
+    """Store ids that ship from outside India (see StoreConfig.ships_from_abroad)."""
+    return [s.id for s in STORES if s.ships_from_abroad]
 
 
 def listings(conn: sqlite3.Connection, query: ListingQuery) -> dict[str, Any]:
@@ -338,14 +350,22 @@ def games(conn: sqlite3.Connection, query: ListingQuery) -> dict[str, Any]:
     # with new copies' history). Computed OUTSIDE the grouped query on purpose:
     # inside it would sit next to the best-offer MIN() and its bind parameter
     # would land ahead of the filter parameters.
-    condition_clause = "AND x.condition = ?" if query.condition else ""
+    # Indian shops only too, for a watch set that way: otherwise Play-Asia's
+    # pre-customs price would be quoted as the game's lowest ever.
+    narrow, narrow_params = [], []
+    if query.condition:
+        narrow.append("AND x.condition = ?")
+        narrow_params.append(query.condition)
+    if query.domestic_only and (abroad := _abroad()):
+        narrow.append(f"AND x.store_id NOT IN ({', '.join('?' * len(abroad))})")
+        narrow_params.extend(abroad)
     history = f"""
         FROM price_point pp
         JOIN listing x ON x.id = pp.listing_id
         JOIN game xg ON xg.id = x.game_id
-        WHERE xg.canonical_title = sub.game AND x.platform = sub.platform {condition_clause}
+        WHERE xg.canonical_title = sub.game AND x.platform = sub.platform {" ".join(narrow)}
     """
-    history_params = [query.condition] * 2 if query.condition else []
+    history_params = narrow_params * 2
     rows = _rows(
         conn.execute(
             f"SELECT sub.*, (SELECT MIN(pp.inr_price) {history}) AS lowest_ever, "
@@ -406,6 +426,9 @@ def watch_status(
         # A "New only" watch is the same games() query with the condition
         # filter set, so best price, stock and lowest-ever all agree with it.
         condition = "NEW" if item.get("condition") == "NEW" else ""
+        # "Indian shops only": an import's price is before customs and shipping,
+        # so it must not be the best offer or set off an alert.
+        domestic = item.get("shops") == "INDIA"
         # Watched under an older key: a matcher improvement re-keys the game.
         # Tried in order: the key as stored; the stored key re-run through
         # today's matcher (covers re-keys made before redirects were recorded);
@@ -426,9 +449,12 @@ def watch_status(
             ),
             key,
         )
-        found = games(conn, ListingQuery(game=resolved, platform=platform, condition=condition, limit=1))[
-            "rows"
-        ]
+        found = games(
+            conn,
+            ListingQuery(
+                game=resolved, platform=platform, condition=condition, domestic_only=domestic, limit=1
+            ),
+        )["rows"]
         best = found[0] if found else None
         target = item.get("target")
         hit = bool(
