@@ -128,7 +128,8 @@ _CONFIRMED_PREFIXES = sorted(
             "maximum", "outright", "funbox media", "merge", "microids", "gearbox publishing",
             "nighthawk interactive", "fangamer", "tesura", "nis america", "marvelous", "xseed",
             "pqube", "deep silver", "plaion", "focus entertainment", "nacon", "bigben", "numskull",
-            "limited run", "team17", "devolver digital",
+            "limited run", "team17", "devolver digital", "astragon", "maximum entertainment",
+            "secret mode", "blizzard", "just",  # "Just For Games 30 In 1 ...", "for" a stopword
         )
     ),
     key=len,
