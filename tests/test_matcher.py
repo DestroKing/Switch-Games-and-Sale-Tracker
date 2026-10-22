@@ -106,6 +106,29 @@ class TestMatchKey:
                 "Bayonetta 2 Nintendo Switch (Includes Bayonetta Digital Code)",
                 "Bayonetta 2 - Nintendo Switch",
             ),
+            # A condition note in brackets must not leave "owned" behind (gameloot, live).
+            ("13 Sentinels Aegis Rim Nintendo Switch (Pre-owned)", "13 Sentinels Aegis Rim Nintendo Switch"),
+            # Play-Asia's cover-art variants and notes, from a home run.
+            (
+                "NSW™, NSW2™ Clock Tower Rewind (Multi-Language) (Cover - English) (Asia)",
+                "Clock Tower: Rewind Nintendo Switch",
+            ),
+            ("NSW™, NSW2™ Capcom Fighting Collection 2 (French Cover) (US)", "Capcom Fighting Collection 2"),
+            ("NSW™, NSW2™ Astral Chain (MDE)", "Astral Chain Nintendo Switch"),
+            (
+                "NSW™, NSW2™ Atelier Sophie 2: The Alchemist of the Mysterious Dream (Korea)",
+                "NSW™, NSW2™ Atelier Sophie 2: The Alchemist of the Mysterious Dream (Japan)",
+            ),
+            (
+                "NSW™, NSW2™ Capcom Belt Action Collection [Best Price] (Multi-Language) (Japan)",
+                "Capcom: Belt Action Collection Nintendo Switch",
+            ),
+            ("60 in 1 Game Collection (Dates Tbd)", "60 IN 1 GAME COLLECTION (SWITCH)"),
+            ("Cat Quest \u2013 Nintendo Switch [video game]", "Cat Quest Nintendo Switch"),
+            (
+                "NSW2™ Back to the Dawn [Limited Edition] (Multi-Language) Game Key Cart (Japan)",
+                "NSW2™ Back to the Dawn [Limited Edition] (Multi-Language) (Japan)",
+            ),
             # The physical format, said three ways (Flipkart, hadiro, live).
             ("PRAGMATA (Game-Key Card) for Nintendo Switch 2", "Pragmata - Nintendo Switch 2"),
             ("Princess Peach Showtime Nintendo Game Card", "Princess Peach Showtime! Nintendo Switch"),
@@ -356,8 +379,14 @@ class TestPlatformFromTitle:
         add(conn, 1, "a", "NSW2™ Mario Kart World (Japan)")  # stored under the store's SWITCH hint
         add(conn, 2, "b", "Mario Kart World - Nintendo Switch 2", platform="SWITCH2")
         add(conn, 3, "a", "NSW™, NSW2™ Tales of Vesperia [Definitive Edition] (Europe)")
+        # Both listed, but it also says it IS the Switch 2 Edition (Play-Asia, live).
+        add(conn, 4, "a", "NSW™, NSW2™ Kuukiyomi 4: Consider It Nintendo Switch 2 Edition+ (Japan)")
         matcher.rematch(conn)
-        assert (self.platform(conn, 1), self.platform(conn, 3)) == ("SWITCH2", "SWITCH")
+        assert (self.platform(conn, 1), self.platform(conn, 3), self.platform(conn, 4)) == (
+            "SWITCH2",
+            "SWITCH",
+            "SWITCH2",
+        )
         assert game_of(conn, 1) == game_of(conn, 2)
 
     def test_a_title_naming_no_console_keeps_the_stored_platform(self, conn) -> None:

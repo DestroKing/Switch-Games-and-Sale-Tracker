@@ -154,6 +154,8 @@ ACCESSORY = _patterns(
     r"\b(t[- ]?shirt|hoodie|mug|keychain|poster|figure|plush)\b",
     r"\bcontrollers?\b",
     r"\bcooling\s*pads?\b",
+    # nekavo and nistore, live: "Nintendo Switch 2 Camera".
+    r"\bswitch\s*(2\s*)?camera\b",
     # HG World is fetched unscoped (stores.py), and its "PXN 2119 Pro Flight
     # Simulator Joystick ... Nintendo Switch" came through as a game. Not
     # "throttle" (Full Throttle) or "mouse" (Mickey Mouse): game titles. Not
@@ -263,7 +265,9 @@ def named_platform(text: str) -> Platform | None:
     # mcubegames, live: "Xenoblade Chronicles™ X ... Nintendo Switch™ 2 Edition"
     # was stored as Switch 1, because the "™" sits between "Switch" and "2".
     text = text.translate(MARKS)
-    if _BOTH_SWITCHES.search(text):
+    # Unless it also names the Switch 2 outright: "NSW™, NSW2™ Kuukiyomi 4 ...
+    # Nintendo Switch 2 Edition+" is the Switch 2 Edition (Play-Asia, live).
+    if _BOTH_SWITCHES.search(text) and not re.search(r"switch\s*2", text, re.IGNORECASE):
         return Platform.SWITCH
     if _any(SWITCH2, text):
         return Platform.SWITCH2
@@ -408,7 +412,8 @@ NOISE = _patterns(
     # The physical format, which is all a "game card" or a Switch 2 "game-key
     # card" says: Flipkart's "(Game-Key Card)" is the same box hadiro sells.
     # Before the "game" rule below, or "game card" leaves a stray "card".
-    r"\b(game[\s-]*)?key[\s-]*card\b",
+    # Play-Asia, live: "Game Key Cart".
+    r"\b(game[\s-]*)?key[\s-]*car[dt]\b",
     r"\bgame[\s-]*card\b",
     r"\b(video\s*)?game(s)?\b",
     r"\b(cartridge|cart|physical|standard|edition)\b",
@@ -422,19 +427,22 @@ _NON_ALNUM = re.compile(r"[^a-z0-9 ]")
 #: and store notes. Amazon, live: "Edition(tbd)", "(Replen)", "(CIB)", "(NA)",
 #: "[AT-PEGI]", "UAE Version [video game]"; Play-Asia: "(Europe)". Only inside
 #: brackets, because outside them some of these are real words ("Among Us").
+#: Play-Asia, live: "(Korea)", "(MDE)", "[Best Price]"; Amazon "(Dates Tbd)".
 _BRACKET_NOTES = frozenset(
     {
         "asia", "asian", "japan", "japanese", "jp", "jpn", "us", "usa", "na", "eu", "europe",
-        "european", "uk", "english", "eng", "en", "chinese", "chs", "cht", "zh", "multi",
-        "language", "languages", "version", "ver", "import", "imported", "region", "free", "pal",
-        "ntsc", "no", "tbd", "replen", "normal", "cib", "nla", "pegi", "at", "uae", "pre", "order",
-        "preorder",
+        "european", "uk", "korea", "korean", "mde", "english", "eng", "en", "chinese", "chs", "cht",
+        "zh", "french", "multi", "language", "languages", "version", "ver", "import", "imported",
+        "region", "free", "pal", "ntsc", "no", "tbd", "dates", "replen", "normal", "cib", "nla",
+        "pegi", "at", "uae", "pre", "order", "preorder", "best", "price", "exclusive", "video",
     }
 )  # fmt: skip
 _BRACKET = re.compile(r"[(\[]([^)\]]*)[)\]]")
-#: "(Includes Bayonetta Digital Code)": what the box includes, not what it is.
-#: German "(inkl. SonarPen)" too (Amazon, live).
-_INCLUDES_NOTE = re.compile(r"^\s*(incl(udes?|uding)?|inkl)\b")
+#: Brackets that say nothing about WHICH product: what the box includes
+#: ("(Includes Bayonetta Digital Code)", German "(inkl. SonarPen)", Amazon) and
+#: which cover art it has (Play-Asia, live: "(Cover - English)", "(French Cover)",
+#: "(Aria of Sorrow Cover)" -- one game, printed with different box art).
+_WHOLE_NOTE = re.compile(r"^\s*(incl(udes?|uding)?|inkl)\b|\bcover\b")
 
 
 def _bracket_words(match: re.Match[str]) -> str:
@@ -442,15 +450,19 @@ def _bracket_words(match: re.Match[str]) -> str:
     # and "(Boxed Code)" are the product, and deleting brackets wholesale keyed
     # Play-Asia's "[Deluxe Edition]" the same as the standard game.
     inside = match.group(1)
-    if _INCLUDES_NOTE.match(inside):
+    if _WHOLE_NOTE.search(inside):
         return " "
     return " " + " ".join(w for w in re.split(r"[^a-z0-9]+", inside) if w and w not in _BRACKET_NOTES) + " "
 
 
 def normalise_title(title: str) -> str:
     """Crude normalisation; the matcher's first pass."""
-    text = _BRACKET.sub(_bracket_words, title.lower())
+    text = title.lower()
+    # Console, format and condition words go FIRST, while "pre-owned" is still
+    # one phrase: split inside "(Pre-owned)" it left a stray "owned" that made
+    # every used copy at gameloot its own game (a home run, live).
     for pattern in NOISE:
         text = pattern.sub(" ", text)
+    text = _BRACKET.sub(_bracket_words, text)
     text = _NON_ALNUM.sub(" ", text)
     return _WHITESPACE.sub(" ", text).strip()
