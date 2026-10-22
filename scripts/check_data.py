@@ -8,6 +8,8 @@ any watched game the watchlist can no longer find.
 
     uv run python scripts/check_data.py
     uv run python scripts/check_data.py --db path/to/tracker.db
+    uv run python scripts/check_data.py --review       what a rematch would change, and
+                                                        games that may still be split
 
 Exit code 1 when something needs looking at, so it can gate a release.
 """
@@ -15,8 +17,12 @@ Exit code 1 when something needs looking at, so it can gate a release.
 from __future__ import annotations
 
 import argparse
+import itertools
 import os
+import re
+import sqlite3
 import sys
+from collections import defaultdict
 from pathlib import Path
 
 from switch_tracker import paths
@@ -65,11 +71,76 @@ GROUP BY l.store_id ORDER BY l.store_id
 """
 
 
+def review(conn: sqlite3.Connection, limit: int) -> None:
+    """Read-only. What `switch-tracker match` would change today, and what it still leaves split.
+
+    The second list is the review queue: pairs the matcher deliberately won't
+    merge on its own, because "one or two extra words" is also how a Deluxe or a
+    sequel looks. Settle a real one with an alias in matches.local.json.
+    """
+    listings = conn.execute(
+        "SELECT l.id, l.store_id, l.raw_title, l.platform, l.region, g.canonical_title AS stored "
+        "FROM listing l LEFT JOIN game g ON g.id = l.game_id"
+    ).fetchall()
+    by_id = {r["id"]: r for r in listings}
+    assigned = matcher.assign(listings, matcher.load_aliases())
+
+    groups: dict[tuple[str, str], list[int]] = defaultdict(list)
+    for lid, key_platform in assigned.items():
+        groups[key_platform].append(lid)
+
+    def sample(ids: list[int]) -> None:
+        for lid in sorted(ids, key=lambda i: by_id[i]["store_id"])[:3]:
+            print(f"      {by_id[lid]['store_id']:14}{by_id[lid]['raw_title'][:90]!r}")
+
+    merges = [
+        (kp, ids, olds)
+        for kp, ids in groups.items()
+        if len(olds := {(by_id[i]["stored"] or "(ungrouped)", by_id[i]["platform"]) for i in ids}) > 1
+    ]
+    relabelled = [lid for lid, (_, platform) in assigned.items() if platform != by_id[lid]["platform"]]
+    print(f"\nA rematch would merge {len(merges)} group(s) and relabel {len(relabelled)} platform(s):")
+    for (key, platform), ids, olds in sorted(merges)[:limit]:
+        print(f"  {platform:8}{key!r}  <-  {sorted(o[0] for o in olds)}")
+        sample(ids)
+    if len(merges) > limit:
+        print(f"  ... and {len(merges) - limit} more (--limit)")
+    for lid in relabelled[:limit]:
+        print(f"  {by_id[lid]['platform']} -> {assigned[lid][1]}: {by_id[lid]['raw_title'][:90]!r}")
+
+    # Possibly the same game: one key is the other plus one or two words that are
+    # not a number, a variant word, or a named edition ("Divine Edition").
+    index: dict[tuple[str, frozenset[str]], list[str]] = defaultdict(list)
+    for key, platform in groups:
+        index[(platform, frozenset(key.split()))].append(key)
+    pairs = set()
+    for key, platform in groups:
+        words = frozenset(key.split())
+        titles = " ".join(by_id[i]["raw_title"].lower() for i in groups[(key, platform)])
+        for n in (1, 2):
+            for extra in itertools.combinations(sorted(words), n):
+                if any(w in matcher.VARIANT_WORDS or any(c.isdigit() for c in w) for w in extra):
+                    continue
+                if any(re.search(rf"\b{re.escape(w)}\W+edition\b", titles) for w in extra):
+                    continue
+                for other in index.get((platform, words - set(extra)), []):
+                    if len(other.split()) >= 2:
+                        pairs.add((platform, other, key))
+    print(f"\nPossibly the same game, still separate: {len(pairs)} pair(s). Same game? Add an alias:")
+    for platform, short, long in sorted(pairs)[:limit]:
+        print(f"  {platform:8}{short!r}  vs  {long!r}")
+        sample(groups[(short, platform)][:1] + groups[(long, platform)][:1])
+    if len(pairs) > limit:
+        print(f"  ... and {len(pairs) - limit} more (--limit)")
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
     parser.add_argument("--db", type=Path, help="default: the app's own database")
+    parser.add_argument("--review", action="store_true", help="preview a rematch and list possible splits")
+    parser.add_argument("--limit", type=int, default=60, help="rows per --review list (default 60)")
     args = parser.parse_args(argv)
 
     target = args.db or paths.db_path()
@@ -125,6 +196,9 @@ def main(argv: list[str] | None = None) -> int:
         if w["best"] is None
     ]
     print(f"Watched games with no offer today: {len(orphans)}" + (f" -- {orphans}" if orphans else ""))
+
+    if args.review:
+        review(conn, args.limit)
 
     problems = sum(r["cut_titles"] + r["bad_prices"] for r in rows)
     print(

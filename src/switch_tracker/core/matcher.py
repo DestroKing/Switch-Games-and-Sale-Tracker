@@ -20,11 +20,12 @@ import json
 import re
 import sqlite3
 import unicodedata
+from collections import Counter, defaultdict
 from collections.abc import Mapping
 
 from switch_tracker import paths
 from switch_tracker.core.models import Platform
-from switch_tracker.core.parse import normalise_title, platform_of
+from switch_tracker.core.parse import MARKS, named_platform, normalise_title, platform_of
 
 # Words that differ between shops' spellings of one game without changing which
 # game it is. Region words are here because Play-Asia writes them into the
@@ -55,6 +56,12 @@ _STOPWORDS = frozenset(
         "ntsc",
         # Flipkart's "Nintendo Switch Games CD": the medium, never part of a name.
         "cd",
+        # Amazon's catalogue notes, written outside brackets too: "Sonic Mania
+        # Plus(tbd)", "Lego Worlds Nla" (no longer available).
+        "tbd",
+        "nla",
+        # Italian "video game", on an Amazon import listing.
+        "videogioco",
     }
 )
 
@@ -66,7 +73,7 @@ _STOPWORDS = frozenset(
 # edition and none of these words or a number; otherwise the whole title is
 # keyed as before. Unsure means split: a missed merge is an alias, a wrong one
 # is silent.
-_VARIANT_WORDS = frozenset(
+VARIANT_WORDS = frozenset(
     {
         "deluxe", "definitive", "complete", "collector", "collectors", "limited", "special", "gold",
         "ultimate", "goty", "year", "anniversary", "bundle", "pack", "twin", "steelbook", "amiibo",
@@ -105,6 +112,29 @@ _PUBLISHER_PREFIXES = sorted(
     reverse=True,
 )
 
+# Publishers Amazon also prepends, whose names real titles DO begin with ("Sega
+# Genesis Classics", "Capcom Fighting Collection"). So these come off only when
+# the rest is CONFIRMED: another listing on the same platform already keys to it
+# ("Sega Sonic Forces" -> "sonic forces" because a shop sells "Sonic Forces").
+# Every one of these was seen prepended on Amazon, live, or is the same kind.
+_CONFIRMED_PREFIXES = sorted(
+    (
+        tuple(p.split())
+        for p in (
+            # Without "Games": normalise_title has already dropped that word, so
+            # "Maximum Games Alfred Hitchcock" arrives here as "maximum alfred ...".
+            "sega", "capcom", "konami", "atlus", "activision", "bandai", "namco", "koei tecmo",
+            "thq nordic", "wb", "ubi soft", "fireshine", "2k", "rockstar", "maximum gaming",
+            "maximum", "outright", "funbox media", "merge", "microids", "gearbox publishing",
+            "nighthawk interactive", "fangamer", "tesura", "nis america", "marvelous", "xseed",
+            "pqube", "deep silver", "plaion", "focus entertainment", "nacon", "bigben", "numskull",
+            "limited run", "team17", "devolver digital",
+        )
+    ),
+    key=len,
+    reverse=True,
+)  # fmt: skip
+
 #: Straight, curly (U+2019, which shops paste from Word) and backtick.
 _APOSTROPHES = str.maketrans("", "", "'\u2019`")
 
@@ -114,7 +144,7 @@ def _words(text: str) -> list[str]:
     # turned "Pokémon" into "pok mon" and split it from every shop that writes
     # "Pokemon". Apostrophes are removed outright for the same reason --
     # "Luigi's Mansion" must not become "luigi s mansion" beside "Luigis".
-    folded = unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode()
+    folded = unicodedata.normalize("NFKD", text.translate(MARKS)).encode("ascii", "ignore").decode()
     return [w for w in normalise_title(folded.translate(_APOSTROPHES)).split() if w not in _STOPWORDS]
 
 
@@ -123,7 +153,7 @@ def _tail_is_marketing(tail: str) -> bool:
         words = _words(segment)
         if _EDITION.search(segment) and words:  # "Deluxe Edition"; "Standard Edition" keys to nothing
             return False
-        if any(w in _VARIANT_WORDS or any(ch.isdigit() for ch in w) for w in words):
+        if any(w in VARIANT_WORDS or any(ch.isdigit() for ch in w) for w in words):
             return False
     return True
 
@@ -170,6 +200,74 @@ def load_aliases() -> dict[str, str]:
     return {match_key(k): match_key(v) for k, v in loaded.items() if isinstance(v, str) and match_key(v)}
 
 
+def platform_from_title(title: str, stored: str) -> str:
+    """The platform a collection would store today. The title's console always
+    wins at collection time (core/parse.py), so re-reading it here repairs rows
+    saved under an older rule, e.g. Play-Asia's "NSW2™" before it was a Switch 2
+    marker, with no re-scrape. A title naming no console keeps what was stored,
+    because that came from a store hint or category this pass can't see.
+    """
+    named = named_platform(title)
+    return named.value if named is not None else stored
+
+
+def assign(
+    listings: list[sqlite3.Row], aliases: Mapping[str, str] | None = None
+) -> dict[int, tuple[str, str]]:
+    """Listing id -> (game key, platform), for every listing that can be matched.
+
+    Two merges on top of match_key, both CONFIRMED by the data rather than
+    guessed: a publisher prefix comes off only if the rest is another listing's
+    key, and keys made of the same words in another order ("FC 26 EA Sports",
+    "EA Sports FC 26") become one. Anything less certain stays split, for
+    check_data.py to list and an alias to settle.
+    """
+    aliases = aliases or {}
+    base: dict[int, tuple[str, str]] = {}
+    for row in listings:
+        platform = platform_from_title(row["raw_title"], row["platform"])
+        key = match_key(row["raw_title"])
+        # UNKNOWN platform is not a game we can compare; matching it would
+        # group a PS5 title with its Switch namesake.
+        if key and platform != "UNKNOWN":
+            base[row["id"]] = (key, platform)
+    known = set(base.values())
+
+    def confirmed(key: str, platform: str) -> str:
+        words = key.split()
+        for prefix in _CONFIRMED_PREFIXES:
+            if tuple(words[: len(prefix)]) == prefix:
+                rest = " ".join(words[len(prefix) :])
+                return rest if (rest, platform) in known else key
+        return key
+
+    stripped = {kp: confirmed(*kp) for kp in known}
+    uses = Counter((stripped[kp], kp[1]) for kp in base.values())
+    # "vs" is the one place word order IS the game: "Capcom vs SNK", "SNK vs Capcom".
+    same_words: dict[tuple[str, frozenset[str]], list[str]] = defaultdict(list)
+    for key, platform in set(uses):
+        if "vs" not in key.split():
+            same_words[(platform, frozenset(key.split()))].append(key)
+    # The most-listed spelling names the group; ties go to the shorter, then A-Z.
+    canonical = {
+        (key, platform): min(keys, key=lambda k: (-uses[(k, platform)], len(k), k))
+        for (platform, _), keys in same_words.items()
+        for key in keys
+    }
+
+    def final(key: str, platform: str) -> str:
+        k = stripped.get((key, platform), key)
+        return canonical.get((k, platform), k)
+
+    out = {}
+    for listing_id, (key, platform) in base.items():
+        # An alias written against a raw title wins; its target joins the group
+        # that title's own listings ended up in.
+        target = aliases.get(key) or aliases.get(final(key, platform))
+        out[listing_id] = (final(target, platform) if target else final(key, platform), platform)
+    return out
+
+
 def rematch(conn: sqlite3.Connection, aliases: Mapping[str, str] | None = None) -> int:
     """Recompute every listing's game. Returns how many listings were matched.
 
@@ -177,20 +275,20 @@ def rematch(conn: sqlite3.Connection, aliases: Mapping[str, str] | None = None) 
     new one, never half of each. Games left with no listing are deleted, so a
     key that improved does not leave its old spelling behind as an empty game.
     """
-    aliases = aliases or {}
     listings = conn.execute("SELECT id, raw_title, platform, region FROM listing").fetchall()
-
-    keyed: list[tuple[int, str, str, str]] = []
-    for row in listings:
-        key = match_key(row["raw_title"])
-        key = aliases.get(key, key)
-        # UNKNOWN platform is not a game we can compare; matching it would
-        # group a PS5 title with its Switch namesake.
-        if key and row["platform"] != "UNKNOWN":
-            keyed.append((row["id"], key, row["platform"], row["region"]))
+    region_of = {row["id"]: row["region"] for row in listings}
+    stored_platform = {row["id"]: row["platform"] for row in listings}
+    assigned = assign(listings, aliases)
+    keyed = [(lid, key, platform, region_of[lid]) for lid, (key, platform) in assigned.items()]
+    relabelled = [
+        (platform_from_title(row["raw_title"], row["platform"]), row["id"])
+        for row in listings
+        if platform_from_title(row["raw_title"], row["platform"]) != stored_platform[row["id"]]
+    ]
 
     conn.execute("BEGIN")
     try:
+        conn.executemany("UPDATE listing SET platform = ? WHERE id = ?", relabelled)
         # A key that disappears and whose listings ALL moved to one new key is
         # recorded, so a watch on it can follow. Split across several new keys
         # it is ambiguous, and no guess is recorded.

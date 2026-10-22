@@ -313,6 +313,44 @@ class TestWatchStatus:
         )
         assert status["hit"] is False
 
+    def test_watches_on_old_split_groups_follow_the_consolidated_game(self, conn) -> None:
+        """Tales of Vesperia, live: three spellings were three games. After a rematch
+        there is one game with every offer, and a watch made on ANY of the old groups
+        keeps its own target and condition and sees all of them."""
+        offers = [
+            (11, "amazon", "NSW™, NSW2™ Tales of Vesperia [Definitive Edition] (Europe)", "EU", 3250),
+            (12, "amazon", "Tales of Vesperia Definitive Edition(tbd)", "IN", 2999),
+            (13, "nistore", "Tales Of Vesperia - Definitive Edition (Switch)", "IN", 3499),
+        ]
+        old_keys = [
+            "nswtm nsw2tm tales vesperia",
+            "tales vesperia definitive tbd",
+            "tales vesperia definitive",
+        ]
+        for (lid, store, title, region, price), key in zip(offers, old_keys, strict=True):
+            add_listing(conn, lid, store, title, region=region)
+            add_price(conn, lid, 1, price, at="2026-01-01T00:00:00Z")
+            conn.execute(
+                "INSERT INTO game (canonical_title, platform, region) VALUES (?, 'SWITCH', ?)", (key, region)
+            )
+            conn.execute("UPDATE listing SET game_id = last_insert_rowid() WHERE id = ?", (lid,))
+        matcher.rematch(conn)
+
+        [game] = queries.games(conn, queries.ListingQuery(q="vesperia"))["rows"]
+        assert (game["offers"], game["stores"], game["best_price"]) == (3, 2, 2999)
+
+        watches = [
+            {"game": "nswtm nsw2tm tales vesperia", "platform": "SWITCH", "target": 3000, "condition": "NEW"},
+            {"game": "tales vesperia definitive tbd", "platform": "SWITCH", "target": 2500},
+        ]
+        status = {s["game"]: s for s in queries.watch_status(conn, watches)}
+        assert {
+            k: (s["target"], s.get("condition"), s["best"]["best_price"], s["hit"]) for k, s in status.items()
+        } == {
+            "nswtm nsw2tm tales vesperia": (3000, "NEW", 2999, True),
+            "tales vesperia definitive tbd": (2500, None, 2999, False),
+        }
+
     def test_a_game_with_no_offers_left_reports_none_rather_than_vanishing(self, shelf) -> None:
         [status] = queries.watch_status(shelf, [{"game": "gone", "platform": "SWITCH", "target": 1}])
         assert (status["best"], status["hit"]) == (None, False)
