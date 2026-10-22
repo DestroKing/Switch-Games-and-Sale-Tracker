@@ -417,7 +417,7 @@ NOISE = _patterns(
     r"\bgame[\s-]*card\b",
     r"\b(video\s*)?game(s)?\b",
     r"\b(cartridge|cart|physical|standard|edition)\b",
-    r"\b(pre[- ]?owned|used|new|sealed|import|brand\s*new)\b",
+    r"\b(pre[- ]?owned|used|new|sealed|import|brand\s*new|open\s*box)\b",
     r"\bfor\s+nintendo\b",
 )
 
@@ -435,6 +435,7 @@ _BRACKET_NOTES = frozenset(
         "zh", "french", "multi", "language", "languages", "version", "ver", "import", "imported",
         "region", "free", "pal", "ntsc", "no", "tbd", "dates", "replen", "normal", "cib", "nla",
         "pegi", "at", "uae", "pre", "order", "preorder", "best", "price", "exclusive", "video",
+        "australia", "subs", "subtitle", "subtitles",
     }
 )  # fmt: skip
 _BRACKET = re.compile(r"[(\[]([^)\]]*)[)\]]")
@@ -442,7 +443,9 @@ _BRACKET = re.compile(r"[(\[]([^)\]]*)[)\]]")
 #: ("(Includes Bayonetta Digital Code)", German "(inkl. SonarPen)", Amazon) and
 #: which cover art it has (Play-Asia, live: "(Cover - English)", "(French Cover)",
 #: "(Aria of Sorrow Cover)" -- one game, printed with different box art).
-_WHOLE_NOTE = re.compile(r"^\s*(incl(udes?|uding)?|inkl)\b|\bcover\b")
+#: But NOT "(Includes only Borderlands 1 Full Game)" (gameloot, live): a partial
+#: copy is less than the product, so it keeps its words and stays its own game.
+_WHOLE_NOTE = re.compile(r"^\s*(incl(udes?|uding)?|inkl)\b(?!\s+only\b)|\bcover\b")
 
 
 def _bracket_words(match: re.Match[str]) -> str:

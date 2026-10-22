@@ -62,6 +62,14 @@ _STOPWORDS = frozenset(
         "nla",
         # Italian "video game", on an Amazon import listing.
         "videogioco",
+        # Shops' typos of the console (gameloot, mcubegames, live), and nistore's
+        # "for Nintendo Switch Lite & OLED": what it runs on, not what it is.
+        "nintedo",
+        "ninteno",
+        "nnintendo",
+        "lite",
+        "oled",
+        "subtitle",
     }
 )
 

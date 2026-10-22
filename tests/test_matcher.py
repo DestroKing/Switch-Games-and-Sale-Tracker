@@ -129,6 +129,20 @@ class TestMatchKey:
                 "NSW2™ Back to the Dawn [Limited Edition] (Multi-Language) Game Key Cart (Japan)",
                 "NSW2™ Back to the Dawn [Limited Edition] (Multi-Language) (Japan)",
             ),
+            # Condition, subtitles, compatibility and shop typos (home run, live).
+            ("Nintendo Ring Fit Adventure Switch (OPEN BOX)", "Ring Fit Adventure Nintendo Switch"),
+            (
+                "NSW™, NSW2™ Dragon Quest Builders 2 (Chinese Subs) (Asia)",
+                "Dragon Quest Builders 2 Nintendo Switch",
+            ),
+            (
+                "Super Mario 3D World + Bowser\u2019s Fury for Nintendo Switch Lite & OLED",
+                "Super Mario 3D World + Bowser's Fury",
+            ),
+            (
+                "Ni No Kuni Wrath of the White Witch Ninteno Switch",
+                "Ni No Kuni Wrath of the White Witch - Nintendo Switch",
+            ),
             # The physical format, said three ways (Flipkart, hadiro, live).
             ("PRAGMATA (Game-Key Card) for Nintendo Switch 2", "Pragmata - Nintendo Switch 2"),
             ("Princess Peach Showtime Nintendo Game Card", "Princess Peach Showtime! Nintendo Switch"),
@@ -162,6 +176,11 @@ class TestMatchKey:
             ("Mario + Rabbids | Sparks of Hope", "Mario + Rabbids | Kingdom Battle"),
             ("Persona 5 | Tactica", "Persona 5"),
             ("Splatoon 3 | Side Order", "Splatoon 3"),
+            # A partial copy is less than the product (gameloot, live).
+            (
+                "Borderlands Legendary Collection (Includes only Borderlands 1 Full Game) Nintendo Switch",
+                "Borderlands Legendary Collection Nintendo Switch",
+            ),
             # Brackets keep the product: an edition or format inside them is real.
             ("Tales of Vesperia [Definitive Edition] (Europe)", "Tales of Vesperia (Europe)"),
             ("Persona 5 Royal [Deluxe Edition] (Asia)", "Persona 5 Royal (Asia)"),
