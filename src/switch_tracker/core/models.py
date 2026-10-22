@@ -105,6 +105,11 @@ class StoreConfig:
     #: Lets a terse title with no console marker still be classified instead of
     #: dropped. Deliberately absent on general retailers -- see designinfo.
     platform_hint: Platform | None = None
+    #: Ships from outside India, so customs and shipping (roughly 30% on top)
+    #: are paid on delivery and are NOT in the price we store. A watch set to
+    #: "Indian shops only" ignores these. About the SHOP, not the game's region:
+    #: an importer selling Japanese pressings from India has already paid duty.
+    ships_from_abroad: bool = False
     note: str = ""
 
 

@@ -351,6 +351,28 @@ class TestWatchStatus:
             "tales vesperia definitive tbd": (2500, None, 2999, False),
         }
 
+    def test_india_only_ignores_an_import_for_best_price_alert_and_lowest_ever(self, shelf) -> None:
+        """Play-Asia's rupee price is before customs and shipping (~30%): cheapest on
+        paper, not in fact. A watch set to Indian shops only must not see it."""
+        shelf.execute("INSERT INTO store VALUES ('playasia','Play-Asia','https://p','BROWSER','INR',1,1)")
+        add_listing(shelf, 9, "playasia", "NSW™, NSW2™ Metroid Prime 4: Beyond (Asia)", region="ASIA_EN")
+        add_price(shelf, 9, 1, 3500, at="2026-01-01T00:00:00Z")
+        matcher.rematch(shelf)
+        item = {"game": "metroid prime 4 beyond", "platform": "SWITCH", "target": 4000}
+        [every] = queries.watch_status(shelf, [{**item, "shops": "ALL"}])
+        [india] = queries.watch_status(shelf, [{**item, "shops": "INDIA"}])
+        assert (every["best"]["best_store"], every["best"]["best_price"], every["hit"]) == (
+            "Play-Asia",
+            3500,
+            True,
+        )
+        assert (india["best"]["best_store"], india["best"]["best_price"], india["hit"]) == (
+            "Amazon",
+            4499,
+            False,
+        )
+        assert india["best"]["lowest_ever"] != 3500
+
     def test_a_game_with_no_offers_left_reports_none_rather_than_vanishing(self, shelf) -> None:
         [status] = queries.watch_status(shelf, [{"game": "gone", "platform": "SWITCH", "target": 1}])
         assert (status["best"], status["hit"]) == (None, False)

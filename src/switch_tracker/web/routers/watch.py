@@ -26,6 +26,9 @@ class WatchItem(BaseModel):
     #: Which copies count: ANY (new or pre-owned) or NEW only. Omitted = keep
     #: the watch's current setting (see watchlist.upsert).
     condition: Literal["ANY", "NEW"] | None = None
+    #: Which shops count: ALL, or INDIA (no shop that ships from abroad).
+    #: Omitted = keep the watch's current setting, as for condition.
+    shops: Literal["ALL", "INDIA"] | None = None
 
 
 def _status(conn: sqlite3.Connection) -> list[dict[str, object]]:
@@ -45,7 +48,7 @@ def upsert(item: WatchItem, conn: Conn) -> list[dict[str, object]] | JSONRespons
         # An OMITTED target means "keep it", an explicit null means "clear it".
         # Pydantic gives both as None; model_fields_set is what tells them apart.
         target = item.target if "target" in item.model_fields_set else watchlist.KEEP
-        watchlist.upsert(item.game, item.platform, target, item.condition)
+        watchlist.upsert(item.game, item.platform, target, item.condition, item.shops)
     except watchlist.WatchlistFull as exc:
         return problem(400, str(exc))
     return _status(conn)

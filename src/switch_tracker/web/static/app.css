@@ -727,6 +727,10 @@ td.price .lowest { color: var(--ink-3); }
 .seg.mini button { padding: 2px var(--s2); font-size: var(--t-sm); }
 .watch-note .linkish { margin-left: var(--s1); text-decoration: underline; }
 
+/* A watched game's name opens its offers: still read as the name, so the
+   underline is the only thing that says it can be clicked. */
+#watch .show-game { color: var(--ink); font: inherit; text-align: left; text-decoration-color: var(--line-control); }
+#watch .show-game:hover { text-decoration-color: currentColor; }
 #watch input.target { width: 8.5em; text-align: right; font-family: var(--mono); padding: var(--s1) var(--s2); }
 #watch .tablewrap { max-height: none; }
 button.watch[aria-pressed="true"] { color: var(--warn); }

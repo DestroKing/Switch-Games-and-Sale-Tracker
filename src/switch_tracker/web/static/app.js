@@ -518,8 +518,10 @@ $("moversStore").addEventListener("change", (event) => {
 
 // store and region are SETS. platform and condition stay single-valued -- their
 // controls are three-way segments whose first option already means "all".
+// `game` is a match key (one game's offers, exactly -- a text search would miss
+// a shop that spells it differently); `gameTitle` is only what its chip says.
 const BLANK = { q: "", platform: "", condition: "", region: [], store: [],
-                inStock: false, sort: "price", dir: "asc", offset: 0 };
+                inStock: false, game: "", gameTitle: "", sort: "price", dir: "asc", offset: 0 };
 // `view` lives outside BLANK: "Reset all" clears filters, not which view you chose.
 const state = { ...BLANK, region: [], store: [], view: "games" };
 let rows = [];
@@ -569,6 +571,7 @@ function filterParams() {
   // so old bookmarks keep working.
   for (const k of ["store", "region"]) if (state[k].length) p.set(k, state[k].join(","));
   if (state.inStock) p.set("in_stock", "true");
+  if (state.game) p.set("game", state.game);
   return p;
 }
 
@@ -602,6 +605,9 @@ function readUrl() {
   $("q").value = state.q;
   state.inStock = p.get("in_stock") === "true";
   $("stock").checked = state.inStock;
+  // Sent only as a query value and shown through esc(), like the search text.
+  state.game = (p.get("game") ?? "").trim();
+  state.gameTitle = state.game;
   for (const key of ["store", "region"]) {
     state[key] = (p.get(key) ?? "").split(",").filter(Boolean);
   }
@@ -655,6 +661,7 @@ function paintChips() {
       `<button type="button" data-chip="${esc(kind)}" data-value="${esc(value ?? "")}"` +
       ` aria-label="Remove filter ${esc(kind)} ${esc(label)}">×</button></span>`);
 
+  if (state.game) push("game", state.gameTitle || state.game);
   if (state.q) push("search", state.q);
   if (state.platform) push("console", state.platform === "SWITCH2" ? "Switch 2" : "Switch");
   if (state.condition) push("condition", state.condition === "NEW" ? "New" : "Pre-owned");
@@ -1067,7 +1074,8 @@ function paintWatch() {
   const refocus = active && $("watch").contains(active) && active.dataset.game
     ? `.${[...active.classList].join(".")}[data-game="${CSS.escape(active.dataset.game)}"]` +
       `[data-platform="${CSS.escape(active.dataset.platform)}"]` +
-      (active.dataset.cond ? `[data-cond="${CSS.escape(active.dataset.cond)}"]` : "")
+      (active.dataset.cond ? `[data-cond="${CSS.escape(active.dataset.cond)}"]` : "") +
+      (active.dataset.shops ? `[data-shops="${CSS.escape(active.dataset.shops)}"]` : "")
     : null;
 
   if (!watched.length) {
@@ -1080,13 +1088,18 @@ function paintWatch() {
     <thead><tr><th class="plain" scope="col">Game</th><th class="plain num" scope="col">Best now</th>
       <th class="plain" scope="col">Where</th>
       <th class="plain" scope="col" title="Which copies count against your target">Copies</th>
+      <th class="plain" scope="col" title="India only: leave out imports, priced before customs and shipping">Shops</th>
       <th class="plain num" scope="col">Your target</th>
       <th class="plain" scope="col"><span class="visually-hidden">Remove</span></th></tr></thead>
     <tbody>${watched.map((w) => {
       const b = w.best;
       const title = b ? b.title : w.game;
+      // The game the server resolved the watch to: an old key follows its redirect.
+      const key = b?.game ?? w.game;
       return `<tr class="${w.hit ? "is-deal" : ""}">
-        <td class="title-cell"><div class="clamp"><span class="name">${esc(title)}</span><span class="meta">${
+        <td class="title-cell"><div class="clamp"><button type="button" class="linkish name show-game"
+             data-game="${esc(key)}" data-platform="${esc(w.platform)}" data-title="${esc(title)}"
+             title="Show every offer for this game">${esc(title)}</button><span class="meta">${
           w.platform === "SWITCH2" ? '<span class="tag sw2">Switch 2</span>' : ""}${
           w.hit ? '<span class="status ok">at target</span>' : ""}</span></div></td>
         ${b ? priceCell(b.best_price, b.lowest_ever, b.at_lowest) : '<td class="num price">—</td>'}
@@ -1095,6 +1108,7 @@ function paintWatch() {
                                            in_stock: b.best_in_stock })}</span>`
             : '<span class="muted">No offers right now</span>'}</td>
         <td>${conditionToggle(w, title)}</td>
+        <td>${shopsToggle(w, title)}</td>
         <td class="num"><input class="target" type="number" inputmode="numeric" min="1" step="1"
              value="${w.target ?? ""}" placeholder="₹ any" data-game="${esc(w.game)}"
              data-platform="${esc(w.platform)}" aria-label="Target price for ${esc(title)}"></td>
@@ -1116,14 +1130,26 @@ function conditionToggle(w, title) {
     button("ANY", "Any") + button("NEW", "New only") + `</div>`;
 }
 
+/** All shops / India only, per watched game. India only leaves out shops that
+ *  ship from abroad (Play-Asia): their price is before customs and shipping,
+ *  so it would look cheapest and set off alerts it shouldn't. */
+function shopsToggle(w, title) {
+  const button = (value, label) =>
+    `<button type="button" class="shops" data-shops="${value}" data-game="${esc(w.game)}" ` +
+    `data-platform="${esc(w.platform)}" aria-pressed="${w.shops === value}">${label}</button>`;
+  return `<div class="seg mini" role="group" aria-label="Shops that count for ${esc(title)}">` +
+    button("ALL", "All") + button("INDIA", "India only") + `</div>`;
+}
+
 /** A field left ``undefined`` is not sent, and the server then KEEPS it. So
- *  the target box (no condition) and the Any/New toggle (no target) never
+ *  the target box (no condition) and the two toggles (no target) never
  *  overwrite each other -- not even when one's request is still in flight
  *  while the other's is sent. ``null`` target is sent: it means "no target". */
-async function saveWatch(game, platform, target, condition) {
+async function saveWatch(game, platform, target, condition, shops) {
   const body = { game, platform };
   if (target !== undefined) body.target = target;
   if (condition) body.condition = condition;
+  if (shops) body.shops = shops;
   watched = await api("/api/watchlist", {
     method: "PUT",
     headers: { "content-type": "application/json" },
@@ -1156,7 +1182,7 @@ async function dropWatch(game, platform) {
     try {
       // The condition explicitly: the entry was deleted, so the server has no
       // setting left to keep, and "New only" would quietly come back as Any.
-      await saveWatch(game, platform, previous.target ?? null, previous.condition);
+      await saveWatch(game, platform, previous.target ?? null, previous.condition, previous.shops);
       syncWatchButtons();
       watchNote(`<span class="status ok">Watching ${esc(name)} again</span>`);
     } catch (err) {
@@ -1241,6 +1267,23 @@ $("watch").addEventListener("click", async (e) => {
 });
 
 $("watch").addEventListener("click", async (e) => {
+  const button = e.target.closest("button.shops");
+  if (!button || button.getAttribute("aria-pressed") === "true") return;
+  const { game, platform, shops } = button.dataset;
+  try {
+    await saveWatch(game, platform, undefined, undefined, shops);
+    watchNote(`<span class="status ok">${shops === "INDIA" ? "Counting Indian shops only" : "Counting every shop"}</span>`);
+  } catch (err) {
+    watchNote(`<span class="status failed">Could not change it: ${esc(err.message)}</span>`);
+  }
+});
+
+$("watch").addEventListener("click", (e) => {
+  const button = e.target.closest("button.show-game");
+  if (button) showGame(button.dataset.game, button.dataset.platform, button.dataset.title);
+});
+
+$("watch").addEventListener("click", async (e) => {
   const button = e.target.closest("button.unwatch");
   if (!button) return;
   try {
@@ -1287,7 +1330,7 @@ $("view").addEventListener("click", (e) => {
 
 function rerun() { state.offset = 0; search(); }
 
-function resetAll() {
+function clearFilters() {
   Object.assign(state, BLANK, { region: [], store: [] });
   $("q").value = "";
   $("stock").checked = false;
@@ -1296,7 +1339,26 @@ function resetAll() {
   for (const g of ["platform", "condition"]) {
     $(g).querySelectorAll("button").forEach((b, i) => b.setAttribute("aria-pressed", String(i === 0)));
   }
+}
+
+function resetAll() { clearFilters(); search(); }
+
+/** A watched game, clicked: every offer for exactly that game, at every shop.
+ *  Other filters are cleared first, or a leftover store tick would hide offers
+ *  and look like the game has fewer than it does. */
+function showGame(game, platform, title) {
+  clearFilters();
+  state.game = game;
+  state.gameTitle = title;
+  // Its platform too: a key can name both the Switch and the Switch 2 release.
+  state.platform = platform;
+  $("platform").querySelectorAll("button").forEach((b) =>
+    b.setAttribute("aria-pressed", String(b.dataset.v === platform)));
+  state.view = "listings";
+  $("view").querySelectorAll("button").forEach((b) =>
+    b.setAttribute("aria-pressed", String(b.dataset.v === "listings")));
   search();
+  $("list").scrollIntoView({ block: "start", behavior: "smooth" });
 }
 
 /* Removing one chip un-sets exactly the condition it names. */
@@ -1306,6 +1368,7 @@ $("chips").addEventListener("click", (e) => {
   if (button.id === "clearAll") return resetAll();
 
   const { chip, value } = button.dataset;
+  if (chip === "game") { state.game = ""; state.gameTitle = ""; }
   if (chip === "search") { state.q = ""; $("q").value = ""; }
   if (chip === "stock") { state.inStock = false; $("stock").checked = false; }
   for (const [kind, group] of [["console", "platform"], ["condition", "condition"]]) {

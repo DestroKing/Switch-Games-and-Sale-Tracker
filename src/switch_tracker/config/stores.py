@@ -288,6 +288,8 @@ STORES: tuple[StoreConfig, ...] = (
         # products the first had already found. Removing it converts that
         # budget into depth instead.
         search_urls=("https://www.play-asia.com/en/search/nintendo+switch+games",),
+        # Hong Kong: customs and shipping come on top of the rupee price.
+        ships_from_abroad=True,
         note=(
             "First in the browser group so it claims a concurrency slot immediately. "
             "Search URLs carry no {p}, so paging is a numeric page-number click; INR "
