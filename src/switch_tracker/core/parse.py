@@ -213,7 +213,14 @@ SERVICE = _patterns(
     r"\b(console\s*)?repair\b",
 )
 
-SWITCH2 = _patterns(r"switch\s*2\b", r"\bns2\b", r"\bswitch\s*two\b", r"\bnintendo\s*switch\s*2")
+SWITCH2 = _patterns(
+    r"switch\s*2\b", r"\bns2\b", r"\bnsw\s*2\b", r"\bswitch\s*two\b", r"\bnintendo\s*switch\s*2"
+)
+#: Play-Asia lists every console a cartridge runs on: "NSW™, NSW2™ Tales of
+#: Vesperia" is a Switch game that also plays on a Switch 2, not a Switch 2 game.
+_BOTH_SWITCHES = re.compile(r"\bnsw\b\W*,\s*nsw\s*2\b", re.IGNORECASE)
+#: Trademark signs, read as spaces wherever a console or a title is read.
+MARKS = str.maketrans("\u2122\u00ae\u00a9", "   ")
 
 # Switch markers, loosest last.  "NS" and "NSW" are genuinely used by Indian
 # importers in terse titles ("Hogwarts Legacy NSW"), which is exactly the case
@@ -251,8 +258,13 @@ def _any(patterns: tuple[re.Pattern[str], ...], text: str) -> bool:
     return any(p.search(text) for p in patterns)
 
 
-def _named_platform(text: str) -> Platform | None:
+def named_platform(text: str) -> Platform | None:
     """The console the text names, UNKNOWN for another console, None for none."""
+    # mcubegames, live: "Xenoblade Chronicles™ X ... Nintendo Switch™ 2 Edition"
+    # was stored as Switch 1, because the "™" sits between "Switch" and "2".
+    text = text.translate(MARKS)
+    if _BOTH_SWITCHES.search(text):
+        return Platform.SWITCH
     if _any(SWITCH2, text):
         return Platform.SWITCH2
     if _any(SWITCH, text):
@@ -268,7 +280,7 @@ def _named_platform(text: str) -> Platform | None:
 
 
 def platform_of(text: str, hint: Platform | None = None) -> Platform:
-    named = _named_platform(text)
+    named = named_platform(text)
     if named is not None:
         return named
     # No console named at all. Trust the store's context if it has one -- a
@@ -304,7 +316,7 @@ def classify(context: str, store_hint: Platform | None = None, *, title: str | N
     # The platform the TITLE names wins over the categories: HG World files
     # "Super Smash Bros Ultimate for Nintendo Switch | ..." under a Switch 2
     # category. Only a title naming no console falls back to the context.
-    named = _named_platform(title) if title is not None else None
+    named = named_platform(title) if title is not None else None
     platform = named if named is not None else platform_of(text, store_hint)
 
     # Order matters. Exclusions first, or hardware wins on a platform match.
@@ -392,21 +404,52 @@ NOISE = _patterns(
     r"\bnintendo\s*switch\b",
     r"\bswitch\s*2\b",
     r"\bswitch\b",
-    r"\b(nsw|ns2|ns)\b",
+    r"\b(nsw\s*2|nsw|ns2|ns)\b",
+    # The physical format, which is all a "game card" or a Switch 2 "game-key
+    # card" says: Flipkart's "(Game-Key Card)" is the same box hadiro sells.
+    # Before the "game" rule below, or "game card" leaves a stray "card".
+    r"\b(game[\s-]*)?key[\s-]*card\b",
+    r"\bgame[\s-]*card\b",
     r"\b(video\s*)?game(s)?\b",
     r"\b(cartridge|cart|physical|standard|edition)\b",
-    r"\((asia|japan|us|eu|english|chinese)[^)]*\)",
-    r"\[[^\]]*\]",
     r"\b(pre[- ]?owned|used|new|sealed|import|brand\s*new)\b",
     r"\bfor\s+nintendo\b",
 )
 
 _NON_ALNUM = re.compile(r"[^a-z0-9 ]")
 
+#: What a shop puts in brackets that is never the game's name: region, language
+#: and store notes. Amazon, live: "Edition(tbd)", "(Replen)", "(CIB)", "(NA)",
+#: "[AT-PEGI]", "UAE Version [video game]"; Play-Asia: "(Europe)". Only inside
+#: brackets, because outside them some of these are real words ("Among Us").
+_BRACKET_NOTES = frozenset(
+    {
+        "asia", "asian", "japan", "japanese", "jp", "jpn", "us", "usa", "na", "eu", "europe",
+        "european", "uk", "english", "eng", "en", "chinese", "chs", "cht", "zh", "multi",
+        "language", "languages", "version", "ver", "import", "imported", "region", "free", "pal",
+        "ntsc", "no", "tbd", "replen", "normal", "cib", "nla", "pegi", "at", "uae", "pre", "order",
+        "preorder",
+    }
+)  # fmt: skip
+_BRACKET = re.compile(r"[(\[]([^)\]]*)[)\]]")
+#: "(Includes Bayonetta Digital Code)": what the box includes, not what it is.
+#: German "(inkl. SonarPen)" too (Amazon, live).
+_INCLUDES_NOTE = re.compile(r"^\s*(incl(udes?|uding)?|inkl)\b")
+
+
+def _bracket_words(match: re.Match[str]) -> str:
+    # The words in a bracket are KEPT, except its notes: "[Definitive Edition]"
+    # and "(Boxed Code)" are the product, and deleting brackets wholesale keyed
+    # Play-Asia's "[Deluxe Edition]" the same as the standard game.
+    inside = match.group(1)
+    if _INCLUDES_NOTE.match(inside):
+        return " "
+    return " " + " ".join(w for w in re.split(r"[^a-z0-9]+", inside) if w and w not in _BRACKET_NOTES) + " "
+
 
 def normalise_title(title: str) -> str:
     """Crude normalisation; the matcher's first pass."""
-    text = title.lower()
+    text = _BRACKET.sub(_bracket_words, title.lower())
     for pattern in NOISE:
         text = pattern.sub(" ", text)
     text = _NON_ALNUM.sub(" ", text)

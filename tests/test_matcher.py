@@ -74,6 +74,41 @@ class TestMatchKey:
                 "Neon White - Nintendo Switch",
             ),
             ("Taxi Chaos 2 | Standard Edition | Switch", "Taxi Chaos 2 - Nintendo Switch"),
+            # Tales of Vesperia, live: three spellings were three games. Play-Asia's
+            # "NSW™" folded to "nswtm", its "[Definitive Edition]" was deleted
+            # outright, and Amazon's "(tbd)" stayed in the key.
+            (
+                "NSW™, NSW2™ Tales of Vesperia [Definitive Edition] (Europe)",
+                "Tales Of Vesperia - Definitive Edition (Switch)",
+            ),
+            ("Tales of Vesperia Definitive Edition(tbd)", "Tales Of Vesperia - Definitive Edition (Switch)"),
+            # Trademark signs anywhere (mcubegames, live).
+            ("Mario Tennis™ Fever - Nintendo Switch 2", "Mario Tennis fever - Nintendo Switch 2"),
+            # Store notes in brackets, or Amazon's outside them -- all live.
+            ("Dragon Ball Xenoverse 2 (Replen)", "Dragon Ball Xenoverse 2 Nintendo Switch"),
+            ("Lego Worlds Nla", "LEGO Worlds Nintendo Switch"),
+            ("Lego Jurassic World (NA)", "LEGO Jurassic World Nintendo Switch"),
+            (
+                "Lego Marvel Superheroes 2 | Standard Edition | Nintendo Switch (CIB)",
+                "LEGO Marvel Superheroes 2",
+            ),
+            (
+                "Pokémon: Let\u2019s Go, Eevee! (Nintendo Switch) (NORMAL)",
+                "Pokemon Lets Go Eevee Nintendo Switch",
+            ),
+            ("Switch - New Super Mario Bros. U Deluxe - [PAL EU - NO NTSC]", "New Super Mario Bros U Deluxe"),
+            (
+                "LEGO Star Wars: The Skywalker Saga (Nintendo Switch) [AT-PEGI]",
+                "Lego Star Wars Skywalker Saga",
+            ),
+            ("Spyro Reignited Trilogy - [Nintendo Switch]", "Spyro Reignited Trilogy Nintendo Switch"),
+            (
+                "Bayonetta 2 Nintendo Switch (Includes Bayonetta Digital Code)",
+                "Bayonetta 2 - Nintendo Switch",
+            ),
+            # The physical format, said three ways (Flipkart, hadiro, live).
+            ("PRAGMATA (Game-Key Card) for Nintendo Switch 2", "Pragmata - Nintendo Switch 2"),
+            ("Princess Peach Showtime Nintendo Game Card", "Princess Peach Showtime! Nintendo Switch"),
         ],
     )
     def test_merges_spellings_of_one_game(self, a: str, b: str) -> None:
@@ -104,6 +139,23 @@ class TestMatchKey:
             ("Mario + Rabbids | Sparks of Hope", "Mario + Rabbids | Kingdom Battle"),
             ("Persona 5 | Tactica", "Persona 5"),
             ("Splatoon 3 | Side Order", "Splatoon 3"),
+            # Brackets keep the product: an edition or format inside them is real.
+            ("Tales of Vesperia [Definitive Edition] (Europe)", "Tales of Vesperia (Europe)"),
+            ("Persona 5 Royal [Deluxe Edition] (Asia)", "Persona 5 Royal (Asia)"),
+            (
+                "LEGO Marvel Superheroes 2 [Code In A Box] (Switch)",
+                "LEGO Marvel Superheroes 2 Nintendo Switch",
+            ),
+            ("Fire Emblem Engage : Divine Edition - Nintendo Switch", "Fire Emblem Engage - Nintendo Switch"),
+            ("Mario + Rabbids Sparks of Hope - Cosmic Edition /Switch", "Mario + Rabbids Sparks of Hope"),
+            (
+                "Resident Evil Requiem Lenticular Edition - Nintendo Switch 2",
+                "Resident Evil Requiem - Switch 2",
+            ),
+            # "card" is only the format when it says "game card" or "key card".
+            ("Pokemon Trading Card Game", "Pokemon Trading Game"),
+            # Region notes are dropped only INSIDE brackets: outside, they're words.
+            ("Among Us - Nintendo Switch", "Among - Nintendo Switch"),
         ],
     )
     def test_keeps_different_games_apart(self, a: str, b: str) -> None:
@@ -201,6 +253,123 @@ class TestRematch:
         add(conn, 1, "a", "Mario Kart World")
         matcher.rematch(conn)
         assert self.redirects(conn) == {}
+
+    def test_rematching_existing_listings_consolidates_and_redirects_old_groups(self, conn) -> None:
+        """Tales of Vesperia end to end: the old three-way split, fixed by a rematch alone."""
+        titles = [
+            (1, "a", "NSW™, NSW2™ Tales of Vesperia [Definitive Edition] (Europe)", "EU"),
+            (2, "a", "Tales of Vesperia Definitive Edition(tbd)", "IN"),
+            (3, "b", "Tales Of Vesperia - Definitive Edition (Switch)", "IN"),
+        ]
+        old_keys = [
+            "nswtm nsw2tm tales vesperia",
+            "tales vesperia definitive tbd",
+            "tales vesperia definitive",
+        ]
+        for (lid, store, title, region), key in zip(titles, old_keys, strict=True):
+            add(conn, lid, store, title, region=region)
+            conn.execute(
+                "INSERT INTO game (canonical_title, platform, region) VALUES (?, 'SWITCH', ?)", (key, region)
+            )
+            conn.execute("UPDATE listing SET game_id = last_insert_rowid() WHERE id = ?", (lid,))
+        matcher.rematch(conn)
+        keys = {r["canonical_title"] for r in conn.execute("SELECT canonical_title FROM game")}
+        assert keys == {"tales vesperia definitive"}  # one game; the EU copy is its own region row
+        assert self.redirects(conn) == {
+            "nswtm nsw2tm tales vesperia": "tales vesperia definitive",
+            "tales vesperia definitive tbd": "tales vesperia definitive",
+        }
+
+
+class TestConfirmedMerges:
+    """Merges the key alone can't make safely, made only when the data confirms them."""
+
+    def test_a_publisher_prefix_comes_off_when_another_listing_confirms_the_rest(self, conn) -> None:
+        add(conn, 1, "a", "Sega Sonic Forces: Standard Edition - Nintendo Switch")
+        add(conn, 2, "b", "Sonic Forces Nintendo Switch")
+        add(conn, 3, "a", "Capcom Monster Hunter: Rise")
+        add(conn, 4, "b", "Monster Hunter Rise Nintendo Switch")
+        # A publisher named "... Games" (normalise_title drops that word first).
+        add(conn, 5, "a", "Maximum Games Alfred Hitchcock: Vertigo - Limited Edition (Nintendo Switch)")
+        add(conn, 6, "b", "Alfred Hitchcock Vertigo Limited Edition Switch")
+        matcher.rematch(conn)
+        assert game_of(conn, 1) == game_of(conn, 2)
+        assert game_of(conn, 3) == game_of(conn, 4)
+        assert game_of(conn, 5) == game_of(conn, 6)
+
+    def test_a_publisher_word_that_is_the_title_stays(self, conn) -> None:
+        add(conn, 1, "a", "Sega Genesis Classics")
+        add(conn, 2, "b", "Capcom Fighting Collection")
+        add(conn, 3, "b", "Marvel vs Capcom Fighting Collection")
+        matcher.rematch(conn)
+        keys = {r["canonical_title"] for r in conn.execute("SELECT canonical_title FROM game")}
+        assert keys == {
+            "sega genesis classics",
+            "capcom fighting collection",
+            "marvel vs capcom fighting collection",
+        }
+
+    def test_the_same_words_in_another_order_are_one_game(self, conn) -> None:
+        add(conn, 1, "a", "FC 26 EA SPORTS Nintendo Switch")
+        add(conn, 2, "b", "EA Sports FC 26 Nintendo Switch")
+        add(conn, 3, "b", "EA Sports FC 26 - Nintendo Switch")
+        add(conn, 4, "a", "PAW Patrol World - Paw Patrol - Nintendo Switch Game")
+        add(conn, 5, "b", "Paw Patrol World Nintendo Switch")
+        matcher.rematch(conn)
+        assert game_of(conn, 1) == game_of(conn, 2) == game_of(conn, 3)
+        assert game_of(conn, 4) == game_of(conn, 5)
+        # Named after the spelling most shops use.
+        assert "ea sports fc 26" in {
+            r["canonical_title"] for r in conn.execute("SELECT canonical_title FROM game")
+        }
+
+    def test_word_order_still_matters_around_vs(self, conn) -> None:
+        add(conn, 1, "a", "Capcom vs SNK")
+        add(conn, 2, "b", "SNK vs Capcom")
+        matcher.rematch(conn)
+        assert game_of(conn, 1) != game_of(conn, 2)
+
+    def test_an_alias_still_wins_and_joins_the_consolidated_group(self, conn) -> None:
+        add(conn, 1, "a", "Sega Sonic Forces")
+        add(conn, 2, "b", "Sonic Forces")
+        add(conn, 3, "b", "Sonik Forsez")  # a spelling no rule can fix
+        aliases = {match_key("Sonik Forsez"): match_key("Sega Sonic Forces")}
+        matcher.rematch(conn, aliases)
+        assert game_of(conn, 1) == game_of(conn, 2) == game_of(conn, 3)
+
+
+class TestPlatformFromTitle:
+    """The title's console wins at collection time, so a rematch can repair rows saved under older rules."""
+
+    def platform(self, conn, lid: int) -> str:
+        return conn.execute("SELECT platform FROM listing WHERE id = ?", (lid,)).fetchone()["platform"]
+
+    def test_a_switch_2_edition_saved_as_switch_is_relabelled_and_kept_apart(self, conn) -> None:
+        """mcubegames, live: the "™" in "Switch™ 2" hid the Switch 2 marker."""
+        add(conn, 1, "a", "Xenoblade Chronicles™ X Definitive Edition \u2013 Nintendo Switch™ 2 Edition")
+        add(conn, 2, "a", "Xenoblade Chronicles™ X: Definitive Edition - Nintendo Switch")
+        matcher.rematch(conn)
+        assert (self.platform(conn, 1), self.platform(conn, 2)) == ("SWITCH2", "SWITCH")
+        assert game_of(conn, 1) != game_of(conn, 2)
+
+    def test_nsw2_is_switch_2_but_a_list_of_both_consoles_is_a_switch_game(self, conn) -> None:
+        add(conn, 1, "a", "NSW2™ Mario Kart World (Japan)")  # stored under the store's SWITCH hint
+        add(conn, 2, "b", "Mario Kart World - Nintendo Switch 2", platform="SWITCH2")
+        add(conn, 3, "a", "NSW™, NSW2™ Tales of Vesperia [Definitive Edition] (Europe)")
+        matcher.rematch(conn)
+        assert (self.platform(conn, 1), self.platform(conn, 3)) == ("SWITCH2", "SWITCH")
+        assert game_of(conn, 1) == game_of(conn, 2)
+
+    def test_a_title_naming_no_console_keeps_the_stored_platform(self, conn) -> None:
+        add(conn, 1, "a", "Hogwarts Legacy", platform="SWITCH2")  # from the store's category
+        matcher.rematch(conn)
+        assert self.platform(conn, 1) == "SWITCH2"
+
+    def test_genuinely_different_platforms_stay_apart(self, conn) -> None:
+        add(conn, 1, "a", "Hades II - Nintendo Switch")
+        add(conn, 2, "b", "Hades II - Nintendo Switch 2")
+        matcher.rematch(conn)
+        assert game_of(conn, 1) != game_of(conn, 2)
 
 
 class TestAliasesFile:

@@ -387,13 +387,27 @@ become `pokemon legends z a`. Same key and platform means the same game.
   alias. A wrong merge silently mixes two games' prices. So single letters stay in
   ("Z-A" vs "Z"), as do numbers and editions. The tests pin must-not-merge pairs as
   carefully as must-merge ones.
+- **Brackets keep the product, lose the notes.** `[Definitive Edition]` and `(Boxed
+  Code)` stay in the key; region, language and store notes inside brackets (`(Europe)`,
+  `[AT-PEGI]`, `(tbd)`, `(Import)`, `(Includes …)`) don't. `™` and the physical format
+  ("Game Card", "Game-Key Card") never count.
 - **Amazon's publisher prefixes** ("Warner Bros Interactive Entertainment …") are
-  stripped from the start of a title. Sega, Capcom, Konami, Namco and EA aren't on the
-  list, because real titles begin with them.
+  stripped from the start of a title. Names real titles also start with (Sega, Capcom,
+  Atlus, Activision and others) come off only when **another listing confirms** the
+  rest: "Sega Sonic Forces" joins "Sonic Forces" because a shop sells "Sonic Forces",
+  while "Sega Genesis Classics" stays whole.
+- **The same words in another order** are one game ("FC 26 EA Sports", "EA Sports FC
+  26"), except around "vs", where order is the game.
+- **The platform is re-read from the title** during matching, the same way a collection
+  reads it, so rows saved under older rules are repaired: Play-Asia's `NSW2™`, and
+  "Switch™ 2 Edition" stored as Switch 1.
 - **Marketing after a `|`** is dropped only if the part before it names the console *and*
   the rest names no edition, number or variant. "Fire Emblem | Engage" stays whole.
 - **Titles that key to nothing** (the console's bare name, Japanese-only text) are never
   grouped. `check_data.py` lists them.
+- **What it won't do: fuzzy matching.** "One or two extra words" is also how a Deluxe, a
+  Divine Edition or a sequel looks ("Ben 10" vs "Ben 10 Power Trip"). Those pairs are
+  listed by `check_data.py --review` for a person to settle with an alias.
 - **Regions**: stored as separate games, but the Games view groups across regions, since
   an import is the comparison.
 - **Re-keying leaves a forwarding address.** When a key disappears and all its listings

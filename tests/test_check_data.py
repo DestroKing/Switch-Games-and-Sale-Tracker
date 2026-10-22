@@ -51,6 +51,33 @@ def test_exit_code_flags_cut_titles_and_bad_prices(
     assert check_data.main(["--db", str(tmp_path / "t.db")]) == code
 
 
+def test_review_previews_a_rematch_without_changing_anything(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setenv("TRACKER_DATA_DIR", str(tmp_path))
+    path = tmp_path / "t.db"
+    seed(path, "Tales of Vesperia Definitive Edition(tbd)", 2999)
+    conn = db.connect(path)
+    conn.execute(
+        "INSERT INTO listing (id, store_id, sku, url, raw_title, platform, region, first_seen, last_seen)"
+        " VALUES (2, 'fk', 's2', 'https://f/p/2', 'Tales Of Vesperia - Definitive Edition (Switch)',"
+        " 'SWITCH', 'IN', 't', 't')"
+    )
+    conn.execute(
+        "INSERT INTO game (canonical_title, platform, region)"
+        " VALUES ('tales vesperia definitive tbd', 'SWITCH', 'IN')"
+    )
+    conn.execute("UPDATE listing SET game_id = 1 WHERE id = 1")
+    conn.close()
+
+    check_data.main(["--db", str(path), "--review"])
+    out = capsys.readouterr().out
+    assert "A rematch would merge 1 group(s)" in out
+    assert "'tales vesperia definitive'" in out
+    # Read-only: the stored grouping is untouched.
+    assert db.connect(path).execute("SELECT game_id FROM listing WHERE id = 2").fetchone()["game_id"] is None
+
+
 def test_missing_database_is_reported_not_created(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     missing = tmp_path / "nope.db"
     assert check_data.main(["--db", str(missing)]) == 1

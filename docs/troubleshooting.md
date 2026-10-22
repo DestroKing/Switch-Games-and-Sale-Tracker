@@ -160,6 +160,20 @@ It exits with code 1 if anything in the **cut** or **bad price** column is not z
 | **compared across 2+ stores** | Not a problem, just the number to watch. If it drops sharply after a change, grouping got worse. | |
 | **Watched games with no offer today** | Informational. Usually the game is sold out or gone everywhere. A watch whose game was regrouped under a new name follows it automatically (walkthrough §3.9). | Nothing, unless you expected offers: then find the game in **Games** and watch it from there. |
 
+**After updating the code, or before trusting a regroup**, preview it. Read-only:
+
+```
+uv run python scripts/check_data.py --review
+uv run python scripts/check_data.py --review --limit 200
+```
+
+It adds two lists. **A rematch would merge…** shows every group the current matcher
+would join, with sample titles, and any platform it would relabel: check none of them
+joins two different products. **Possibly the same game, still separate** is the review
+queue: pairs one or two words apart that the matcher won't merge on its own, because
+that's also how a Deluxe or a sequel looks. For a pair that is one game, add an alias
+(below).
+
 **Two copies of one game in two rows?** That's a missed merge, which is deliberate: the
 matcher errs towards splitting. Create `matches.local.json` in your data folder, pasting
 titles exactly as the dashboard shows them:
