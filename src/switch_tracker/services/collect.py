@@ -240,7 +240,20 @@ class CollectService:
             # _persist drops these; say so, or a store whose links all broke
             # would quietly report fewer listings with nothing to explain why.
             events.warning(f"{store.id}: skipped {unlinked} listing(s) with no http(s) link")
-        saved = self._persist(run_id, store, outcome.listings)
+                try:
+            saved = self._persist(run_id, store, outcome.listings)
+        except Exception as exc:  # noqa: BLE001 - a persistence fault is a store fault when its transaction rolls back
+            reason = f"Could not save listings: {type(exc).__name__}: {exc}"
+            self._record(run_id, store.id, "failed", 0, elapsed_ms(), reason)
+            events.store_finished(
+                store.id,
+                status="failed",
+                count=0,
+                duration_ms=elapsed_ms(),
+                detail=reason,
+            )
+            return
+
         status = "ok" if isinstance(outcome, Ok) else "partial"
         detail = outcome.reason if isinstance(outcome, Partial) else None
         self._record(run_id, store.id, status, saved, elapsed_ms(), detail)

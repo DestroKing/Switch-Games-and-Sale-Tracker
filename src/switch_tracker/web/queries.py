@@ -498,6 +498,7 @@ def movers(conn: sqlite3.Connection) -> list[dict[str, Any]]:
             JOIN price_point cur ON cur.id = {_LATEST_ID}
             JOIN price_point prev ON prev.id = {_PREVIOUS_ID}
             WHERE cur.inr_price <> prev.inr_price
+            AND prev.inr_price > 0
             """
         )
     )
