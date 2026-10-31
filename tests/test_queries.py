@@ -853,3 +853,10 @@ class TestMultiValueFilters:
         hostile = ("amazon", "'); DROP TABLE listing; --")
         assert self._ids(queries.listings(spread, queries.ListingQuery(stores=hostile))) == {2, 4}
         assert spread.execute("SELECT COUNT(*) c FROM listing").fetchone()["c"] == 4
+        
+    def test_skips_zero_previous_price(self, conn: sqlite3.Connection) -> None:
+        add_listing(conn, 1, "nistore", "Zero Price Game")
+        add_price(conn, 1, 1, 0, at="2026-08-01")
+        add_price(conn, 1, 2, 100, at="2026-08-15")
+
+        assert queries.movers(conn) == []
