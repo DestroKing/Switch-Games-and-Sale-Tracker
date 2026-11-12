@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 from typing import Any
 
@@ -25,7 +26,7 @@ class HobbyallAdapter:
         if not response.ok:
             return Failed(f"product API: HTTP {response.status or response.body}")
         try:
-            payload = __import__("json").loads(response.body)
+            payload = json.loads(response.body)
         except ValueError:
             return Failed("product API returned invalid JSON")
         if not isinstance(payload, dict) or payload.get("success") is not True:
