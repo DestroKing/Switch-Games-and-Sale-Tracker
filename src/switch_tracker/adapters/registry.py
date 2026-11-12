@@ -19,10 +19,12 @@ def build_registry(
     """
     from switch_tracker.adapters.shopify import ShopifyAdapter
     from switch_tracker.adapters.woocommerce import WooAdapter
+    from switch_tracker.adapters.hobbyall import HobbyallAdapter
 
     registry: dict[AdapterKind, Adapter] = {
         AdapterKind.SHOPIFY: ShopifyAdapter(client),
         AdapterKind.WOOCOMMERCE: WooAdapter(client),
+        AdapterKind.HOBBYALL: HobbyallAdapter(client),
     }
 
     if browser_provider is not None:
