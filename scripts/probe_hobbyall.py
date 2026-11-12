@@ -68,7 +68,24 @@ async def inspect_catalog(page: Page, url: str, label: str) -> dict[str, object]
                         record["sample_product"] = value[0]
                         record["product_ids"] = [
                             str(item.get("id") or item.get("_id") or item.get("slug") or item.get("sku") or "")
-                            for item in value[:1000]
+                            for item in value
+                        ]
+                        record["unique_product_id_count"] = len(set(record["product_ids"]))
+                        record["duplicate_product_ids"] = [
+                            product_id for product_id in sorted(set(record["product_ids"]))
+                            if record["product_ids"].count(product_id) > 1
+                        ]
+                        record["product_summaries"] = [
+                            {
+                                key: item.get(key)
+                                for key in (
+                                    "id", "name", "category", "navItem", "parentNavItem",
+                                    "megaMenuCol", "megaMenuSubcat", "price", "oldPrice",
+                                    "stockQuantity", "stockUnit", "isInquiryOnly", "brand",
+                                    "platform", "availability", "tag"
+                                )
+                            }
+                            for item in value if isinstance(item, dict)
                         ]
                         break
                 for key, value in payload.items():
@@ -110,6 +127,7 @@ async def inspect_catalog(page: Page, url: str, label: str) -> dict[str, object]
             .filter(card => card.querySelector('a[href*="/product/"]'));
           const products = cards.map(card => {
             const link = card.querySelector('a[href*="/product/"]');
+            const productId = (link?.href || '').match(/(PRD\\d+)(?:[/?#]|$)/i)?.[1] || '';
             const title = card.querySelector('h3, h2, [class*="title"]');
             const current = card.querySelector('p.text-primary, [class*="text-primary"][class*="font-black"]');
             const old = card.querySelector('p.line-through, [class*="line-through"]');
@@ -117,6 +135,7 @@ async def inspect_catalog(page: Page, url: str, label: str) -> dict[str, object]
             const badge = card.querySelector('span.absolute');
             const platform = card.querySelector('p.text-slate-400.font-bold, p[class*="uppercase"][class*="tracking-wider"]');
             return {
+              product_id: productId,
               title: clean(title),
               price: clean(current),
               original_price: clean(old),
@@ -159,12 +178,31 @@ async def inspect_catalog(page: Page, url: str, label: str) -> dict[str, object]
         }""",
         {"cardSelector": CARD_SELECTOR},
     )
+    api_products = [
+        response_data for response_data in api_responses
+        if response_data.get("status") == 200 and response_data.get("product_summaries")
+    ]
+    api_products = api_products[-1] if api_products else {}
+    api_ids = set(api_products.get("product_ids", []))
+    card_ids = [str(product.get("product_id") or "") for product in result["products"]]
+    card_ids = [product_id for product_id in card_ids if product_id]
     snapshot = {
         "label": label, "requested_url": url, "final_url": page.url,
         "http_status": response.status if response else None,
         "title": await page.title(), **result,
         "api_requests": requests[:100],
         "api_products_responses": api_responses[:20],
+        "api_vs_dom": {
+            "api_product_count": api_products.get("list_count"),
+            "api_unique_id_count": api_products.get("unique_product_id_count"),
+            "api_duplicate_ids": api_products.get("duplicate_product_ids", []),
+            "dom_card_count": len(result["products"]),
+            "dom_cards_with_product_id": len(card_ids),
+            "dom_unique_id_count": len(set(card_ids)),
+            "dom_duplicate_ids": sorted({x for x in card_ids if card_ids.count(x) > 1}),
+            "dom_ids_missing_from_api": sorted(set(card_ids) - api_ids),
+            "api_ids_not_rendered_in_dom": sorted(api_ids - set(card_ids)),
+        },
     }
     print(f"  HTTP {snapshot['http_status']} | {snapshot['title']!r}")
     print(f"  product cards: {snapshot['card_count']}")
