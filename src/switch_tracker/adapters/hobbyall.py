@@ -9,7 +9,15 @@ from typing import Any
 from switch_tracker.adapters.base import ProgressSink
 from switch_tracker.core.http import PoliteClient
 from switch_tracker.core.models import (
-    AdapterKind, Failed, FetchOutcome, Ok, Platform, ProductKind, RawListing, Region, StoreConfig,
+    AdapterKind,
+    Failed,
+    FetchOutcome,
+    Ok,
+    Platform,
+    ProductKind,
+    RawListing,
+    Region,
+    StoreConfig,
 )
 from switch_tracker.core.parse import classify, infer_condition, infer_region, parse_price
 
@@ -62,7 +70,10 @@ class HobbyallAdapter:
             return None
 
         result = classify(
-            " ".join(str(product.get(key) or "") for key in ("name", "category", "navItem", "parentNavItem", "platform", "tag")),
+            " ".join(
+                str(product.get(key) or "")
+                for key in ("name", "category", "navItem", "parentNavItem", "platform", "tag")
+            ),
             title=title,
         )
         if result.kind is not ProductKind.GAME:
@@ -83,7 +94,8 @@ class HobbyallAdapter:
         if image and image.startswith("/"):
             image = f"{store.base_url.rstrip('/')}{image}"
 
-        context = " ".join(str(product.get(key) or "") for key in ("name", "tag")).replace("open boxed", "open box").replace("Open Boxed", "Open Box")
+        context = " ".join(str(product.get(key) or "") for key in ("name", "tag"))
+        context = context.replace("open boxed", "open box").replace("Open Boxed", "Open Box")
         return RawListing(
             store_id=store.id,
             sku=product_id,
