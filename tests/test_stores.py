@@ -24,7 +24,7 @@ def data_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
 
 class TestShippedList:
     def test_carries_every_store(self) -> None:
-        assert len(STORES) == 24
+        assert len(STORES) == 25
 
     def test_ids_are_unique(self) -> None:
         """store.id is a primary key; a duplicate would silently merge two shops."""
@@ -201,6 +201,16 @@ class TestTheAddedBatch:
         assert [url for url in store.search_urls if "categoryIds=1086" in url]
 
 
+class TestHobbyall:
+    def test_hobbyall_uses_its_dedicated_api_adapter(self) -> None:
+        store = next(s for s in STORES if s.id == "hobbyall")
+        assert store.kind is AdapterKind.HOBBYALL
+        assert store.enabled is True
+        assert store.base_url == "https://hobbyall.in"
+        assert store.collections == ()
+        assert store.search_urls == ()
+
+
 class TestOverrides:
     def test_the_overrides_file_lives_in_the_data_dir_not_the_working_directory(self, data_dir: Path) -> None:
         """The bug this design removes.
@@ -246,7 +256,7 @@ class TestOverrides:
         """
         paths.overrides_path().write_text("{not json at all")
         assert overrides.read() == {}
-        assert len(overrides.active_stores()) == 24
+        assert len(overrides.active_stores()) == 25
 
     def test_reset_clears_every_correction(self, data_dir: Path) -> None:
         overrides.set_override("nistore", enabled=False)
@@ -262,4 +272,4 @@ class TestOverrides:
     def test_ignores_a_correction_for_an_unknown_store(self, data_dir: Path) -> None:
         """A stale entry from a renamed store must not invent a phantom store."""
         paths.overrides_path().write_text(json.dumps({"ghost_store": {"enabled": False}}))
-        assert len(overrides.active_stores()) == 24
+        assert len(overrides.active_stores()) == 25
