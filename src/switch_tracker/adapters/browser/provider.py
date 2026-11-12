@@ -8,8 +8,10 @@ Neither case is the adapter's business.
 
 from __future__ import annotations
 
-from playwright.async_api import Browser, BrowserContext, Error, Playwright, async_playwright
-from playwright_stealth import Stealth
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from playwright.async_api import Browser, BrowserContext, Playwright
 
 _USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -43,6 +45,8 @@ class BrowserProvider:
     async def browser(self) -> Browser:
         if self._browser is not None:
             return self._browser
+
+        from playwright.async_api import Error, async_playwright
 
         self._playwright = await async_playwright().start()
         try:
@@ -90,6 +94,8 @@ class BrowserProvider:
         # scripts, so every page opened in it is patched before its first script
         # runs -- strictly earlier than domcontentloaded, by which point a
         # detection script has already executed and read the real values.
+        from playwright_stealth import Stealth
+
         await Stealth().apply_stealth_async(context)
         return context
 
