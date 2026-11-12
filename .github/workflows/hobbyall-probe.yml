@@ -1,0 +1,55 @@
+name: Hobbyall Playwright probe
+
+on:
+  push:
+    branches:
+      - test/hobbyall-playwright-probe
+    paths:
+      - ".github/workflows/hobbyall-probe.yml"
+      - "scripts/probe_hobbyall.py"
+      - "src/switch_tracker/adapters/browser/**"
+      - "src/switch_tracker/paths.py"
+      - "pyproject.toml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Install project dependencies
+        run: uv sync --all-groups
+
+      - name: Install Playwright Chromium
+        run: uv run playwright install --with-deps chromium
+
+      - name: Run Hobbyall browser probe
+        run: |
+          set -o pipefail
+          uv run python scripts/probe_hobbyall.py 2>&1 | tee hobbyall-probe.log
+
+      - name: Upload probe report and rendered HTML
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hobbyall-playwright-probe
+          path: |
+            hobbyall-probe.log
+            ~/.local/share/switch-tracker/diagnostics/hobbyall-probe.json
+            ~/.local/share/switch-tracker/diagnostics/hobbyall-*.html
+          if-no-files-found: warn
+          retention-days: 7
