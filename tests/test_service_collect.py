@@ -263,7 +263,7 @@ class TestDeadlines:
         If the service's deadline fired first it would cancel the coroutine and
         discard every page already scraped.
         """
-        from switch_tracker.adapters.browser.adapter import DEFAULT_TIME_BUDGET_S
+        from switch_tracker.adapters.browser.budgets import DEFAULT_TIME_BUDGET_S
         from switch_tracker.adapters.browser.profiles import PROFILES
 
         svc = CollectService(None, adapters={}, fx=None)  # type: ignore[arg-type]
