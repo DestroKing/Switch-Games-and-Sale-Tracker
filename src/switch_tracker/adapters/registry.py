@@ -17,12 +17,14 @@ def build_registry(
     enabled, so a run of HTTP-only stores never imports Playwright or pays
     for launching Chromium.
     """
+    from switch_tracker.adapters.hobbyall import HobbyallAdapter
     from switch_tracker.adapters.shopify import ShopifyAdapter
     from switch_tracker.adapters.woocommerce import WooAdapter
 
     registry: dict[AdapterKind, Adapter] = {
         AdapterKind.SHOPIFY: ShopifyAdapter(client),
         AdapterKind.WOOCOMMERCE: WooAdapter(client),
+        AdapterKind.HOBBYALL: HobbyallAdapter(client),
     }
 
     if browser_provider is not None:
