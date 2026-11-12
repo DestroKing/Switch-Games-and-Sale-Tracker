@@ -156,7 +156,7 @@ async def inspect_page(page: Page, url: str, label: str) -> dict[str, object]:
     )
 
     pager = await page.evaluate(
-        """() => [...document.querySelectorAll('a,button,[role="button"]')]
+        r"""() => [...document.querySelectorAll('a,button,[role="button"]')]
           .map(el => ({
             text: (el.innerText || el.getAttribute('aria-label') || '').trim(),
             href: el.href || '',
