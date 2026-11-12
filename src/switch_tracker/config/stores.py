@@ -21,7 +21,10 @@ STORES: tuple[StoreConfig, ...] = (
         currency="INR",
         tier=2,
         enabled=True,
-        note="Uses its public /api/products catalogue; adapter filters Switch and Switch 2 games by API category/platform fields.",
+        note=(
+            "Uses its public /api/products catalogue; adapter filters Switch and Switch 2 "
+            "games by API category/platform fields."
+        ),
     ),
     # ---- Tier 2: dedicated retailers. The real catalogue lives here. ----
     StoreConfig(
