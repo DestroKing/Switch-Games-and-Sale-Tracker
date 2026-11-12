@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import re
+from typing import TYPE_CHECKING
 
-from playwright.async_api import Page
+if TYPE_CHECKING:
+    from playwright.async_api import Page
 
 
 class ProductivityTracker:
