@@ -11,31 +11,24 @@ import contextlib
 import json
 import random
 from collections.abc import Callable
-from typing import TYPE_CHECKING
 from urllib.parse import SplitResult, parse_qs, urlencode, urljoin, urlsplit
 
-try:
-    from playwright.async_api import TimeoutError as PlaywrightTimeoutError
-except ImportError:  # Android can run the mocked recovery tests without Playwright.
-    PlaywrightTimeoutError = TimeoutError
-
-if TYPE_CHECKING:
-    from playwright.async_api import Page, Response
+from playwright.async_api import Page, Response
+from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 
 from switch_tracker import paths
 from switch_tracker.adapters.base import ProgressSink
 from switch_tracker.adapters.browser.diagnostics import dump
 from switch_tracker.adapters.browser.budgets import DEFAULT_TIME_BUDGET_S
 from switch_tracker.adapters.browser.extract import Extracted, extract
-from switch_tracker.adapters.browser.logic import _condition_for, rejects_url, uses_click_paging
+from switch_tracker.adapters.browser.logic import _condition_for, rejects_url
 from switch_tracker.adapters.browser.pagination import (
     ProductivityTracker,
     read_claimed_total,
     wait_for_cloudflare,
 )
 from switch_tracker.adapters.browser.profiles import StoreProfile, WaitUntil, effective_profile
-if TYPE_CHECKING:
-    from switch_tracker.adapters.browser.provider import BrowserProvider
+from switch_tracker.adapters.browser.provider import BrowserProvider
 from switch_tracker.core.models import (
     AdapterKind,
     Condition,
@@ -625,6 +618,26 @@ def _canonical_url(split: SplitResult, keep_params: tuple[str, ...]) -> str:
     found = parse_qs(split.query)
     kept = [(name, found[name][0]) for name in keep_params if found.get(name) and found[name][0]]
     return f"{base}?{urlencode(kept)}" if kept else base
+
+
+def uses_click_paging(profile: StoreProfile, template: str) -> bool:
+    """Must this store's page 2+ be reached by clicking rather than by URL?
+
+    Two independent reasons, and the second one matters:
+
+    * The profile declares a next-page control -- the store renders page 2
+      client-side, so a URL parameter silently returns page 1 forever.
+    * The search URL has no ``{p}`` to substitute. There is simply no other
+      URL to go to, so clicking is the only mechanism available.
+
+    Inferring this from ``next_page`` alone was wrong: Play-Asia has no ``{p}``
+    AND, deliberately, no CSS pager selectors, because the only mechanism its
+    verified sweep used was the numeric page-number clicker. Under the old rule
+    an empty ``next_page`` meant "re-fetch the same URL forever".
+    """
+    return bool(profile.next_page) or "{p}" not in template
+
+
 
 
 class _NoMorePages(Exception):
