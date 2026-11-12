@@ -19,7 +19,6 @@ import asyncio
 import json
 import re
 import sys
-from urllib.parse import urljoin
 
 from playwright.async_api import Page
 
