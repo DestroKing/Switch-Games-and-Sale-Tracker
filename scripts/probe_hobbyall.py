@@ -35,13 +35,63 @@ PRODUCT_HREF = re.compile(r"/product/[^/?#]+", re.I)
 
 async def inspect_catalog(page: Page, url: str, label: str) -> dict[str, object]:
     print(f"\n{'=' * 76}\n{label}: {url}")
-    requests: list[str] = []
+    requests: list[dict[str, object]] = []
+    api_responses: list[dict[str, object]] = []
+
     def record_request(request: object) -> None:
         request_url = getattr(request, "url", "")
-        if request_url and any(x in request_url.lower() for x in ("/api/", ".json", "graphql")):
-            if request_url not in requests:
-                requests.append(request_url)
+        if request_url and "/api/" in request_url.lower():
+            requests.append({
+                "url": request_url,
+                "method": getattr(request, "method", ""),
+                "post_data": getattr(request, "post_data", None),
+            })
+
+    async def record_response(response: object) -> None:
+        response_url = getattr(response, "url", "")
+        if not response_url or "/api/products" not in response_url.lower():
+            return
+        record: dict[str, object] = {
+            "url": response_url,
+            "status": getattr(response, "status", None),
+        }
+        try:
+            payload = await response.json()
+            record["payload_type"] = type(payload).__name__
+            if isinstance(payload, dict):
+                record["top_level_keys"] = list(payload)[:80]
+                for key, value in payload.items():
+                    if isinstance(value, list) and value and isinstance(value[0], dict):
+                        record["list_key"] = key
+                        record["list_count"] = len(value)
+                        record["sample_product_keys"] = list(value[0])[:80]
+                        record["sample_product"] = value[0]
+                        record["product_ids"] = [
+                            str(item.get("id") or item.get("_id") or item.get("slug") or item.get("sku") or "")
+                            for item in value[:1000]
+                        ]
+                        break
+                for key, value in payload.items():
+                    if not isinstance(value, (dict, list)):
+                        record[f"meta_{key}"] = value
+                    elif isinstance(value, dict):
+                        record[f"meta_{key}"] = {
+                            k: v for k, v in value.items()
+                            if not isinstance(v, (dict, list))
+                        }
+            elif isinstance(payload, list):
+                record["list_count"] = len(payload)
+                record["sample_product"] = payload[0] if payload else None
+                record["product_ids"] = [
+                    str(item.get("id") or item.get("_id") or item.get("slug") or item.get("sku") or "")
+                    for item in payload[:1000] if isinstance(item, dict)
+                ]
+        except Exception as exc:
+            record["json_error"] = f"{type(exc).__name__}: {exc}"
+        api_responses.append(record)
+
     page.on("request", record_request)
+    page.on("response", record_response)
     try:
         response = await page.goto(url, wait_until="domcontentloaded", timeout=45_000)
         await page.wait_for_timeout(2_500)
@@ -50,6 +100,7 @@ async def inspect_catalog(page: Page, url: str, label: str) -> dict[str, object]
         print(f"  NAVIGATION ERROR: {type(exc).__name__}: {exc}")
         return {"label": label, "requested_url": url, "error": f"{type(exc).__name__}: {exc}"}
     page.remove_listener("request", record_request)
+    page.remove_listener("response", record_response)
 
     result = await page.evaluate(
         """({cardSelector}) => {
@@ -112,7 +163,8 @@ async def inspect_catalog(page: Page, url: str, label: str) -> dict[str, object]
         "label": label, "requested_url": url, "final_url": page.url,
         "http_status": response.status if response else None,
         "title": await page.title(), **result,
-        "api_like_requests": requests[:100],
+        "api_requests": requests[:100],
+        "api_products_responses": api_responses[:20],
     }
     print(f"  HTTP {snapshot['http_status']} | {snapshot['title']!r}")
     print(f"  product cards: {snapshot['card_count']}")
