@@ -3,12 +3,20 @@
 from __future__ import annotations
 
 import json
+
 import pytest
 
 from switch_tracker.adapters.base import NullSink
 from switch_tracker.adapters.hobbyall import HobbyallAdapter
 from switch_tracker.core.http import PoliteClient
-from switch_tracker.core.models import AdapterKind, Condition, Failed, Ok, Platform, StoreConfig
+from switch_tracker.core.models import (
+    AdapterKind,
+    Condition,
+    Failed,
+    Ok,
+    Platform,
+    StoreConfig,
+)
 
 
 def product(pid: str, name: str, *, platform: str = "NSW", **kw: object) -> dict[str, object]:
@@ -117,7 +125,10 @@ class TestFailures:
 
     async def test_unexpected_json_shape_is_a_failure(self, adapter, server) -> None:
         base, recorder = server
-        recorder.plan("/api/products", (200, '{"success":true,"data":{}}', {"content-type": "application/json"}))
+        recorder.plan(
+            "/api/products",
+            (200, '{"success":true,"data":{}}', {"content-type": "application/json"}),
+        )
         assert isinstance(await adapter.fetch(store_at(base), NullSink()), Failed)
 
     async def test_unreachable_store_fails_with_a_readable_reason(self, adapter) -> None:
