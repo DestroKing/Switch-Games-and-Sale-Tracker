@@ -13,6 +13,16 @@ from __future__ import annotations
 from switch_tracker.core.models import AdapterKind, Platform, StoreConfig
 
 STORES: tuple[StoreConfig, ...] = (
+    StoreConfig(
+        id="hobbyall",
+        name="Hobbyall",
+        base_url="https://hobbyall.in",
+        kind=AdapterKind.HOBBYALL,
+        currency="INR",
+        tier=2,
+        enabled=True,
+        note="Uses its public /api/products catalogue; adapter filters Switch and Switch 2 games by API category/platform fields.",
+    ),
     # ---- Tier 2: dedicated retailers. The real catalogue lives here. ----
     StoreConfig(
         id="nistore",
