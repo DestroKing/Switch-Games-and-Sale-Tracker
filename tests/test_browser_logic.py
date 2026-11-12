@@ -583,7 +583,7 @@ class TestPagingPathSelection:
         which real store each trigger applies to, so a future edit to a search
         URL cannot silently move a store onto the other mechanism.
         """
-        from switch_tracker.adapters.browser.adapter import uses_click_paging
+        from switch_tracker.adapters.browser.logic import uses_click_paging
         from switch_tracker.adapters.browser.profiles import PROFILES
         from switch_tracker.config.stores import STORES
         from switch_tracker.core.models import AdapterKind
@@ -645,7 +645,7 @@ class TestBudgetInvariant:
         every page scraped -- exactly the loss the self-limit exists to avoid.
         A comment cannot fail a build; this can.
         """
-        from switch_tracker.adapters.browser.adapter import DEFAULT_TIME_BUDGET_S
+        from switch_tracker.adapters.browser.budgets import DEFAULT_TIME_BUDGET_S
         from switch_tracker.services.collect import CollectService
 
         assert DEFAULT_TIME_BUDGET_S < CollectService.DEFAULT_BROWSER_DEADLINE_S
