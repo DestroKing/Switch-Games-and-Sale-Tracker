@@ -1,17 +1,8 @@
-"""Inspect Hobbyall's rendered storefront before adding it to the shipped store list.
+"""Inspect Hobbyall's rendered catalogue and product detail pages.
 
-This is deliberately a diagnostic, not a StoreProfile: it records what the
-live page actually renders so selectors and pagination can be chosen from
-evidence rather than guessed. It uses the same BrowserProvider (Chrome first,
-stealth context, Chromium fallback) as the production adapter.
-
-    uv run python scripts/probe_hobbyall.py
-    uv run python scripts/probe_hobbyall.py --headful
-
-The report and full HTML snapshots are written under the normal diagnostics
-directory. No tracker data or store configuration is changed.
+Diagnostic only: no shipped StoreConfig/StoreProfile is changed.
+Run with: uv run python scripts/probe_hobbyall.py
 """
-
 from __future__ import annotations
 
 import argparse
@@ -19,6 +10,7 @@ import asyncio
 import json
 import re
 import sys
+from urllib.parse import urljoin
 
 from playwright.async_api import Page
 
@@ -27,178 +19,154 @@ from switch_tracker.adapters.browser.provider import BrowserProvider
 
 BASE_URL = "https://hobbyall.in"
 PRODUCT_URL = (
-    "https://hobbyall.in/product/"
+    f"{BASE_URL}/product/"
     "the-legend-of-zelda-ocarina-of-time-multi-language-PRD0174"
 )
-SEARCH_URLS = (
-    f"{BASE_URL}/?s=nintendo+switch&post_type=product",
-    f"{BASE_URL}/?s=nintendo+switch+2&post_type=product",
+# The site's own navigation exposes these category routes. WordPress-style
+# ?s=...&post_type=product URLs are not understood by this custom storefront.
+CATALOG_URLS = (
+    ("home", BASE_URL),
+    ("nintendo-category", f"{BASE_URL}/?category=nintendo"),
+    ("games-category", f"{BASE_URL}/?category=games"),
 )
-
-# Ordered from specific WooCommerce structures to broad diagnostic fallbacks.
-CARD_SELECTORS = (
-    "ul.products li.product",
-    "li.product",
-    "div.product-small.product",
-    "div.product",
-    "[class*='product-card']",
-    "[class*='product-item']",
-)
-TITLE_SELECTORS = (
-    ".woocommerce-loop-product__title",
-    ".product-title",
-    "[class*='product-title']",
-    "h2",
-    "h3",
-)
-PRICE_SELECTORS = (
-    ".price ins .amount",
-    ".price .amount",
-    ".woocommerce-Price-amount",
-    "[class*='price']",
-)
-LINK_SELECTORS = (
-    "a.woocommerce-LoopProduct-link",
-    "a.woocommerce-loop-product__link",
-    "a[href*='/product/']",
-)
+CARD_SELECTOR = "div.group.bg-white.rounded-2xl"
+PRODUCT_HREF = re.compile(r"/product/[^/?#]+", re.I)
 
 
-async def inspect_page(page: Page, url: str, label: str) -> dict[str, object]:
+async def inspect_catalog(page: Page, url: str, label: str) -> dict[str, object]:
     print(f"\n{'=' * 76}\n{label}: {url}")
+    requests: list[str] = []
+    def record_request(request: object) -> None:
+        request_url = getattr(request, "url", "")
+        if request_url and any(x in request_url.lower() for x in ("/api/", ".json", "graphql")):
+            if request_url not in requests:
+                requests.append(request_url)
+    page.on("request", record_request)
     try:
         response = await page.goto(url, wait_until="domcontentloaded", timeout=45_000)
         await page.wait_for_timeout(2_500)
-    except Exception as exc:  # noqa: BLE001 - diagnostic must report navigation failures
+    except Exception as exc:  # diagnostic should preserve navigation failures
+        page.remove_listener("request", record_request)
         print(f"  NAVIGATION ERROR: {type(exc).__name__}: {exc}")
-        return {"label": label, "url": url, "error": f"{type(exc).__name__}: {exc}"}
+        return {"label": label, "requested_url": url, "error": f"{type(exc).__name__}: {exc}"}
+    page.remove_listener("request", record_request)
 
-    status = response.status if response else None
-    final_url = page.url
-    title = await page.title()
-    print(f"  HTTP status : {status}")
-    print(f"  final URL   : {final_url}")
-    print(f"  page title  : {title!r}")
-
-    selectors: dict[str, int | str] = {}
-    for selector in CARD_SELECTORS:
-        try:
-            selectors[selector] = await page.locator(selector).count()
-        except Exception as exc:  # noqa: BLE001
-            selectors[selector] = f"ERROR: {type(exc).__name__}"
-
-    anchors = await page.locator("a[href]").evaluate_all(
-        """els => els.map(a => ({
-            text: (a.innerText || a.getAttribute('aria-label') || '').trim(),
-            href: a.href
-        })).filter(a => a.href)"""
-    )
-    product_links = []
-    seen: set[str] = set()
-    for item in anchors:
-        href = str(item["href"])
-        if re.search(r"/product/[^/?#]+", href, re.I) and href not in seen:
-            seen.add(href)
-            product_links.append(
-                {"text": str(item["text"])[:120], "href": href}
-            )
-
-    samples = await page.evaluate(
-        """({cardSelectors, titleSelectors, priceSelectors, linkSelectors}) => {
-          const first = selectors => {
-            for (const selector of selectors) {
-              try {
-                const el = document.querySelector(selector);
-                if (el) return {selector, text: (el.innerText || el.textContent || '').trim()};
-              } catch (_) {}
-            }
-            return null;
-          };
-          let cards = [];
-          let matchedBy = null;
-          for (const selector of cardSelectors) {
-            try {
-              const found = [...document.querySelectorAll(selector)];
-              if (found.length) { cards = found; matchedBy = selector; break; }
-            } catch (_) {}
-          }
+    result = await page.evaluate(
+        """({cardSelector}) => {
+          const clean = el => (el?.innerText || el?.textContent || '').trim().replace(/\\s+/g, ' ');
+          const unique = values => [...new Set(values.filter(Boolean))];
+          const cards = [...document.querySelectorAll(cardSelector)]
+            .filter(card => card.querySelector('a[href*="/product/"]'));
+          const products = cards.map(card => {
+            const link = card.querySelector('a[href*="/product/"]');
+            const title = card.querySelector('h3, h2, [class*="title"]');
+            const current = card.querySelector('p.text-primary, [class*="text-primary"][class*="font-black"]');
+            const old = card.querySelector('p.line-through, [class*="line-through"]');
+            const image = card.querySelector('img');
+            const badge = card.querySelector('span.absolute');
+            const platform = card.querySelector('p.text-slate-400.font-bold, p[class*="uppercase"][class*="tracking-wider"]');
+            return {
+              title: clean(title),
+              price: clean(current),
+              original_price: clean(old),
+              condition_badge: clean(badge),
+              platform_label: clean(platform),
+              image_alt: image?.alt || '',
+              image_url: image?.currentSrc || image?.src || '',
+              url: link?.href || ''
+            };
+          });
+          const forms = [...document.forms].map(form => ({
+            action: form.action, method: form.method,
+            inputs: [...form.querySelectorAll('input')].map(x => ({
+              name: x.name, type: x.type, placeholder: x.placeholder, value: x.value
+            }))
+          }));
+          const categoryLinks = [...document.querySelectorAll('a[href]')]
+            .filter(a => /category=|\\/category\\//i.test(a.href))
+            .map(a => ({text: clean(a), href: a.href}));
+          const controls = [...document.querySelectorAll('button,[role="button"],a')]
+            .map(el => ({
+              text: clean(el).slice(0, 80),
+              aria: el.getAttribute('aria-label') || '',
+              title: el.getAttribute('title') || '',
+              href: el.href || '',
+              disabled: el.hasAttribute('disabled') || el.getAttribute('aria-disabled') === 'true'
+            }))
+            .filter(x => /next|load more|show more|page/i.test(x.text + ' ' + x.aria + ' ' + x.title));
+          const body = clean(document.body);
+          const countMatches = [...body.matchAll(/(?:showing|of)\\s+(\\d+)\\s+(?:products|items)/ig)]
+            .map(x => Number(x[1]));
           return {
-            matchedBy,
-            samples: cards.slice(0, 8).map(card => {
-              const pick = selectors => {
-                for (const selector of selectors) {
-                  try {
-                    const el = card.querySelector(selector);
-                    if (el) return {
-                      selector,
-                      text: (el.innerText || el.textContent || '').trim(),
-                      href: el.href || el.closest('a')?.href || null
-                    };
-                  } catch (_) {}
-                }
-                return null;
-              };
-              return {
-                title: pick(titleSelectors),
-                price: pick(priceSelectors),
-                link: pick(linkSelectors),
-                text: (card.innerText || '').trim().slice(0, 300)
-              };
-            })
+            card_count: products.length,
+            products: products.slice(0, 160),
+            category_links: unique(categoryLinks.map(x => JSON.stringify(x))).map(x => JSON.parse(x)),
+            forms, pagination_or_load_more_controls: controls,
+            claimed_catalog_counts: countMatches,
+            body_text_excerpt: body.slice(0, 1400)
           };
         }""",
-        {
-            "cardSelectors": list(CARD_SELECTORS),
-            "titleSelectors": list(TITLE_SELECTORS),
-            "priceSelectors": list(PRICE_SELECTORS),
-            "linkSelectors": list(LINK_SELECTORS),
-        },
+        {"cardSelector": CARD_SELECTOR},
     )
-
-    pager = await page.evaluate(
-        r"""() => [...document.querySelectorAll('a,button,[role="button"]')]
-          .map(el => ({
-            text: (el.innerText || el.getAttribute('aria-label') || '').trim(),
-            href: el.href || '',
-            aria: el.getAttribute('aria-label') || '',
-            cls: (typeof el.className === 'string' ? el.className : '').slice(0, 100),
-            disabled: el.hasAttribute('disabled') ||
-              el.getAttribute('aria-disabled') === 'true'
-          }))
-          .filter(x => /next|more|older|›|»|→/i.test(x.text + ' ' + x.aria) ||
-            /page\/?\d+|\bpage=\d+/i.test(x.href))
-          .slice(0, 30)"""
-    )
-
     snapshot = {
-        "label": label,
-        "requested_url": url,
-        "final_url": final_url,
-        "http_status": status,
-        "title": title,
-        "card_selector_counts": selectors,
-        "matched_card_selector": samples["matchedBy"],
-        "sample_cards": samples["samples"],
-        "product_links": product_links[:40],
-        "pagination_candidates": pager,
+        "label": label, "requested_url": url, "final_url": page.url,
+        "http_status": response.status if response else None,
+        "title": await page.title(), **result,
+        "api_like_requests": requests[:100],
     }
-    print("  card selector counts:")
-    for selector, count in selectors.items():
-        print(f"    {count!s:>6}  {selector}")
-    print(f"  chosen diagnostic selector: {samples['matchedBy']!r}")
-    print("  sample cards:")
-    print(json.dumps(samples["samples"], indent=2, ensure_ascii=False)[:12_000])
-    print(f"  distinct /product/ links: {len(product_links)}")
-    for item in product_links[:15]:
-        print(f"    {item['text']!r} -> {item['href']}")
-    print("  pagination candidates:")
-    print(json.dumps(pager, indent=2, ensure_ascii=False))
-
-    safe_label = re.sub(r"[^a-z0-9_-]+", "-", label.lower()).strip("-")
-    html_path = paths.diagnostics_dir() / f"hobbyall-{safe_label}.html"
-    html_path.write_text(await page.content(), encoding="utf-8")
-    print(f"  HTML snapshot: {html_path}")
+    print(f"  HTTP {snapshot['http_status']} | {snapshot['title']!r}")
+    print(f"  product cards: {snapshot['card_count']}")
+    print(json.dumps(snapshot, ensure_ascii=False, indent=2)[:18_000])
+    safe = re.sub(r"[^a-z0-9_-]+", "-", label.lower()).strip("-")
+    (paths.diagnostics_dir() / f"hobbyall-{safe}.html").write_text(
+        await page.content(), encoding="utf-8"
+    )
     return snapshot
+
+
+async def inspect_product(page: Page) -> dict[str, object]:
+    print(f"\n{'=' * 76}\nproduct detail: {PRODUCT_URL}")
+    try:
+        response = await page.goto(PRODUCT_URL, wait_until="domcontentloaded", timeout=45_000)
+        await page.wait_for_timeout(2_000)
+    except Exception as exc:
+        return {"label": "product-detail", "error": f"{type(exc).__name__}: {exc}"}
+    data = await page.evaluate(
+        """() => {
+          const clean = el => (el?.innerText || el?.textContent || '').trim().replace(/\\s+/g, ' ');
+          const h1 = document.querySelector('h1');
+          const main = document.querySelector('main') || document.body;
+          const text = clean(main);
+          const priceNodes = [...main.querySelectorAll('span,p,div')]
+            .filter(el => el.children.length === 0 && /₹\\s?[\\d,]+/.test(clean(el)));
+          const stockNodes = [...main.querySelectorAll('span,p,div')]
+            .filter(el => el.children.length === 0 && /in stock|out of stock|only\\s+\\d+\\s+left/i.test(clean(el)));
+          const images = [...main.querySelectorAll('img')].map(img => ({
+            alt: img.alt, src: img.currentSrc || img.src
+          })).filter(x => x.src);
+          const details = [...main.querySelectorAll('dt,th,[class*="font-bold"]')]
+            .map(el => clean(el)).filter(Boolean).slice(0, 50);
+          return {
+            title: clean(h1),
+            price_text: priceNodes.map(clean).slice(0, 12),
+            stock_text: stockNodes.map(clean).slice(0, 12),
+            detail_labels: details,
+            images: images.slice(0, 12),
+            description_excerpt: text.slice(0, 2600),
+            has_add_to_cart: [...main.querySelectorAll('button')].some(b => /add to cart/i.test(clean(b)))
+          };
+        }"""
+    )
+    data.update({
+        "label": "product-detail", "requested_url": PRODUCT_URL,
+        "final_url": page.url, "http_status": response.status if response else None,
+        "title_tag": await page.title(),
+    })
+    print(json.dumps(data, ensure_ascii=False, indent=2)[:12_000])
+    (paths.diagnostics_dir() / "hobbyall-product-detail.html").write_text(
+        await page.content(), encoding="utf-8"
+    )
+    return data
 
 
 async def run(*, headful: bool) -> int:
@@ -207,22 +175,14 @@ async def run(*, headful: bool) -> int:
     try:
         context = await provider.new_context()
         page = await context.new_page()
-        for label, url in (
-            ("home", BASE_URL),
-            ("switch-search", SEARCH_URLS[0]),
-            ("switch-2-search", SEARCH_URLS[1]),
-            ("known-product", PRODUCT_URL),
-        ):
-            report.append(await inspect_page(page, url, label))
+        for label, url in CATALOG_URLS:
+            report.append(await inspect_catalog(page, url, label))
+        report.append(await inspect_product(page))
         print(f"\nBrowser engine: {provider.launched_channel}")
     finally:
         await provider.close()
-
     report_path = paths.diagnostics_dir() / "hobbyall-probe.json"
-    report_path.write_text(
-        json.dumps(report, indent=2, ensure_ascii=False) + "\n",
-        encoding="utf-8",
-    )
+    report_path.write_text(json.dumps(report, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     print(f"\nFull report: {report_path}")
     return 0 if any(item.get("http_status") == 200 for item in report) else 1
 
