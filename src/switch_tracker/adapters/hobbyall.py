@@ -83,7 +83,7 @@ class HobbyallAdapter:
         if image and image.startswith("/"):
             image = f"{store.base_url.rstrip('/')}{image}"
 
-        context = " ".join(str(product.get(key) or "") for key in ("name", "tag"))
+        context = " ".join(str(product.get(key) or "") for key in ("name", "tag")).replace("open boxed", "open box").replace("Open Boxed", "Open Box")
         return RawListing(
             store_id=store.id,
             sku=product_id,
