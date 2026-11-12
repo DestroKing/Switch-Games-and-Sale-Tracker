@@ -108,48 +108,12 @@ async def inspect_catalog(page: Page, url: str, label: str) -> dict[str, object]
         api_responses.append(record)
 
     page.on("request", record_request)
-    async def record_api_response(response: object) -> None:
-        response_url = getattr(response, "url", "")
-        if "/api/products" not in response_url:
-            return
-        request = getattr(response, "request", None)
-        try:
-            payload = await response.json()
-        except Exception as exc:
-            api_responses.append({"url": response_url, "error": str(exc)})
-            return
-        if isinstance(payload, dict):
-            summary = {"type": "object", "keys": list(payload)[:80]}
-            for key, value in payload.items():
-                if isinstance(value, list):
-                    summary[str(key)] = {"type": "list", "count": len(value),
-                                         "sample": value[:2]}
-                elif key.lower() in {"total", "count", "page", "limit", "per_page",
-                                     "last_page", "current_page", "total_pages"}:
-                    summary[str(key)] = value
-                elif isinstance(value, dict):
-                    summary[str(key)] = {"type": "object", "keys": list(value)[:40]}
-        elif isinstance(payload, list):
-            summary = {"type": "list", "count": len(payload), "sample": payload[:2]}
-        else:
-            summary = {"type": type(payload).__name__}
-        api_responses.append({
-            "url": response_url,
-            "status": getattr(response, "status", None),
-            "method": getattr(request, "method", None),
-            "post_data": getattr(request, "post_data", None),
-            "json_shape": summary,
-        })
-    page.on("response", lambda response: pending.append(asyncio.create_task(record_api_response(response))))
     page.on("response", record_response)
     try:
         response = await page.goto(url, wait_until="domcontentloaded", timeout=45_000)
         await page.wait_for_timeout(2_500)
     except Exception as exc:  # diagnostic should preserve navigation failures
-        await page.wait_for_timeout(500)
-    if pending:
-        await asyncio.gather(*pending, return_exceptions=True)
-    page.remove_listener("request", record_request)
+        page.remove_listener("request", record_request)
         print(f"  NAVIGATION ERROR: {type(exc).__name__}: {exc}")
         return {"label": label, "requested_url": url, "error": f"{type(exc).__name__}: {exc}"}
     page.remove_listener("request", record_request)
