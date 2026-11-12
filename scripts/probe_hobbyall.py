@@ -136,24 +136,33 @@ async def inspect_product(page: Page) -> dict[str, object]:
           const clean = el => (el?.innerText || el?.textContent || '').trim().replace(/\\s+/g, ' ');
           const h1 = document.querySelector('h1');
           const main = document.querySelector('main') || document.body;
-          const text = clean(main);
-          const priceNodes = [...main.querySelectorAll('span,p,div')]
-            .filter(el => el.children.length === 0 && /₹\\s?[\\d,]+/.test(clean(el)));
-          const stockNodes = [...main.querySelectorAll('span,p,div')]
-            .filter(el => el.children.length === 0 && /in stock|out of stock|only\\s+\\d+\\s+left/i.test(clean(el)));
+          // The product detail's primary information is in the column beside
+          // the gallery. Restrict price/stock extraction to that panel so
+          // related-product cards cannot pollute the primary price.
+          const panel = h1?.closest('div[class*="lg:col-span-5"]') || main;
+          const priceBox = [...panel.querySelectorAll('div')]
+            .find(el => el.classList.contains('p-4.5') && el.classList.contains('bg-slate-50'));
+          const currentPrice = panel.querySelector('span.text-2xl, span[class*="text-2xl"]');
+          const originalPrice = panel.querySelector('span.line-through, span[class*="line-through"]');
+          const stockNodes = [...panel.querySelectorAll('span,p')]
+            .map(clean).filter(x => /in stock|out of stock|only\\s+\\d+\\s+left/i.test(x));
           const images = [...main.querySelectorAll('img')].map(img => ({
             alt: img.alt, src: img.currentSrc || img.src
           })).filter(x => x.src);
-          const details = [...main.querySelectorAll('dt,th,[class*="font-bold"]')]
-            .map(el => clean(el)).filter(Boolean).slice(0, 50);
+          const labels = [...panel.querySelectorAll('span,p')]
+            .map(clean).filter(x => x && x.length < 100);
+          const text = clean(panel);
           return {
             title: clean(h1),
-            price_text: priceNodes.map(clean).slice(0, 12),
-            stock_text: stockNodes.map(clean).slice(0, 12),
-            detail_labels: details,
+            current_price: clean(currentPrice),
+            original_price: clean(originalPrice),
+            price_box_text: clean(priceBox),
+            stock_text: stockNodes,
+            brand_text: labels.find(x => /^by\\s+/i.test(x)) || '',
+            platform_and_condition_labels: labels.slice(0, 12),
             images: images.slice(0, 12),
-            description_excerpt: text.slice(0, 2600),
-            has_add_to_cart: [...main.querySelectorAll('button')].some(b => /add to cart/i.test(clean(b)))
+            product_panel_excerpt: text.slice(0, 2600),
+            has_add_to_cart: [...panel.querySelectorAll('button')].some(b => /add to cart/i.test(clean(b)))
           };
         }"""
     )
