@@ -75,6 +75,7 @@ class AdapterKind(StrEnum):
     SHOPIFY = "SHOPIFY"
     WOOCOMMERCE = "WOOCOMMERCE"
     BROWSER = "BROWSER"
+    HOBBYALL = "HOBBYALL"
 
 
 @dataclass(frozen=True, slots=True)
