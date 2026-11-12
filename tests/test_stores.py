@@ -272,4 +272,4 @@ class TestOverrides:
     def test_ignores_a_correction_for_an_unknown_store(self, data_dir: Path) -> None:
         """A stale entry from a renamed store must not invent a phantom store."""
         paths.overrides_path().write_text(json.dumps({"ghost_store": {"enabled": False}}))
-        assert len(overrides.active_stores()) == 24
+        assert len(overrides.active_stores()) == 25
