@@ -11,10 +11,16 @@ import contextlib
 import json
 import random
 from collections.abc import Callable
+from typing import TYPE_CHECKING
 from urllib.parse import SplitResult, parse_qs, urlencode, urljoin, urlsplit
 
-from playwright.async_api import Page, Response
-from playwright.async_api import TimeoutError as PlaywrightTimeoutError
+try:
+    from playwright.async_api import TimeoutError as PlaywrightTimeoutError
+except ImportError:  # Android can run the mocked recovery tests without Playwright.
+    PlaywrightTimeoutError = TimeoutError
+
+if TYPE_CHECKING:
+    from playwright.async_api import Page, Response
 
 from switch_tracker import paths
 from switch_tracker.adapters.base import ProgressSink
@@ -28,7 +34,8 @@ from switch_tracker.adapters.browser.pagination import (
     wait_for_cloudflare,
 )
 from switch_tracker.adapters.browser.profiles import StoreProfile, WaitUntil, effective_profile
-from switch_tracker.adapters.browser.provider import BrowserProvider
+if TYPE_CHECKING:
+    from switch_tracker.adapters.browser.provider import BrowserProvider
 from switch_tracker.core.models import (
     AdapterKind,
     Condition,
