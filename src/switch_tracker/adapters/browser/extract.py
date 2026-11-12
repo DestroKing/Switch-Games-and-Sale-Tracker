@@ -17,9 +17,10 @@ from __future__ import annotations
 import json
 from collections.abc import Iterator
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from playwright.async_api import Page
+if TYPE_CHECKING:
+    from playwright.async_api import Page
 
 from switch_tracker.adapters.browser.profiles import StoreProfile
 from switch_tracker.core.parse import first_rupee_price, parse_price
