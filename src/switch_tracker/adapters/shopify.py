@@ -52,6 +52,7 @@ class ShopifyAdapter:
         problems: list[str] = []
 
         for path in paths:
+            reached_end = False
             for page in range(1, self.MAX_PAGES + 1):
                 url = f"{store.base_url}{path}?limit={self.PAGE_SIZE}&page={page}"
                 data = await self._client.get_json(url)
@@ -62,6 +63,7 @@ class ShopifyAdapter:
 
                 products = data.get("products") or []
                 if not products:
+                    reached_end = True
                     break
 
                 for raw in products:
@@ -73,14 +75,22 @@ class ShopifyAdapter:
 
                 # The real stopping signal: a short page means the last page.
                 if len(products) < self.PAGE_SIZE:
+                    reached_end = True
                     break
+
+            if not reached_end and not any(problem.startswith(path) for problem in problems):
+                problems.append(f"{path}: reached the {self.MAX_PAGES}-page safety cap without an end signal")
 
         listings = one_product_per_sku(rows)
         if not listings:
             return Failed("; ".join(problems) or "zero products returned")
         if problems:
             return Partial(tuple(listings), "; ".join(problems))
-        return Ok(tuple(listings))
+        return Ok(
+            tuple(listings),
+            coverage_complete=True,
+            completion_evidence="Every configured Shopify collection/feed ended with an empty or short page.",
+        )
 
     def _to_listing(self, store: StoreConfig, product: dict[str, Any]) -> RawListing | None:
         variants = product.get("variants") or []
