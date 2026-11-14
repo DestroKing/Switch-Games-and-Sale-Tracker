@@ -238,10 +238,64 @@ def overview(conn: sqlite3.Connection) -> dict[str, int]:
              (SELECT COUNT(*) FROM market_catalogue) AS products,
              (SELECT COUNT(*) FROM market_retailer_item) AS retailer_items,
              (SELECT COUNT(*) FROM market_evidence) AS evidence_records,
+             (SELECT COUNT(*) FROM market_scan) AS total_scans,
              (SELECT COUNT(*) FROM market_scan WHERE coverage_status = 'COMPLETE') AS complete_scans,
-             (SELECT COUNT(*) FROM market_scan WHERE coverage_status != 'COMPLETE') AS unverified_scans"""
+             (SELECT COUNT(*) FROM market_scan WHERE coverage_status = 'PARTIAL') AS partial_scans,
+             (SELECT COUNT(*) FROM market_scan WHERE coverage_status = 'FAILED') AS failed_scans,
+             (SELECT COUNT(*) FROM market_scan WHERE coverage_status = 'UNKNOWN') AS unknown_scans,
+             (SELECT COUNT(*) FROM market_scan WHERE coverage_status != 'COMPLETE') AS unverified_scans,
+             (SELECT COUNT(*) FROM market_item_observation) AS observations,
+             (SELECT COUNT(*) FROM market_retailer_item WHERE product_id IS NULL) AS unresolved_items"""
     ).fetchone()
     return dict(row)
+
+
+def scan_history(conn: sqlite3.Connection, *, limit: int = 100) -> list[dict[str, Any]]:
+    """Latest configured-scope scans, including their evidence boundary."""
+    safe_limit = max(1, min(limit, 500))
+    return [dict(row) for row in conn.execute(
+        """SELECT scan.id, scan.run_id, scan.store_id, store.name AS store_name,
+                  scan.scope_key, scan.scope_type, scan.coverage_status,
+                  scan.pages_expected, scan.pages_seen, scan.completion_evidence,
+                  scan.started_at, scan.completed_at, scan.detail,
+                  (SELECT COUNT(*) FROM market_item_observation observation
+                   WHERE observation.scan_id = scan.id
+                     AND observation.state != 'NOT_LISTED') AS observed_items
+           FROM market_scan scan JOIN store ON store.id = scan.store_id
+           ORDER BY scan.id DESC LIMIT ?""",
+        (safe_limit,),
+    )]
+
+
+def discovered_items(conn: sqlite3.Connection, *, limit: int = 100, offset: int = 0) -> dict[str, Any]:
+    """Retailer listings found by adapters but not yet mapped to exact releases."""
+    safe_limit = max(1, min(limit, 500))
+    safe_offset = max(0, offset)
+    total = int(conn.execute(
+        "SELECT COUNT(*) FROM market_retailer_item WHERE product_id IS NULL"
+    ).fetchone()[0])
+    rows = [dict(row) for row in conn.execute(
+        """SELECT item.id, item.store_id, store.name AS store_name, item.scope_key,
+                  item.sku, item.url, item.first_seen, item.last_seen,
+                  listing.raw_title, listing.platform, listing.region, listing.condition,
+                  (SELECT observation.state FROM market_item_observation observation
+                   WHERE observation.retailer_item_id = item.id
+                   ORDER BY observation.id DESC LIMIT 1) AS latest_state,
+                  (SELECT observation.price FROM market_item_observation observation
+                   WHERE observation.retailer_item_id = item.id
+                   ORDER BY observation.id DESC LIMIT 1) AS latest_price,
+                  (SELECT observation.currency FROM market_item_observation observation
+                   WHERE observation.retailer_item_id = item.id
+                   ORDER BY observation.id DESC LIMIT 1) AS latest_currency
+           FROM market_retailer_item item
+           JOIN store ON store.id = item.store_id
+           LEFT JOIN listing ON listing.store_id = item.store_id AND listing.sku = item.sku
+           WHERE item.product_id IS NULL
+           ORDER BY item.last_seen DESC, item.id DESC
+           LIMIT ? OFFSET ?""",
+        (safe_limit, safe_offset),
+    )]
+    return {"total": total, "rows": rows, "limit": safe_limit, "offset": safe_offset}
 
 
 def catalogue(
