@@ -62,6 +62,8 @@ class TestPathDiscovery:
         recorder.plan(V1, page(product(1, "Mario Kart World")))
         result = await adapter.fetch(store_at(base), NullSink())
         assert isinstance(result, Ok)
+        assert result.coverage_complete is True
+        assert result.completion_evidence
 
     async def test_falls_back_to_the_legacy_path_for_older_installs(self, adapter, server) -> None:
         base, recorder = server
