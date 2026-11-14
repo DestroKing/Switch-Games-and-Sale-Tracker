@@ -65,7 +65,7 @@ class TestSchema:
         expected = {"store", "game", "listing", "price_point", "fx_rate", "run", "run_store"}
         assert expected <= _tables(fresh)
 
-    def test_creates_the_one_additive_table(self, fresh: sqlite3.Connection) -> None:
+    def test_creates_the_additive_tables(self, fresh: sqlite3.Connection) -> None:
         assert "run_event" in _tables(fresh)
 
     def test_enables_wal_so_the_dashboard_can_read_during_a_collection(
