@@ -163,7 +163,12 @@ CREATE TABLE IF NOT EXISTS market_catalogue (
   edition         TEXT NOT NULL DEFAULT 'UNKNOWN',
   region          TEXT NOT NULL DEFAULT 'UNKNOWN',
   physical_format TEXT NOT NULL DEFAULT 'UNKNOWN'
-                  CHECK (physical_format IN ('FULL_GAME_CARD','GAME_KEY_CARD','CODE_IN_BOX','DOWNLOAD_CODE','UNKNOWN')),
+                  CHECK (
+                    physical_format IN (
+                      'FULL_GAME_CARD', 'GAME_KEY_CARD', 'CODE_IN_BOX',
+                      'DOWNLOAD_CODE', 'UNKNOWN'
+                    )
+                  ),
   release_date    TEXT,
   linked_game_id  INTEGER REFERENCES game(id),
   source_url      TEXT,
@@ -179,7 +184,12 @@ CREATE TABLE IF NOT EXISTS market_retailer_group (
   group_key       TEXT NOT NULL UNIQUE,
   display_name    TEXT NOT NULL,
   relationship    TEXT NOT NULL DEFAULT 'UNVERIFIED'
-                  CHECK (relationship IN ('VERIFIED_INDEPENDENT','VERIFIED_SAME_GROUP','MARKETPLACE','UNVERIFIED')),
+                  CHECK (
+                    relationship IN (
+                      'VERIFIED_INDEPENDENT', 'VERIFIED_SAME_GROUP',
+                      'MARKETPLACE', 'UNVERIFIED'
+                    )
+                  ),
   legal_entity    TEXT,
   evidence_url    TEXT,
   checked_at      TEXT,
@@ -214,7 +224,12 @@ CREATE TABLE IF NOT EXISTS market_scan (
   store_id        TEXT NOT NULL REFERENCES store(id),
   scope_key       TEXT NOT NULL,
   scope_type      TEXT NOT NULL
-                  CHECK (scope_type IN ('RETAILER_CATALOGUE','PHYSICAL_GAME_CATEGORY','SEARCH_RESULTS','CONFIGURED_COLLECTION','MANUAL_GROUP')),
+                  CHECK (
+                    scope_type IN (
+                      'RETAILER_CATALOGUE', 'PHYSICAL_GAME_CATEGORY',
+                      'SEARCH_RESULTS', 'CONFIGURED_COLLECTION', 'MANUAL_GROUP'
+                    )
+                  ),
   coverage_status TEXT NOT NULL
                   CHECK (coverage_status IN ('COMPLETE','PARTIAL','FAILED','UNKNOWN')),
   expected_count  INTEGER,
@@ -246,7 +261,12 @@ CREATE TABLE IF NOT EXISTS market_evidence (
   id              INTEGER PRIMARY KEY AUTOINCREMENT,
   product_id      INTEGER NOT NULL REFERENCES market_catalogue(id),
   evidence_type   TEXT NOT NULL
-                  CHECK (evidence_type IN ('OUT_OF_PRINT','REPRINT','DISCONTINUED','PUBLISHER_STATUS','DISTRIBUTOR_STATUS','PACKAGING','OTHER')),
+                  CHECK (
+                    evidence_type IN (
+                      'OUT_OF_PRINT', 'REPRINT', 'DISCONTINUED',
+                      'PUBLISHER_STATUS', 'DISTRIBUTOR_STATUS', 'PACKAGING', 'OTHER'
+                    )
+                  ),
   source_url      TEXT NOT NULL,
   source_name     TEXT,
   published_at    TEXT,
