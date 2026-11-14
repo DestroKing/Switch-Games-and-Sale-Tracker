@@ -162,6 +162,7 @@ class BrowserAdapter:
         # text, which counts everything in the category rather than only games.
         raw_seen = 0
         out_of_time = False
+        all_scopes_complete = True
 
         # Per-profile where set: one large catalogue should not force every
         # store's budget up, and a store with nothing deep to walk should not
@@ -205,6 +206,7 @@ class BrowserAdapter:
                 #: one the moment it failed would report a complete fetch as
                 #: Partial.
                 struck: dict[int, str] = {}
+                scope_reached_end = False
                 for page_number in range(1, page_cap + 1):
                     try:
                         # The store's own pager href, when it has one. Kept
@@ -232,6 +234,7 @@ class BrowserAdapter:
                                 page, store, profile, template, page_number, resolved_url=target
                             )
                     except _NoMorePages:
+                        scope_reached_end = True
                         break
                     except Exception as exc:  # noqa: BLE001 - one bad page is not a dead store
                         # SKIP the page; do NOT end the walk. This branch used
@@ -261,7 +264,8 @@ class BrowserAdapter:
                     sink.page(store.id, page_number, len(listings))
 
                     if not rows:
-                        break  # a genuinely empty page is unambiguous
+                        scope_reached_end = True  # a genuinely empty page is unambiguous
+                        break
 
                     # Productivity is measured against rows that SURVIVED
                     # filtering, not every raw row scraped.
@@ -349,7 +353,10 @@ class BrowserAdapter:
                 if struck and recovered:
                     problems.append("second pass recovered p" + ", p".join(str(n) for n in recovered))
 
+                if not scope_reached_end or struck:
+                    all_scopes_complete = False
                 if out_of_time:
+                    all_scopes_complete = False
                     break
         finally:
             await context.close()
@@ -386,7 +393,15 @@ class BrowserAdapter:
             return Partial(tuple(unique), f"{'; '.join(problems)} ({via}){completeness}")
         if claimed_total is not None and raw_seen < claimed_total * 0.9:
             return Partial(tuple(unique), f"stopped early{completeness} ({via})")
-        return Ok(tuple(unique))
+        return Ok(
+            tuple(unique),
+            coverage_complete=all_scopes_complete,
+            completion_evidence=(
+                "Every configured browser search scope reached an explicit no-more-pages or empty-page signal."
+                if all_scopes_complete
+                else None
+            ),
+        )
 
     def _absorb(
         self,
