@@ -176,6 +176,38 @@ class TestPersistence:
         assert row["first_seen"] == original
 
 
+
+    async def test_market_bridge_tracks_store_stock_without_creating_products(self, conn) -> None:
+        adapters = {
+            AdapterKind.SHOPIFY: FakeAdapter(
+                AdapterKind.SHOPIFY, Ok((listing("A"),)),
+            )
+        }
+        await service(conn, adapters).run([store("s1")])
+        scan = conn.execute("SELECT coverage_status FROM market_scan").fetchone()
+        assert scan["coverage_status"] == "PARTIAL"
+        observation = conn.execute(
+            "SELECT state, price FROM market_item_observation"
+        ).fetchone()
+        assert (observation["state"], observation["price"]) == ("IN_STOCK", 4499.0)
+        item = conn.execute("SELECT product_id FROM market_retailer_item").fetchone()
+        assert item["product_id"] is None
+        assert conn.execute("SELECT COUNT(*) FROM market_catalogue").fetchone()[0] == 0
+
+    async def test_failed_price_adapter_records_failed_market_scan(self, conn) -> None:
+        adapters = {
+            AdapterKind.SHOPIFY: FakeAdapter(
+                AdapterKind.SHOPIFY, Failed("unavailable"),
+            )
+        }
+        await service(conn, adapters).run([store("s1")])
+        scan = conn.execute("SELECT coverage_status FROM market_scan").fetchone()
+        assert scan["coverage_status"] == "FAILED"
+        assert conn.execute(
+            "SELECT COUNT(*) FROM market_item_observation"
+        ).fetchone()[0] == 0
+
+
 class TestOutcomes:
     async def test_records_a_failure_with_its_reason(self, conn) -> None:
         """A store going quiet must be as loud in the data as an exception."""
