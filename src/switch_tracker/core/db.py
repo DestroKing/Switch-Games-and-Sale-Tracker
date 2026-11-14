@@ -219,6 +219,7 @@ CREATE TABLE IF NOT EXISTS market_scan (
   expected_count  INTEGER,
   pages_expected  INTEGER,
   pages_seen      INTEGER NOT NULL DEFAULT 0,
+  completion_evidence TEXT,
   started_at      TEXT NOT NULL,
   completed_at    TEXT,
   detail          TEXT
@@ -312,6 +313,9 @@ def _migrate(conn: sqlite3.Connection) -> None:
     columns = {row[1] for row in conn.execute("PRAGMA table_info(listing)")}
     if columns and "condition" not in columns:
         conn.execute("ALTER TABLE listing ADD COLUMN condition TEXT NOT NULL DEFAULT 'NEW'")
+    market_scan_columns = {row[1] for row in conn.execute("PRAGMA table_info(market_scan)")}
+    if market_scan_columns and "completion_evidence" not in market_scan_columns:
+        conn.execute("ALTER TABLE market_scan ADD COLUMN completion_evidence TEXT")
 
 
 #: How many backups to keep. A week of daily collections; each is one
