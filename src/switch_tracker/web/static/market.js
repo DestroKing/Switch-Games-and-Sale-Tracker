@@ -4,6 +4,7 @@
   const $ = (id) => document.getElementById(id);
   const esc = (value) => String(value ?? "").replace(/[&<>"']/g, (char) =>
     ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]);
+  const safeUrl = (value) => (/^https?:\/\//i.test(String(value ?? "")) ? esc(value) : "#");
   const query = $("marketQuery");
   const platform = $("marketPlatform");
   const catalogue = $("marketCatalogue");
@@ -41,7 +42,7 @@
       }
       catalogue.innerHTML = `
         <div class="tablewrap"><table>
-          <thead><tr><th>Physical release</th><th>Platform</th><th>Edition</th><th>Region</th><th>Format</th><th>Retailers</th><th>Evidence</th></tr></thead>
+          <thead><tr><th>Physical release</th><th>Platform</th><th>Edition</th><th>Region</th><th>Format</th><th>Retailer items</th><th>Verified independent</th><th>Evidence</th></tr></thead>
           <tbody>${data.rows.map((row) => `
             <tr>
               <td><button type="button" class="market-open" data-id="${row.id}">${esc(row.title)}</button></td>
@@ -65,13 +66,13 @@
         <p>${esc(p.platform)} · ${esc(p.edition)} · ${esc(p.region)} · ${esc(p.physical_format)}</p>
         <h4>Retailer observations</h4>
         ${data.retailer_items.length ? `<ul>${data.retailer_items.map((item) =>
-          `<li><a href="${esc(item.url)}" target="_blank" rel="noopener noreferrer">${esc(item.store_name)}</a> — ${esc(item.latest_state || "No stock observation")} ${item.latest_price == null ? "" : `· ${esc(item.latest_currency || "")} ${esc(item.latest_price)}`}</li>`
+          `<li><a href="${safeUrl(item.url)}" target="_blank" rel="noopener noreferrer">${esc(item.store_name)}</a> — ${esc(item.latest_state || "No stock observation")} · ${esc(item.retailer_relationship || "UNVERIFIED")} ${item.latest_price == null ? "" : `· ${esc(item.latest_currency || "")} ${esc(item.latest_price)}`}</li>`
         ).join("")}</ul>` : "<p>No retailer items recorded.</p>"}
         <h4>Evidence</h4>
         ${data.evidence.length ? `<ul>${data.evidence.map((item) =>
           `<li><a href="${esc(item.source_url)}" target="_blank" rel="noopener noreferrer">${esc(item.source_name || item.evidence_type)}</a> — ${esc(item.verification)} · checked ${esc(item.checked_at)}<p>${esc(item.notes || "")}</p></li>`
         ).join("")}</ul>` : "<p>No publisher, distributor, packaging or reprint evidence recorded.</p>"}
-        <p class="muted">Availability and out-of-print status are separate assessments. An incomplete scan cannot establish absence.</p>`;
+        <p class="muted">Only explicitly verified independent businesses count toward the strict independent-retailer figure. Marketplace and unverified seller relationships are not treated as independent. Availability and out-of-print status are separate assessments. An incomplete scan cannot establish absence.</p>`;
       $("marketClose").addEventListener("click", () => { detail.hidden = true; });
     } catch (error) {
       detail.hidden = false;
