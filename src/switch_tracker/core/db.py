@@ -6,15 +6,16 @@ accidental column
 rename a silent loss of the accumulated price history, which is the one thing
 this project exists to accumulate.
 
-Three additive changes, all deliberate:
+Additive changes, all deliberate:
 
   * ``run_event`` -- durable progress, so a closed tab or a restarted
     dashboard loses nothing (HLD option 3).
   * ``idx_run_active`` -- a partial unique index permitting at most one
-    unfinished run.  This is the authoritative half of the concurrency guard;
-    the disabled button in the UI is cosmetic and must never be relied on.
-  * ``game_redirect`` -- old game key -> new, written by the matcher, so a
-    watch saved under a key the matcher has since improved still finds its game.
+    unfinished run. This is the authoritative half of the concurrency guard.
+  * ``game_redirect`` -- old game key -> new, written by the matcher.
+  * ``market_*`` -- isolated physical-release catalogue, retailer-scope
+    coverage, observations, ownership evidence and publisher/reprint evidence.
+    These never rewrite the legacy game/listing/price history.
 
 One deviation: ``price_point.inr_price`` becomes nullable.  See fx/rates.py --
 when no exchange rate is stored, recording NO number is correct and recording
