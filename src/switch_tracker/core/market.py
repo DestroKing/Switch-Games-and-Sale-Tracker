@@ -81,6 +81,8 @@ def create_product(
 ) -> int:
     """Create or return an exact identity; ambiguous matches are never guessed."""
     clean_title = title.strip()
+    if source_url is not None and not source_url.startswith(("https://", "http://")):
+        raise ValueError("source_url must be HTTP(S)")
     if not clean_title:
         raise ValueError("title must not be empty")
     if platform not in {"SWITCH", "SWITCH2"}:
@@ -157,6 +159,8 @@ def upsert_retailer_item(
     """Persist retailer identity independently of price parsing or stock."""
     if not item_key.strip():
         raise ValueError("item_key must not be empty")
+    if not url.startswith(("https://", "http://")):
+        raise ValueError("retailer item URL must be HTTP(S)")
     now = now_iso()
     conn.execute(
         """INSERT INTO market_retailer_item
@@ -257,6 +261,19 @@ def catalogue(
                    p.release_date, p.verified_at,
                    (SELECT COUNT(DISTINCT i.store_id) FROM market_retailer_item i
                     WHERE i.product_id = p.id) AS retailer_count,
+                   (SELECT COUNT(DISTINCT i.store_id)
+                    FROM market_retailer_item i
+                    JOIN market_retailer_group_member gm ON gm.store_id = i.store_id
+                    JOIN market_retailer_group rg ON rg.id = gm.group_id
+                    WHERE i.product_id = p.id AND rg.relationship = 'VERIFIED_INDEPENDENT')
+                    AS verified_independent_count,
+                   (SELECT COUNT(DISTINCT i.store_id)
+                    FROM market_retailer_item i
+                    LEFT JOIN market_retailer_group_member gm ON gm.store_id = i.store_id
+                    LEFT JOIN market_retailer_group rg ON rg.id = gm.group_id
+                    WHERE i.product_id = p.id
+                      AND (rg.relationship IS NULL OR rg.relationship = 'UNVERIFIED'))
+                    AS unverified_store_count,
                    (SELECT COUNT(*) FROM market_evidence e WHERE e.product_id = p.id) AS evidence_count
             FROM market_catalogue p {clause}
             ORDER BY p.title COLLATE NOCASE, p.platform, p.region
@@ -273,6 +290,8 @@ def product_detail(conn: sqlite3.Connection, product_id: int) -> dict[str, Any] 
     items = [dict(row) for row in conn.execute(
         """SELECT i.id, i.store_id, s.name AS store_name, i.scope_key, i.sku, i.url,
                   i.first_seen, i.last_seen,
+                  rg.display_name AS retailer_group,
+                  rg.relationship AS retailer_relationship,
                   (SELECT o.state FROM market_item_observation o
                    WHERE o.retailer_item_id = i.id ORDER BY o.id DESC LIMIT 1) AS latest_state,
                   (SELECT o.price FROM market_item_observation o
@@ -280,6 +299,8 @@ def product_detail(conn: sqlite3.Connection, product_id: int) -> dict[str, Any] 
                   (SELECT o.currency FROM market_item_observation o
                    WHERE o.retailer_item_id = i.id ORDER BY o.id DESC LIMIT 1) AS latest_currency
            FROM market_retailer_item i JOIN store s ON s.id = i.store_id
+           LEFT JOIN market_retailer_group_member gm ON gm.store_id = i.store_id
+           LEFT JOIN market_retailer_group rg ON rg.id = gm.group_id
            WHERE i.product_id = ? ORDER BY s.name""",
         (product_id,),
     )]
