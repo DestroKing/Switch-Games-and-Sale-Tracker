@@ -48,7 +48,7 @@
               <td><button type="button" class="market-open" data-id="${row.id}">${esc(row.title)}</button></td>
               <td>${esc(row.platform)}</td><td>${esc(row.edition)}</td><td>${esc(row.region)}</td>
               <td>${esc(row.physical_format)}</td><td class="num">${row.retailer_count}</td>
-              <td class="num">${row.evidence_count}</td>
+              <td class="num">${row.verified_independent_count}</td><td class="num">${row.evidence_count}</td>
             </tr>`).join("")}</tbody>
         </table></div><p class="count">${data.total} physical releases</p>`;
     } catch (error) {
@@ -70,7 +70,7 @@
         ).join("")}</ul>` : "<p>No retailer items recorded.</p>"}
         <h4>Evidence</h4>
         ${data.evidence.length ? `<ul>${data.evidence.map((item) =>
-          `<li><a href="${esc(item.source_url)}" target="_blank" rel="noopener noreferrer">${esc(item.source_name || item.evidence_type)}</a> — ${esc(item.verification)} · checked ${esc(item.checked_at)}<p>${esc(item.notes || "")}</p></li>`
+          `<li><a href="${safeUrl(item.source_url)}" target="_blank" rel="noopener noreferrer">${esc(item.source_name || item.evidence_type)}</a> — ${esc(item.verification)} · checked ${esc(item.checked_at)}<p>${esc(item.notes || "")}</p></li>`
         ).join("")}</ul>` : "<p>No publisher, distributor, packaging or reprint evidence recorded.</p>"}
         <p class="muted">Only explicitly verified independent businesses count toward the strict independent-retailer figure. Marketplace and unverified seller relationships are not treated as independent. Availability and out-of-print status are separate assessments. An incomplete scan cannot establish absence.</p>`;
       $("marketClose").addEventListener("click", () => { detail.hidden = true; });
