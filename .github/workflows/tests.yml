@@ -9,6 +9,7 @@ on:
   pull_request:
     branches:
       - android-termux-support
+      - feature/physical-game-market-rarity
 
 permissions:
   contents: read
