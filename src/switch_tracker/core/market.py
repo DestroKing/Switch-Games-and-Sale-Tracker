@@ -57,7 +57,7 @@ def now_iso() -> str:
 
 
 def _identity_part(value: str) -> str:
-    return re.sub(r"\\s+", " ", value.strip()).casefold()
+    return re.sub(r"\s+", " ", value.strip()).casefold()
 
 
 def identity_key(title: str, platform: str, edition: str, region: str, physical_format: str) -> str:
