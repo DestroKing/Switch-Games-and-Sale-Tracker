@@ -82,6 +82,10 @@ class TestPhysicalReleaseIdentity:
             market.create_product(conn, title="Example", platform="UNKNOWN")
         with pytest.raises(ValueError):
             market.create_product(conn, title="  ", platform="SWITCH")
+        with pytest.raises(ValueError):
+            market.create_product(
+                conn, title="Example", platform="SWITCH", source_url="javascript:alert(1)"
+            )
 
 
 class TestRetailerItemsAndCoverage:
@@ -97,6 +101,11 @@ class TestRetailerItemsAndCoverage:
         assert item_id > 0
         assert conn.execute("SELECT COUNT(*) FROM price_point").fetchone()[0] == 0
         assert conn.execute("SELECT COUNT(*) FROM market_retailer_item").fetchone()[0] == 1
+        with pytest.raises(ValueError):
+            market.upsert_retailer_item(
+                conn, store_id="shop", scope_key="switch-games", item_key="bad",
+                url="javascript:alert(1)",
+            )
 
     @pytest.mark.parametrize(
         "status", [market.CoverageStatus.PARTIAL, market.CoverageStatus.FAILED, market.CoverageStatus.UNKNOWN]
@@ -208,6 +217,15 @@ class TestEvidenceAndRetailerGroups:
         ).fetchone()
         assert group_id > 0
         assert row["relationship"] == "UNVERIFIED"
+        product = market.create_product(conn, title="Shop Game", platform="SWITCH")
+        market.upsert_retailer_item(
+            conn, store_id="shop", scope_key="category-a", item_key="item",
+            url="https://shop.test/item", product_id=product,
+        )
+        listing = market.catalogue(conn)["rows"][0]
+        assert listing["retailer_count"] == 1
+        assert listing["verified_independent_count"] == 0
+        assert listing["unverified_store_count"] == 1
 
     def test_market_overview_and_catalogue_are_readable(self, conn):
         product = market.create_product(conn, title="Zelda Example", platform="SWITCH")
