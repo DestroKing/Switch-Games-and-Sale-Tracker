@@ -10,7 +10,7 @@ import pytest
 from switch_tracker.adapters.base import NullSink
 from switch_tracker.adapters.shopify import ShopifyAdapter
 from switch_tracker.core.http import PoliteClient
-from switch_tracker.core.models import AdapterKind, Condition, Failed, Ok, Platform, StoreConfig
+from switch_tracker.core.models import AdapterKind, Condition, Failed, Ok, Partial, Platform, StoreConfig
 
 
 def product(
@@ -167,6 +167,16 @@ class TestPagination:
         result = await adapter.fetch(store_at(base), NullSink())
         assert isinstance(result, Ok)
         assert len(result.listings) == ShopifyAdapter.PAGE_SIZE + 1
+
+    async def test_safety_cap_does_not_claim_complete_coverage(self, adapter, server, monkeypatch) -> None:
+        base, recorder = server
+        monkeypatch.setattr(ShopifyAdapter, "MAX_PAGES", 1)
+        full = page(*(product(i, f"Game {i} Switch") for i in range(ShopifyAdapter.PAGE_SIZE)))
+        recorder.plan("/products.json", full)
+        result = await adapter.fetch(store_at(base), NullSink())
+        assert isinstance(result, Partial)
+        assert "safety cap" in result.reason
+
 
     async def test_reports_progress_per_page(self, adapter, server) -> None:
         base, recorder = server
