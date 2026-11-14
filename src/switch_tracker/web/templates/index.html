@@ -214,11 +214,33 @@
     <div id="list"></div>
   </section>
 
-</main>
+
+  <section class="section market-section" aria-labelledby="marketHead">
+    <div class="section-head">
+      <h2 id="marketHead">Physical Game Market Rarity</h2>
+      <span class="sub" id="marketSummary">Separate catalogue · evidence-led · no buy recommendations</span>
+    </div>
+    <div class="market-stats" id="marketStats" aria-live="polite"></div>
+    <div class="market-toolbar">
+      <label class="visually-hidden" for="marketQuery">Search physical releases</label>
+      <input type="search" id="marketQuery" placeholder="Search physical releases…">
+      <select id="marketPlatform" aria-label="Platform">
+        <option value="">Both platforms</option>
+        <option value="SWITCH">Nintendo Switch</option>
+        <option value="SWITCH2">Nintendo Switch 2</option>
+      </select>
+      <button type="button" id="marketRefresh">Refresh</button>
+    </div>
+    <div id="marketCatalogue" class="market-catalogue" aria-live="polite">
+      <p class="empty"><b>Market catalogue is ready for data.</b> Products will appear when verified physical-release records and retailer observations are added. No temporary stockout will be labelled out of print.</p>
+    </div>
+    <div id="marketDetail" class="market-detail" hidden></div>
+  </section>
+\n</main>
 
 <script>
 const ACTIVE_RUN = {{ active_run | tojson }};
 </script>
-<script src="/static/app.js?v={{ asset_version }}"></script>
+<script src="/static/app.js?v={{ asset_version }}"></script>\n<script src="/static/market.js?v={{ asset_version }}"></script>
 </body>
 </html>
