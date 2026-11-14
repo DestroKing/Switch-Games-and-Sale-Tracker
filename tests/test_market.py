@@ -58,7 +58,9 @@ class TestPhysicalReleaseIdentity:
     )
     def test_material_release_differences_create_distinct_products(self, conn, changes):
         base = market.create_product(conn, title="Example Game", platform="SWITCH")
-        different = market.create_product(conn, title="Example Game", platform="SWITCH", **changes)
+        identity = {"title": "Example Game", "platform": "SWITCH"}
+        identity.update(changes)
+        different = market.create_product(conn, **identity)
         assert different != base
 
     def test_unknown_format_is_explicit_not_guessed(self, conn):
@@ -145,7 +147,7 @@ class TestRetailerItemsAndCoverage:
         scan_id = market.record_scan(
             conn, store_id="shop", scope_key="query-zelda",
             scope_type=market.ScopeType.SEARCH_RESULTS,
-            coverage_status=market.CoverageStatus.COMPLETE,
+            coverage_status=market.CoverageStatus.COMPLETE, pages_expected=1, pages_seen=1,
         )
         row = conn.execute("SELECT scope_type FROM market_scan WHERE id=?", (scan_id,)).fetchone()
         assert row["scope_type"] == "SEARCH_RESULTS"
@@ -167,7 +169,7 @@ class TestRetailerItemsAndCoverage:
         scan_id = market.record_scan(
             conn, store_id="shop", scope_key="category-a",
             scope_type=market.ScopeType.PHYSICAL_GAME_CATEGORY,
-            coverage_status=market.CoverageStatus.COMPLETE,
+            coverage_status=market.CoverageStatus.COMPLETE, pages_expected=1, pages_seen=1,
         )
         market.record_observation(
             conn, scan_id=scan_id, retailer_item_id=item_id,
