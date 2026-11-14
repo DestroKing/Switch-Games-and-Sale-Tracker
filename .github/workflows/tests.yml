@@ -5,6 +5,9 @@ on:
     branches:
       - test/hobbyall-playwright-probe
       - feature/physical-game-market-rarity
+  pull_request:
+    branches:
+      - android-termux-support
 
 permissions:
   contents: read
