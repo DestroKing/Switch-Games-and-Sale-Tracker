@@ -143,7 +143,9 @@ def record_scan(
         (run_id, store_id, scope_key, scope.value, status.value, expected_count,
          pages_expected, pages_seen, completion_evidence, now_iso(), now_iso(), detail),
     )
-    return int(cursor.lastrowid)
+    if cursor.lastrowid is None:
+        raise RuntimeError("SQLite did not return the inserted scan ID")
+    return cursor.lastrowid
 
 
 def upsert_retailer_item(
@@ -202,7 +204,9 @@ def record_observation(
            VALUES (?, ?, ?, ?, ?, ?)""",
         (scan_id, retailer_item_id, now_iso(), observed_state.value, price, currency),
     )
-    return int(cursor.lastrowid)
+    if cursor.lastrowid is None:
+        raise RuntimeError("SQLite did not return the inserted observation ID")
+    return cursor.lastrowid
 
 
 def reconcile_complete_scan(conn: sqlite3.Connection, scan_id: int) -> int:
@@ -334,7 +338,9 @@ def add_evidence(
         (product_id, evidence_type, source_url, source_name, published_at,
          now_iso(), verification, confidence, notes),
     )
-    return int(cursor.lastrowid)
+    if cursor.lastrowid is None:
+        raise RuntimeError("SQLite did not return the inserted evidence ID")
+    return cursor.lastrowid
 
 
 def set_retailer_group(
