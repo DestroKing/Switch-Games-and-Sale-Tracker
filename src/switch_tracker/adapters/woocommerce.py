@@ -75,6 +75,8 @@ class WooAdapter:
         for category in category_values:
             if out_of_time:
                 break
+            category_complete = False
+            problems_before_category = len(problems)
             suffix = f"&category={quote(category)}" if category else ""
             # Read ONCE per category query, not once per page.
             #
@@ -127,6 +129,7 @@ class WooAdapter:
                     problems.append(f"category {category or 'all'}, page {page}: expected a product list")
                     break
                 if not products:
+                    category_complete = True
                     break
 
                 raw_fetched += len(products)
@@ -138,8 +141,14 @@ class WooAdapter:
                 sink.page(store.id, page, len(rows))
 
                 if len(products) < self.PER_PAGE:
+                    category_complete = True
                     break
 
+            if not category_complete and len(problems) == problems_before_category:
+                problems.append(
+                    f"category {category or 'all'}: reached the {self.MAX_PAGES}-page safety cap "
+                    "without an end signal"
+                )
             if category_total is not None:
                 expected_total += category_total
 
@@ -163,7 +172,14 @@ class WooAdapter:
             return Partial(tuple(listings), f"{'; '.join(problems)}{completeness}")
         if expected_total > 0 and raw_fetched < expected_total:
             return Partial(tuple(listings), f"stopped early{completeness}")
-        return Ok(tuple(listings))
+        return Ok(
+            tuple(listings),
+            coverage_complete=True,
+            completion_evidence=(
+                "Every configured WooCommerce category ended with an empty or short API page; "
+                "the adapter's own total-count check also passed where available."
+            ),
+        )
 
     async def _get(
         self, store: StoreConfig, base_path: str, suffix: str, per_page: int, page: int
