@@ -197,6 +197,7 @@ command, and what to do when something fails — is in
 
 Design documents are in `docs/`:
 
+- **`physical-game-market-phase-1.md`** — market discovery integration, adapter coverage rules, safe absence reconciliation, and Phase 1 verification boundaries.
 - **`walkthrough.md`** — start here. What runs and where every file lives, the tech
   stack and why, one collection run step by step, how each feature works, an FAQ, and
   a glossary.
