@@ -53,6 +53,7 @@ class TestFetching:
         recorder.plan("/api/products", payload(product("PRD001", "Mario Kart World")))
         result = await adapter.fetch(store_at(base), NullSink())
         assert isinstance(result, Ok)
+        assert result.coverage_complete is False
         assert recorder.hits == ["/api/products"]
         assert result.listings[0].sku == "PRD001"
 
