@@ -3,7 +3,8 @@ name: Tests
 on:
   push:
     branches:
-      - test/hobbyall-playwright-probe\n      - feature/physical-game-market-rarity
+      - test/hobbyall-playwright-probe
+      - feature/physical-game-market-rarity
 
 permissions:
   contents: read
