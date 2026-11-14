@@ -7,7 +7,8 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query
 
-from switch_tracker import selection\nfrom switch_tracker.core import market
+from switch_tracker import selection
+from switch_tracker.core import market
 from switch_tracker.web import queries
 from switch_tracker.web.deps import get_conn
 
