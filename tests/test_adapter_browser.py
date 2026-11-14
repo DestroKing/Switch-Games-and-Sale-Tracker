@@ -101,6 +101,8 @@ class TestCollecting:
         )
         result = await adapter.fetch(shop_store(base), NullSink())
         assert isinstance(result, Ok)
+        assert result.coverage_complete is True
+        assert result.completion_evidence
         assert [listing.title for listing in result.listings] == ["Mario Kart World"]
         assert result.listings[0].native_price == 4499.0
 

@@ -142,6 +142,10 @@ class RawListing:
 @dataclass(frozen=True, slots=True)
 class Ok:
     listings: tuple[RawListing, ...]
+    #: True only when the adapter observed an actual end-of-scope signal.
+    #: A successful fetch is not automatically proof that the catalogue is complete.
+    coverage_complete: bool = False
+    completion_evidence: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

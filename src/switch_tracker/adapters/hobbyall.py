@@ -57,7 +57,9 @@ class HobbyallAdapter:
         sink.page(store.id, 1, len(listings))
         if not listings:
             return Failed("product API reachable but returned no Switch games")
-        return Ok(tuple(listings))
+        # The endpoint currently exposes no pagination cursor or authoritative total.
+        # A successful response is useful discovery, but cannot prove catalogue exhaustion.
+        return Ok(tuple(listings), coverage_complete=False)
 
     def _to_listing(self, store: StoreConfig, product: dict[str, Any]) -> RawListing | None:
         product_id = str(product.get("id") or "").strip()

@@ -146,6 +146,20 @@ def market_overview(conn: Conn) -> dict[str, int]:
     return market.overview(conn)
 
 
+@router.get("/market/scans")
+def market_scans(conn: Conn, limit: int = Query(default=100, ge=1, le=500)) -> list[dict[str, object]]:
+    return market.scan_history(conn, limit=limit)
+
+
+@router.get("/market/discoveries")
+def market_discoveries(
+    conn: Conn,
+    limit: int = Query(default=100, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+) -> dict[str, object]:
+    return market.discovered_items(conn, limit=limit, offset=offset)
+
+
 @router.get("/market/catalogue")
 def market_catalogue(
     conn: Conn,

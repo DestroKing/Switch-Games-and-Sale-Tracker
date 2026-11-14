@@ -176,6 +176,78 @@ class TestPersistence:
         assert row["first_seen"] == original
 
 
+class TestMarketIntegration:
+    async def test_complete_scan_records_observations_and_reconciles_only_its_scope(self, conn) -> None:
+        complete = Ok(
+            (listing("A"), listing("B")),
+            coverage_complete=True,
+            completion_evidence="Fake adapter exhausted its configured test scope.",
+        )
+        svc = service(conn, {AdapterKind.SHOPIFY: FakeAdapter(AdapterKind.SHOPIFY, complete)})
+        await svc.run([store("s1")])
+
+        first_scan = conn.execute("SELECT id FROM market_scan").fetchone()["id"]
+        assert conn.execute(
+            "SELECT COUNT(*) FROM market_retailer_item WHERE product_id IS NULL"
+        ).fetchone()[0] == 2
+        assert conn.execute(
+            "SELECT COUNT(*) FROM market_item_observation WHERE scan_id=? AND state='IN_STOCK'",
+            (first_scan,),
+        ).fetchone()[0] == 2
+
+        second = Ok(
+            (listing("A"),),
+            coverage_complete=True,
+            completion_evidence="Fake adapter exhausted its configured test scope.",
+        )
+        svc = service(conn, {AdapterKind.SHOPIFY: FakeAdapter(AdapterKind.SHOPIFY, second)})
+        await svc.run([store("s1")])
+        state = conn.execute(
+            """SELECT observation.state FROM market_item_observation observation
+               JOIN market_retailer_item item ON item.id=observation.retailer_item_id
+               WHERE item.sku='B' ORDER BY observation.id DESC LIMIT 1"""
+        ).fetchone()["state"]
+        assert state == "NOT_LISTED"
+
+    async def test_partial_scan_never_marks_missing_items_not_listed(self, conn) -> None:
+        complete = Ok(
+            (listing("A"), listing("B")),
+            coverage_complete=True,
+            completion_evidence="Complete fixture scope.",
+        )
+        svc = service(conn, {AdapterKind.SHOPIFY: FakeAdapter(AdapterKind.SHOPIFY, complete)})
+        await svc.run([store("s1")])
+        partial = Partial((listing("A"),), "one page failed")
+        svc = service(conn, {AdapterKind.SHOPIFY: FakeAdapter(AdapterKind.SHOPIFY, partial)})
+        await svc.run([store("s1")])
+
+        assert conn.execute(
+            "SELECT COUNT(*) FROM market_item_observation WHERE state='NOT_LISTED'"
+        ).fetchone()[0] == 0
+        assert conn.execute(
+            "SELECT coverage_status FROM market_scan ORDER BY id DESC LIMIT 1"
+        ).fetchone()["coverage_status"] == "PARTIAL"
+
+    async def test_success_without_completion_evidence_is_unknown_not_complete(self, conn) -> None:
+        outcome = Ok((listing("A"),))
+        svc = service(conn, {AdapterKind.SHOPIFY: FakeAdapter(AdapterKind.SHOPIFY, outcome)})
+        await svc.run([store("s1")])
+        assert conn.execute(
+            "SELECT coverage_status FROM market_scan"
+        ).fetchone()["coverage_status"] == "UNKNOWN"
+        assert conn.execute(
+            "SELECT COUNT(*) FROM market_item_observation WHERE state='NOT_LISTED'"
+        ).fetchone()[0] == 0
+
+    async def test_failed_store_still_records_a_failed_market_scan(self, conn) -> None:
+        await service(
+            conn, {AdapterKind.SHOPIFY: FakeAdapter(AdapterKind.SHOPIFY, Failed("offline"))}
+        ).run([store("s1")])
+        assert conn.execute(
+            "SELECT coverage_status FROM market_scan"
+        ).fetchone()["coverage_status"] == "FAILED"
+
+
 class TestOutcomes:
     async def test_records_a_failure_with_its_reason(self, conn) -> None:
         """A store going quiet must be as loud in the data as an exception."""

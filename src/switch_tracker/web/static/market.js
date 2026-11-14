@@ -24,11 +24,68 @@
       ["Physical releases", data.products],
       ["Retailer items", data.retailer_items],
       ["Evidence records", data.evidence_records],
+      ["Retailer scans", data.total_scans],
       ["Complete scans", data.complete_scans],
-      ["Unverified scans", data.unverified_scans],
+      ["Partial scans", data.partial_scans],
+      ["Failed scans", data.failed_scans],
+      ["Unknown coverage", data.unknown_scans],
+      ["Unresolved listings", data.unresolved_items],
     ].map(([label, value]) =>
       `<div class="market-stat"><b>${Number(value).toLocaleString("en-IN")}</b><span>${esc(label)}</span></div>`
     ).join("");
+  }
+
+  async function loadCoverage() {
+    const target = $("marketCoverage");
+    if (!target) return;
+    try {
+      const rows = await get("/api/market/scans?limit=40");
+      if (!rows.length) {
+        target.innerHTML = '<p class="empty">No market scans yet. Run Collect prices to begin retailer discovery.</p>';
+        return;
+      }
+      target.innerHTML = `
+        <h3>Recent retailer scan coverage</h3>
+        <div class="tablewrap"><table>
+          <thead><tr><th>Store</th><th>Scope</th><th>Coverage</th><th>Items observed</th><th>Completed</th><th>Detail</th></tr></thead>
+          <tbody>${rows.map((row) => `
+            <tr>
+              <td>${esc(row.store_name)}</td><td>${esc(row.scope_type)}</td>
+              <td><b>${esc(row.coverage_status)}</b></td><td class="num">${Number(row.observed_items).toLocaleString("en-IN")}</td>
+              <td>${esc(row.completed_at || row.started_at)}</td>
+              <td>${esc(row.detail || row.completion_evidence || "—")}</td>
+            </tr>`).join("")}</tbody>
+        </table></div>`;
+    } catch (error) {
+      target.innerHTML = `<p class="notice error">${esc(error.message)}</p>`;
+    }
+  }
+
+  async function loadDiscoveries() {
+    const target = $("marketDiscoveries");
+    if (!target) return;
+    try {
+      const data = await get("/api/market/discoveries?limit=100");
+      if (!data.rows.length) {
+        target.innerHTML = '<p class="empty">No unresolved retailer listings. Listings are linked to physical releases only after their edition, region and format can be identified safely.</p>';
+        return;
+      }
+      target.innerHTML = `
+        <div class="tablewrap"><table>
+          <thead><tr><th>Listing title</th><th>Platform</th><th>Region</th><th>Retailer</th><th>Latest state</th><th>Price</th><th>Last seen</th><th>Source</th></tr></thead>
+          <tbody>${data.rows.map((row) => `
+            <tr>
+              <td>${esc(row.raw_title || row.sku)}</td><td>${esc(row.platform || "UNKNOWN")}</td>
+              <td>${esc(row.region || "UNKNOWN")}</td><td>${esc(row.store_name)}</td>
+              <td>${esc(row.latest_state || "UNKNOWN")}</td>
+              <td class="num">${row.latest_price == null ? "—" : `${esc(row.latest_currency || "")} ${esc(row.latest_price)}`}</td>
+              <td>${esc(row.last_seen)}</td>
+              <td><a href="${safeUrl(row.url)}" target="_blank" rel="noopener noreferrer">Open listing</a></td>
+            </tr>`).join("")}</tbody>
+        </table></div><p class="count">${data.total} unresolved retailer listings</p>`;
+    } catch (error) {
+      target.innerHTML = `<p class="notice error">${esc(error.message)}</p>`;
+    }
   }
 
   async function loadCatalogue() {
@@ -85,7 +142,7 @@
     if (button) loadDetail(button.dataset.id);
   });
   $("marketRefresh").addEventListener("click", () => {
-    Promise.all([loadOverview(), loadCatalogue()]).catch((error) => {
+    Promise.all([loadOverview(), loadCoverage(), loadDiscoveries(), loadCatalogue()]).catch((error) => {
       catalogue.innerHTML = `<p class="notice error">${esc(error.message)}</p>`;
     });
   });
@@ -95,7 +152,7 @@
   });
   platform.addEventListener("change", loadCatalogue);
 
-  Promise.all([loadOverview(), loadCatalogue()]).catch((error) => {
+  Promise.all([loadOverview(), loadCoverage(), loadDiscoveries(), loadCatalogue()]).catch((error) => {
     catalogue.innerHTML = `<p class="notice error">${esc(error.message)}</p>`;
   });
 })();
