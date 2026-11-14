@@ -20,6 +20,7 @@ from switch_tracker.core.db import now_iso
 from switch_tracker.core.models import AdapterKind, Failed, Ok, Partial, RawListing, StoreConfig
 from switch_tracker.events.writer import EventWriter
 from switch_tracker.fx.rates import FxService
+from switch_tracker.services.market_ingest import record_result as record_market_result
 
 
 def _is_web_url(url: str) -> bool:
@@ -204,6 +205,7 @@ class CollectService:
 
         if adapter is None:
             self._record(run_id, store.id, "skipped", 0, elapsed_ms(), f"no adapter for {store.kind}")
+            self._record_market(run_id, store, (), "skipped", f"no adapter for {store.kind}", events)
             events.store_finished(
                 store.id,
                 status="skipped",
@@ -220,6 +222,7 @@ class CollectService:
         except TimeoutError:
             reason = f"gave up after {int(deadline)}s ({store.id})"
             self._record(run_id, store.id, "failed", 0, elapsed_ms(), reason)
+            self._record_market(run_id, store, (), "failed", reason, events)
             events.store_finished(store.id, status="failed", count=0, duration_ms=elapsed_ms(), detail=reason)
             return
         except Exception as exc:  # noqa: BLE001 - an adapter fault is a store fault, not a run fault
@@ -230,6 +233,7 @@ class CollectService:
 
         if isinstance(outcome, Failed):
             self._record(run_id, store.id, "failed", 0, elapsed_ms(), outcome.reason)
+            self._record_market(run_id, store, (), "failed", outcome.reason, events)
             events.store_finished(
                 store.id, status="failed", count=0, duration_ms=elapsed_ms(), detail=outcome.reason
             )
@@ -257,7 +261,26 @@ class CollectService:
         status = "ok" if isinstance(outcome, Ok) else "partial"
         detail = outcome.reason if isinstance(outcome, Partial) else None
         self._record(run_id, store.id, status, saved, elapsed_ms(), detail)
+        self._record_market(run_id, store, outcome.listings, status, detail, events)
         events.store_finished(store.id, status=status, count=saved, duration_ms=elapsed_ms(), detail=detail)
+
+    def _record_market(
+        self,
+        run_id: int,
+        store: StoreConfig,
+        listings: Sequence[RawListing],
+        status: str,
+        detail: str | None,
+        events: EventWriter,
+    ) -> None:
+        """Market collection is additive; never destroy existing price history."""
+        try:
+            record_market_result(
+                self._conn, store=store, run_id=run_id,
+                listings=listings, result=status, detail=detail,
+            )
+        except Exception as exc:  # noqa: BLE001 - legacy price collection must survive
+            events.warning(f"{store.id}: market import failed: {type(exc).__name__}: {exc}")
 
     def _sync_store_table(self, stores: Sequence[StoreConfig]) -> None:
         """Config is the source of truth; the table is a projection of it."""
