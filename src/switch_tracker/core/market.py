@@ -114,6 +114,7 @@ def record_scan(
     expected_count: int | None = None,
     pages_expected: int | None = None,
     pages_seen: int = 0,
+    completion_evidence: str | None = None,
     detail: str | None = None,
 ) -> int:
     status = CoverageStatus(coverage_status)
@@ -121,6 +122,13 @@ def record_scan(
     if not scope_key.strip():
         raise ValueError("scope_key must not be empty")
     if status is CoverageStatus.COMPLETE:
+        page_count_verified = pages_expected is not None and pages_seen >= pages_expected
+        authoritative_empty = pages_expected == 0 and expected_count == 0
+        explicit_completion = bool(completion_evidence and completion_evidence.strip())
+        if not (page_count_verified or authoritative_empty or explicit_completion):
+            raise ValueError(
+                "a COMPLETE scan requires verified page exhaustion or explicit completion evidence"
+            )
         if pages_expected is not None and pages_seen < pages_expected:
             raise ValueError("a COMPLETE scan cannot have fewer pages_seen than pages_expected")
         if expected_count is not None and expected_count < 0:
@@ -128,10 +136,10 @@ def record_scan(
     cursor = conn.execute(
         """INSERT INTO market_scan
            (run_id, store_id, scope_key, scope_type, coverage_status, expected_count,
-            pages_expected, pages_seen, started_at, completed_at, detail)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            pages_expected, pages_seen, completion_evidence, started_at, completed_at, detail)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (run_id, store_id, scope_key, scope.value, status.value, expected_count,
-         pages_expected, pages_seen, now_iso(), now_iso(), detail),
+         pages_expected, pages_seen, completion_evidence, now_iso(), now_iso(), detail),
     )
     return int(cursor.lastrowid)
 
