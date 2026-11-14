@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from switch_tracker.core import db, market
+from switch_tracker.core import db
 from switch_tracker.core.models import (
     AdapterKind,
     Condition,
@@ -183,7 +183,8 @@ class TestMarketIntegration:
             coverage_complete=True,
             completion_evidence="Fake adapter exhausted its configured test scope.",
         )
-        await service(conn, {AdapterKind.SHOPIFY: FakeAdapter(AdapterKind.SHOPIFY, complete)}).run([store("s1")])
+        svc = service(conn, {AdapterKind.SHOPIFY: FakeAdapter(AdapterKind.SHOPIFY, complete)})
+        await svc.run([store("s1")])
 
         first_scan = conn.execute("SELECT id FROM market_scan").fetchone()["id"]
         assert conn.execute(
@@ -199,7 +200,8 @@ class TestMarketIntegration:
             coverage_complete=True,
             completion_evidence="Fake adapter exhausted its configured test scope.",
         )
-        await service(conn, {AdapterKind.SHOPIFY: FakeAdapter(AdapterKind.SHOPIFY, second)}).run([store("s1")])
+        svc = service(conn, {AdapterKind.SHOPIFY: FakeAdapter(AdapterKind.SHOPIFY, second)})
+        await svc.run([store("s1")])
         state = conn.execute(
             """SELECT observation.state FROM market_item_observation observation
                JOIN market_retailer_item item ON item.id=observation.retailer_item_id
@@ -215,7 +217,8 @@ class TestMarketIntegration:
         )
         await service(conn, {AdapterKind.SHOPIFY: FakeAdapter(AdapterKind.SHOPIFY, complete)}).run([store("s1")])
         partial = Partial((listing("A"),), "one page failed")
-        await service(conn, {AdapterKind.SHOPIFY: FakeAdapter(AdapterKind.SHOPIFY, partial)}).run([store("s1")])
+        svc = service(conn, {AdapterKind.SHOPIFY: FakeAdapter(AdapterKind.SHOPIFY, partial)})
+        await svc.run([store("s1")])
 
         assert conn.execute(
             "SELECT COUNT(*) FROM market_item_observation WHERE state='NOT_LISTED'"
@@ -226,7 +229,8 @@ class TestMarketIntegration:
 
     async def test_success_without_completion_evidence_is_unknown_not_complete(self, conn) -> None:
         outcome = Ok((listing("A"),))
-        await service(conn, {AdapterKind.SHOPIFY: FakeAdapter(AdapterKind.SHOPIFY, outcome)}).run([store("s1")])
+        svc = service(conn, {AdapterKind.SHOPIFY: FakeAdapter(AdapterKind.SHOPIFY, outcome)})
+        await svc.run([store("s1")])
         assert conn.execute(
             "SELECT coverage_status FROM market_scan"
         ).fetchone()["coverage_status"] == "UNKNOWN"
