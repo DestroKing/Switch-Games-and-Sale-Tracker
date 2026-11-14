@@ -298,6 +298,7 @@ def assert_threadsafe() -> None:
 def ensure_schema(conn: sqlite3.Connection) -> None:
     conn.executescript(_LEGACY_SCHEMA)
     conn.executescript(_ADDITIVE_SCHEMA)
+    conn.executescript(_MARKET_SCHEMA)
     _migrate(conn)
 
 
