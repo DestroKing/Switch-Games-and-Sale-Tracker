@@ -7,7 +7,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query
 
-from switch_tracker import selection
+from switch_tracker import selection\nfrom switch_tracker.core import market
 from switch_tracker.web import queries
 from switch_tracker.web.deps import get_conn
 
@@ -137,3 +137,30 @@ def listings(
     return queries.listings(
         conn, _query(q, platform, region, store, condition, in_stock, game, sort, dir, limit, offset)
     )
+
+
+@router.get("/market/overview")
+def market_overview(conn: Conn) -> dict[str, int]:
+    """Physical-release market catalogue coverage, separate from price history."""
+    return market.overview(conn)
+
+
+@router.get("/market/catalogue")
+def market_catalogue(
+    conn: Conn,
+    q: str = "",
+    platform: str = "",
+    limit: int = Query(default=100, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+) -> dict[str, object]:
+    return market.catalogue(conn, q=q, platform=platform, limit=limit, offset=offset)
+
+
+@router.get("/market/products/{product_id}")
+def market_product(product_id: int, conn: Conn) -> dict[str, object]:
+    from fastapi import HTTPException
+
+    result = market.product_detail(conn, product_id)
+    if result is None:
+        raise HTTPException(status_code=404, detail="Market product not found")
+    return result
