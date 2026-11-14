@@ -280,3 +280,64 @@ def product_detail(conn: sqlite3.Connection, product_id: int) -> dict[str, Any] 
         (product_id,),
     )]
     return {"product": dict(product), "retailer_items": items, "evidence": evidence}
+
+
+def add_evidence(
+    conn: sqlite3.Connection,
+    *,
+    product_id: int,
+    evidence_type: str,
+    source_url: str,
+    source_name: str | None = None,
+    published_at: str | None = None,
+    verification: str = "UNVERIFIED",
+    confidence: str = "LOW",
+    notes: str | None = None,
+) -> int:
+    """Attach dated, source-backed print-status or format evidence."""
+    if not source_url.startswith(("https://", "http://")):
+        raise ValueError("evidence source_url must be HTTP(S)")
+    cursor = conn.execute(
+        """INSERT INTO market_evidence
+           (product_id, evidence_type, source_url, source_name, published_at,
+            checked_at, verification, confidence, notes)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (product_id, evidence_type, source_url, source_name, published_at,
+         now_iso(), verification, confidence, notes),
+    )
+    return int(cursor.lastrowid)
+
+
+def set_retailer_group(
+    conn: sqlite3.Connection,
+    *,
+    store_id: str,
+    group_key: str,
+    display_name: str,
+    relationship: RetailerRelationship | str = RetailerRelationship.UNVERIFIED,
+    legal_entity: str | None = None,
+    evidence_url: str | None = None,
+    confidence: str = "UNVERIFIED",
+    notes: str | None = None,
+) -> int:
+    """Set an auditable retailer grouping; unknown ownership stays unverified."""
+    relationship_value = RetailerRelationship(relationship).value
+    checked = now_iso() if evidence_url else None
+    conn.execute(
+        """INSERT INTO market_retailer_group
+           (group_key, display_name, relationship, legal_entity, evidence_url, checked_at, confidence, notes)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT(group_key) DO UPDATE SET
+             display_name=excluded.display_name, relationship=excluded.relationship,
+             legal_entity=excluded.legal_entity, evidence_url=excluded.evidence_url,
+             checked_at=excluded.checked_at, confidence=excluded.confidence, notes=excluded.notes""",
+        (group_key, display_name, relationship_value, legal_entity, evidence_url, checked, confidence, notes),
+    )
+    group = conn.execute("SELECT id FROM market_retailer_group WHERE group_key = ?", (group_key,)).fetchone()
+    assert group is not None
+    conn.execute(
+        """INSERT INTO market_retailer_group_member (store_id, group_id) VALUES (?, ?)
+           ON CONFLICT(store_id) DO UPDATE SET group_id=excluded.group_id""",
+        (store_id, int(group["id"])),
+    )
+    return int(group["id"])
