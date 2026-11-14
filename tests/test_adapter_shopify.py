@@ -56,6 +56,8 @@ class TestFetching:
         recorder.plan("/products.json", page(product(1, "Mario Kart World")))
         result = await adapter.fetch(store_at(base), NullSink())
         assert isinstance(result, Ok)
+        assert result.coverage_complete is True
+        assert result.completion_evidence
         assert [listing.title for listing in result.listings] == ["Mario Kart World"]
 
     async def test_scopes_to_configured_collections(self, adapter, server) -> None:
