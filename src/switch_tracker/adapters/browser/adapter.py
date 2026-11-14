@@ -397,7 +397,8 @@ class BrowserAdapter:
             tuple(unique),
             coverage_complete=all_scopes_complete,
             completion_evidence=(
-                "Every configured browser search scope reached an explicit no-more-pages or empty-page signal."
+                "Every configured browser search scope reached an explicit no-more-pages "
+                "or empty-page signal."
                 if all_scopes_complete
                 else None
             ),
