@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+from playwright.async_api import Page
+
 from switch_tracker.adapters.browser.extract import Extracted
 from switch_tracker.adapters.browser.profiles import StoreProfile
-from switch_tracker.core.models import Condition
+from switch_tracker.core.models import Condition, RawListing
 from switch_tracker.core.parse import infer_condition
 
 
