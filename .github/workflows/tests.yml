@@ -4,6 +4,11 @@ on:
   push:
     branches:
       - test/hobbyall-playwright-probe
+      - feature/physical-game-market-rarity
+  pull_request:
+    branches:
+      - android-termux-support
+      - feature/physical-game-market-rarity
 
 permissions:
   contents: read

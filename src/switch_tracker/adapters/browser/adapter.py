@@ -18,8 +18,8 @@ from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 
 from switch_tracker import paths
 from switch_tracker.adapters.base import ProgressSink
-from switch_tracker.adapters.browser.diagnostics import dump
 from switch_tracker.adapters.browser.budgets import DEFAULT_TIME_BUDGET_S
+from switch_tracker.adapters.browser.diagnostics import dump
 from switch_tracker.adapters.browser.extract import Extracted, extract
 from switch_tracker.adapters.browser.logic import _condition_for, rejects_url
 from switch_tracker.adapters.browser.pagination import (
@@ -31,7 +31,6 @@ from switch_tracker.adapters.browser.profiles import StoreProfile, WaitUntil, ef
 from switch_tracker.adapters.browser.provider import BrowserProvider
 from switch_tracker.core.models import (
     AdapterKind,
-    Condition,
     Failed,
     FetchOutcome,
     Ok,
@@ -41,7 +40,7 @@ from switch_tracker.core.models import (
     RawListing,
     StoreConfig,
 )
-from switch_tracker.core.parse import classify, infer_condition, infer_region
+from switch_tracker.core.parse import classify, infer_region
 from switch_tracker.core.skus import sku_from_url
 
 # A backstop, NOT a target. Every store stops on its own real signal -- an

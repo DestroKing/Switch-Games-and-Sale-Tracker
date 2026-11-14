@@ -6,15 +6,16 @@ accidental column
 rename a silent loss of the accumulated price history, which is the one thing
 this project exists to accumulate.
 
-Three additive changes, all deliberate:
+Additive changes, all deliberate:
 
   * ``run_event`` -- durable progress, so a closed tab or a restarted
     dashboard loses nothing (HLD option 3).
   * ``idx_run_active`` -- a partial unique index permitting at most one
-    unfinished run.  This is the authoritative half of the concurrency guard;
-    the disabled button in the UI is cosmetic and must never be relied on.
-  * ``game_redirect`` -- old game key -> new, written by the matcher, so a
-    watch saved under a key the matcher has since improved still finds its game.
+    unfinished run. This is the authoritative half of the concurrency guard.
+  * ``game_redirect`` -- old game key -> new, written by the matcher.
+  * ``market_*`` -- isolated physical-release catalogue, retailer-scope
+    coverage, observations, ownership evidence and publisher/reprint evidence.
+    These never rewrite the legacy game/listing/price history.
 
 One deviation: ``price_point.inr_price`` becomes nullable.  See fx/rates.py --
 when no exchange rate is stored, recording NO number is correct and recording
@@ -150,6 +151,136 @@ CREATE TABLE IF NOT EXISTS game_redirect (
 """
 
 
+
+
+# --- Additive: physical-release market catalogue. Kept independent of price listings.
+_MARKET_SCHEMA = """
+CREATE TABLE IF NOT EXISTS market_catalogue (
+  id              INTEGER PRIMARY KEY AUTOINCREMENT,
+  identity_key    TEXT NOT NULL UNIQUE,
+  title           TEXT NOT NULL,
+  platform        TEXT NOT NULL CHECK (platform IN ('SWITCH', 'SWITCH2')),
+  edition         TEXT NOT NULL DEFAULT 'UNKNOWN',
+  region          TEXT NOT NULL DEFAULT 'UNKNOWN',
+  physical_format TEXT NOT NULL DEFAULT 'UNKNOWN'
+                  CHECK (
+                    physical_format IN (
+                      'FULL_GAME_CARD', 'GAME_KEY_CARD', 'CODE_IN_BOX',
+                      'DOWNLOAD_CODE', 'UNKNOWN'
+                    )
+                  ),
+  release_date    TEXT,
+  linked_game_id  INTEGER REFERENCES game(id),
+  source_url      TEXT,
+  verified_at     TEXT,
+  created_at      TEXT NOT NULL,
+  updated_at      TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_market_catalogue_title ON market_catalogue(title COLLATE NOCASE);
+CREATE INDEX IF NOT EXISTS idx_market_catalogue_platform ON market_catalogue(platform, region);
+
+CREATE TABLE IF NOT EXISTS market_retailer_group (
+  id              INTEGER PRIMARY KEY AUTOINCREMENT,
+  group_key       TEXT NOT NULL UNIQUE,
+  display_name    TEXT NOT NULL,
+  relationship    TEXT NOT NULL DEFAULT 'UNVERIFIED'
+                  CHECK (
+                    relationship IN (
+                      'VERIFIED_INDEPENDENT', 'VERIFIED_SAME_GROUP',
+                      'MARKETPLACE', 'UNVERIFIED'
+                    )
+                  ),
+  legal_entity    TEXT,
+  evidence_url    TEXT,
+  checked_at      TEXT,
+  confidence      TEXT NOT NULL DEFAULT 'UNVERIFIED'
+                  CHECK (confidence IN ('HIGH','MEDIUM','LOW','UNVERIFIED')),
+  notes           TEXT
+);
+
+CREATE TABLE IF NOT EXISTS market_retailer_group_member (
+  store_id        TEXT PRIMARY KEY REFERENCES store(id),
+  group_id        INTEGER NOT NULL REFERENCES market_retailer_group(id)
+);
+
+CREATE TABLE IF NOT EXISTS market_retailer_item (
+  id              INTEGER PRIMARY KEY AUTOINCREMENT,
+  store_id        TEXT NOT NULL REFERENCES store(id),
+  scope_key       TEXT NOT NULL,
+  item_key        TEXT NOT NULL,
+  sku             TEXT,
+  url             TEXT NOT NULL,
+  product_id      INTEGER REFERENCES market_catalogue(id),
+  first_seen      TEXT NOT NULL,
+  last_seen       TEXT NOT NULL,
+  UNIQUE(store_id, scope_key, item_key)
+);
+CREATE INDEX IF NOT EXISTS idx_market_item_product ON market_retailer_item(product_id);
+CREATE INDEX IF NOT EXISTS idx_market_item_store_scope ON market_retailer_item(store_id, scope_key);
+
+CREATE TABLE IF NOT EXISTS market_scan (
+  id              INTEGER PRIMARY KEY AUTOINCREMENT,
+  run_id          INTEGER REFERENCES run(id),
+  store_id        TEXT NOT NULL REFERENCES store(id),
+  scope_key       TEXT NOT NULL,
+  scope_type      TEXT NOT NULL
+                  CHECK (
+                    scope_type IN (
+                      'RETAILER_CATALOGUE', 'PHYSICAL_GAME_CATEGORY',
+                      'SEARCH_RESULTS', 'CONFIGURED_COLLECTION', 'MANUAL_GROUP'
+                    )
+                  ),
+  coverage_status TEXT NOT NULL
+                  CHECK (coverage_status IN ('COMPLETE','PARTIAL','FAILED','UNKNOWN')),
+  expected_count  INTEGER,
+  pages_expected  INTEGER,
+  pages_seen      INTEGER NOT NULL DEFAULT 0,
+  completion_evidence TEXT,
+  started_at      TEXT NOT NULL,
+  completed_at    TEXT,
+  detail          TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_market_scan_store_scope ON market_scan(store_id, scope_key, id DESC);
+CREATE INDEX IF NOT EXISTS idx_market_scan_run ON market_scan(run_id);
+
+CREATE TABLE IF NOT EXISTS market_item_observation (
+  id                INTEGER PRIMARY KEY AUTOINCREMENT,
+  scan_id           INTEGER NOT NULL REFERENCES market_scan(id),
+  retailer_item_id  INTEGER NOT NULL REFERENCES market_retailer_item(id),
+  observed_at       TEXT NOT NULL,
+  state             TEXT NOT NULL
+                    CHECK (state IN ('IN_STOCK','OUT_OF_STOCK','LISTED','NOT_LISTED','UNKNOWN')),
+  price             REAL,
+  currency          TEXT,
+  CHECK (price IS NULL OR price >= 0),
+  UNIQUE(scan_id, retailer_item_id)
+);
+CREATE INDEX IF NOT EXISTS idx_market_observation_item ON market_item_observation(retailer_item_id, id DESC);
+
+CREATE TABLE IF NOT EXISTS market_evidence (
+  id              INTEGER PRIMARY KEY AUTOINCREMENT,
+  product_id      INTEGER NOT NULL REFERENCES market_catalogue(id),
+  evidence_type   TEXT NOT NULL
+                  CHECK (
+                    evidence_type IN (
+                      'OUT_OF_PRINT', 'REPRINT', 'DISCONTINUED',
+                      'PUBLISHER_STATUS', 'DISTRIBUTOR_STATUS', 'PACKAGING', 'OTHER'
+                    )
+                  ),
+  source_url      TEXT NOT NULL,
+  source_name     TEXT,
+  published_at    TEXT,
+  checked_at      TEXT NOT NULL,
+  verification    TEXT NOT NULL DEFAULT 'UNVERIFIED'
+                  CHECK (verification IN ('VERIFIED','CORROBORATED','UNVERIFIED','CONFLICTING')),
+  confidence      TEXT NOT NULL DEFAULT 'LOW'
+                  CHECK (confidence IN ('HIGH','MEDIUM','LOW')),
+  notes           TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_market_evidence_product ON market_evidence(product_id, checked_at DESC);
+"""
+
+
 def connect(path: Path | None = None) -> sqlite3.Connection:
     target = path or paths.db_path()
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -189,6 +320,7 @@ def assert_threadsafe() -> None:
 def ensure_schema(conn: sqlite3.Connection) -> None:
     conn.executescript(_LEGACY_SCHEMA)
     conn.executescript(_ADDITIVE_SCHEMA)
+    conn.executescript(_MARKET_SCHEMA)
     _migrate(conn)
 
 
@@ -202,6 +334,9 @@ def _migrate(conn: sqlite3.Connection) -> None:
     columns = {row[1] for row in conn.execute("PRAGMA table_info(listing)")}
     if columns and "condition" not in columns:
         conn.execute("ALTER TABLE listing ADD COLUMN condition TEXT NOT NULL DEFAULT 'NEW'")
+    market_scan_columns = {row[1] for row in conn.execute("PRAGMA table_info(market_scan)")}
+    if market_scan_columns and "completion_evidence" not in market_scan_columns:
+        conn.execute("ALTER TABLE market_scan ADD COLUMN completion_evidence TEXT")
 
 
 #: How many backups to keep. A week of daily collections; each is one
