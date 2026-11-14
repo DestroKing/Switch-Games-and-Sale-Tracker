@@ -215,7 +215,8 @@ class TestMarketIntegration:
             coverage_complete=True,
             completion_evidence="Complete fixture scope.",
         )
-        await service(conn, {AdapterKind.SHOPIFY: FakeAdapter(AdapterKind.SHOPIFY, complete)}).run([store("s1")])
+        svc = service(conn, {AdapterKind.SHOPIFY: FakeAdapter(AdapterKind.SHOPIFY, complete)})
+        await svc.run([store("s1")])
         partial = Partial((listing("A"),), "one page failed")
         svc = service(conn, {AdapterKind.SHOPIFY: FakeAdapter(AdapterKind.SHOPIFY, partial)})
         await svc.run([store("s1")])
