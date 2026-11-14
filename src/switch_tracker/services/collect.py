@@ -8,13 +8,15 @@ amounts of memory and CPU, so they get separate pools and separate deadlines.
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
 import sqlite3
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from urllib.parse import urlsplit
 
 from switch_tracker.adapters.base import Adapter
-from switch_tracker.core import db, matcher
+from switch_tracker.core import db, market, matcher
 from switch_tracker.core.concurrency import bounded_gather
 from switch_tracker.core.db import now_iso
 from switch_tracker.core.models import AdapterKind, Failed, Ok, Partial, RawListing, StoreConfig
@@ -203,7 +205,9 @@ class CollectService:
             return int((asyncio.get_running_loop().time() - started) * 1000)
 
         if adapter is None:
-            self._record(run_id, store.id, "skipped", 0, elapsed_ms(), f"no adapter for {store.kind}")
+            reason = f"no adapter for {store.kind}"
+            self._record(run_id, store.id, "skipped", 0, elapsed_ms(), reason)
+            self._safe_record_market_scan(run_id, store, Failed(reason), events)
             events.store_finished(
                 store.id,
                 status="skipped",
@@ -220,16 +224,19 @@ class CollectService:
         except TimeoutError:
             reason = f"gave up after {int(deadline)}s ({store.id})"
             self._record(run_id, store.id, "failed", 0, elapsed_ms(), reason)
+            self._safe_record_market_scan(run_id, store, Failed(reason), events)
             events.store_finished(store.id, status="failed", count=0, duration_ms=elapsed_ms(), detail=reason)
             return
         except Exception as exc:  # noqa: BLE001 - an adapter fault is a store fault, not a run fault
             reason = f"{type(exc).__name__}: {exc}"
             self._record(run_id, store.id, "failed", 0, elapsed_ms(), reason)
+            self._safe_record_market_scan(run_id, store, Failed(reason), events)
             events.store_finished(store.id, status="failed", count=0, duration_ms=elapsed_ms(), detail=reason)
             return
 
         if isinstance(outcome, Failed):
             self._record(run_id, store.id, "failed", 0, elapsed_ms(), outcome.reason)
+            self._safe_record_market_scan(run_id, store, outcome, events)
             events.store_finished(
                 store.id, status="failed", count=0, duration_ms=elapsed_ms(), detail=outcome.reason
             )
@@ -245,6 +252,7 @@ class CollectService:
         except Exception as exc:  # noqa: BLE001 - a persistence fault is a store fault when its transaction rolls back
             reason = f"Could not save listings: {type(exc).__name__}: {exc}"
             self._record(run_id, store.id, "failed", 0, elapsed_ms(), reason)
+            self._safe_record_market_scan(run_id, store, Failed(reason), events)
             events.store_finished(
                 store.id,
                 status="failed",
@@ -254,10 +262,110 @@ class CollectService:
             )
             return
 
+        self._safe_record_market_scan(run_id, store, outcome, events)
         status = "ok" if isinstance(outcome, Ok) else "partial"
         detail = outcome.reason if isinstance(outcome, Partial) else None
         self._record(run_id, store.id, status, saved, elapsed_ms(), detail)
         events.store_finished(store.id, status=status, count=saved, duration_ms=elapsed_ms(), detail=detail)
+
+    def _safe_record_market_scan(
+        self, run_id: int, store: StoreConfig, outcome: Ok | Partial | Failed, events: EventWriter
+    ) -> None:
+        """Record market discovery separately; never let it break price collection."""
+        try:
+            self._record_market_scan(run_id, store, outcome)
+        except Exception as exc:  # noqa: BLE001 - market data is additive to the price tracker
+            events.warning(
+                f"{store.id}: market discovery could not be saved: {type(exc).__name__}: {exc}"
+            )
+
+    def _record_market_scan(
+        self, run_id: int, store: StoreConfig, outcome: Ok | Partial | Failed
+    ) -> None:
+        """Persist one auditable configured-scope scan and its item observations.
+
+        Physical-release identity is intentionally NOT inferred from a retailer
+        SKU or a matched legacy game: edition and physical format are not
+        reliably present in every adapter's output.
+        """
+        scope_type = (
+            market.ScopeType.CONFIGURED_COLLECTION
+            if store.collections
+            else market.ScopeType.SEARCH_RESULTS
+            if store.kind is AdapterKind.BROWSER
+            else market.ScopeType.RETAILER_CATALOGUE
+        )
+        scope_material = json.dumps(
+            {
+                "kind": str(store.kind),
+                "base_url": store.base_url.rstrip("/"),
+                "collections": list(store.collections),
+                "search_urls": list(store.search_urls),
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        scope_key = "configured-" + hashlib.sha256(scope_material.encode()).hexdigest()[:20]
+
+        if isinstance(outcome, Failed):
+            coverage = market.CoverageStatus.FAILED
+            detail = outcome.reason
+            completion_evidence = None
+        elif isinstance(outcome, Partial):
+            coverage = market.CoverageStatus.PARTIAL
+            detail = outcome.reason
+            completion_evidence = None
+        elif outcome.coverage_complete and outcome.completion_evidence:
+            coverage = market.CoverageStatus.COMPLETE
+            detail = None
+            completion_evidence = outcome.completion_evidence
+        else:
+            coverage = market.CoverageStatus.UNKNOWN
+            detail = "Fetch succeeded, but the adapter did not prove that the configured scope was exhausted."
+            completion_evidence = None
+
+        self._conn.execute("BEGIN")
+        try:
+            scan_id = market.record_scan(
+                self._conn,
+                run_id=run_id,
+                store_id=store.id,
+                scope_key=scope_key,
+                scope_type=scope_type,
+                coverage_status=coverage,
+                completion_evidence=completion_evidence,
+                detail=detail,
+            )
+            if not isinstance(outcome, Failed):
+                for item in outcome.listings:
+                    if not _is_web_url(item.url):
+                        continue
+                    retailer_item_id = market.upsert_retailer_item(
+                        self._conn,
+                        store_id=store.id,
+                        scope_key=scope_key,
+                        item_key=item.sku,
+                        sku=item.sku,
+                        url=item.url,
+                    )
+                    market.record_observation(
+                        self._conn,
+                        scan_id=scan_id,
+                        retailer_item_id=retailer_item_id,
+                        state=(
+                            market.ObservationState.IN_STOCK
+                            if item.in_stock
+                            else market.ObservationState.OUT_OF_STOCK
+                        ),
+                        price=item.native_price,
+                        currency=item.native_currency,
+                    )
+            if coverage is market.CoverageStatus.COMPLETE:
+                market.reconcile_complete_scan(self._conn, scan_id)
+            self._conn.execute("COMMIT")
+        except Exception:
+            self._conn.execute("ROLLBACK")
+            raise
 
     def _sync_store_table(self, stores: Sequence[StoreConfig]) -> None:
         """Config is the source of truth; the table is a projection of it."""
