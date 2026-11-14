@@ -150,6 +150,21 @@ class TestRetailerItemsAndCoverage:
                 coverage_status=market.CoverageStatus.COMPLETE, pages_expected=3, pages_seen=2,
             )
 
+    def test_complete_scan_requires_a_verifiable_end_condition(self, conn):
+        with pytest.raises(ValueError):
+            market.record_scan(
+                conn, store_id="shop", scope_key="category-a",
+                scope_type=market.ScopeType.PHYSICAL_GAME_CATEGORY,
+                coverage_status=market.CoverageStatus.COMPLETE,
+            )
+        scan_id = market.record_scan(
+            conn, store_id="shop", scope_key="empty-category",
+            scope_type=market.ScopeType.PHYSICAL_GAME_CATEGORY,
+            coverage_status=market.CoverageStatus.COMPLETE,
+            expected_count=0, pages_expected=0, pages_seen=0,
+        )
+        assert scan_id > 0
+
     def test_search_result_scope_is_stored_as_search_scope_not_catalogue(self, conn):
         scan_id = market.record_scan(
             conn, store_id="shop", scope_key="query-zelda",
