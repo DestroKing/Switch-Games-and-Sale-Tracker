@@ -16,8 +16,8 @@ import pytest
 
 from switch_tracker import paths
 from switch_tracker.adapters.browser import overrides as profile_overrides
-from switch_tracker.adapters.browser.logic import _condition_for, rejects_url
 from switch_tracker.adapters.browser.extract import Extracted
+from switch_tracker.adapters.browser.logic import _condition_for, rejects_url
 from switch_tracker.adapters.browser.pagination import ProductivityTracker, read_claimed_total
 from switch_tracker.adapters.browser.profiles import PROFILES, StoreProfile, effective_profile
 from switch_tracker.core.models import Condition, Region
