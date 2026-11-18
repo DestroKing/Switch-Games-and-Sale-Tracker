@@ -182,10 +182,12 @@ Market data appears only as context, never as evidence.
 
 Each phase is test-first, ends green (targeted tests, then the full suite, Ruff and mypy), and is committed locally.
 
-- [ ] **P0 Design.** This document; agreement on open decisions.
-- [ ] **P1 Foundation + off switch.** Package skeleton, `market.db` + migrations, models, settings flag,
+- [x] **P0 Design.** This document; agreement on open decisions.
+- [x] **P1 Foundation + off switch.** Package skeleton, `market.db` + migrations, models, settings flag,
       import-boundary and removal-simulation tests, `tests/market/`.
-- [ ] **P2 Coverage evidence.** `Coverage` on outcomes, 4 adapters fill it, backstop → Partial, `coverage.py` verdicts.
+- [x] **P2 Coverage evidence.** `Coverage` on outcomes, backstop → Partial, `coverage.py` verdicts.
+      Shopify and Woo fill it. Hobbyall and browser stores report `None` on purpose: a single unpaginated
+      response and rendered pages prove nothing about completeness, so their verdict is UNKNOWN either way.
 - [ ] **P3 Ingestion + history.** Observer protocol in `CollectService`, scopes, scans, listings, spans,
       absence reconciliation; end-to-end test with fake adapters.
 - [ ] **P4 Identity.** Attribute extraction, game/release/codes, matching tiers, review ops, audit log.

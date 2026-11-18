@@ -140,8 +140,34 @@ class RawListing:
 
 
 @dataclass(frozen=True, slots=True)
+class Coverage:
+    """What a feed walk actually read. Facts only; deciding what they prove is the reader's job.
+
+    ``Ok`` means "nothing went wrong that I noticed", which is weaker than "I
+    read the whole configured scope". Anything concluding that a product has
+    LEFT a store needs the second, so it is reported here rather than implied.
+    """
+
+    pages_attempted: int
+    pages_completed: int
+    #: Every configured path or category stopped at its own end -- a short or
+    #: empty page -- and not at a page backstop, a time budget or an error.
+    end_reached: bool
+    #: The store's own product count for the queries run, summed; None if not stated.
+    claimed_total: int | None
+    #: Raw products returned, BEFORE game-only filtering.
+    raw_seen: int
+    #: Both the SKU field and the product id of EVERY raw product, games or not.
+    #: A product the classifier dropped is still one the store lists, and a SKU
+    #: one_product_per_sku rewrote to the product id must still count as seen.
+    seen_skus: frozenset[str]
+
+
+@dataclass(frozen=True, slots=True)
 class Ok:
     listings: tuple[RawListing, ...]
+    #: None where the adapter has no way to show what it covered.
+    coverage: Coverage | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -150,6 +176,7 @@ class Partial:
 
     listings: tuple[RawListing, ...]
     reason: str
+    coverage: Coverage | None = None
 
 
 @dataclass(frozen=True, slots=True)

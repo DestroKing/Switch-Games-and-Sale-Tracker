@@ -20,6 +20,7 @@ from switch_tracker.adapters.base import ProgressSink
 from switch_tracker.core.http import HttpResult, PoliteClient
 from switch_tracker.core.models import (
     AdapterKind,
+    Coverage,
     Failed,
     FetchOutcome,
     Ok,
@@ -34,6 +35,11 @@ from switch_tracker.core.parse import classify, infer_condition, infer_region, p
 from switch_tracker.core.skus import one_product_per_sku
 
 _PATHS = ("/wp-json/wc/store/v1/products", "/wp-json/wc/store/products")
+
+
+def _sku(product: dict[str, Any]) -> str:
+    """The SKU field, else the product id. ONE rule, for listings and coverage alike."""
+    return str(product.get("sku") or "").strip() or str(product.get("id"))
 
 
 class WooAdapter:
@@ -68,6 +74,8 @@ class WooAdapter:
         problems: list[str] = []
         raw_fetched = 0
         expected_total = 0
+        attempted = completed = ended = 0
+        seen: set[str] = set()
         loop = asyncio.get_running_loop()
         started = loop.time()
         out_of_time = False
@@ -95,6 +103,7 @@ class WooAdapter:
                     )
                     out_of_time = True
                     break
+                attempted += 1
                 response = await self._page(store, base_path, suffix, page)
                 if not response.ok:
                     error = f"HTTP {response.status}" if response.status else response.body[:200]
@@ -126,11 +135,15 @@ class WooAdapter:
                 if not isinstance(products, list):
                     problems.append(f"category {category or 'all'}, page {page}: expected a product list")
                     break
+                completed += 1
                 if not products:
+                    ended += 1
                     break
 
                 raw_fetched += len(products)
                 for raw in products:
+                    if isinstance(raw, dict):
+                        seen.update({_sku(raw), str(raw.get("id"))})
                     listing = self._to_listing(store, raw)
                     if listing is not None:
                         rows.append((listing, str(raw.get("id"))))
@@ -138,7 +151,14 @@ class WooAdapter:
                 sink.page(store.id, page, len(rows))
 
                 if len(products) < self.PER_PAGE:
+                    ended += 1
                     break
+            else:
+                # Full pages all the way to the backstop: more lies unread. See
+                # ShopifyAdapter -- this used to come back Ok.
+                problems.append(
+                    f"category {category or 'all'}: stopped at the {self.MAX_PAGES}-page backstop"
+                )
 
             if category_total is not None:
                 expected_total += category_total
@@ -154,16 +174,25 @@ class WooAdapter:
             else ""
         )
 
+        coverage = Coverage(
+            pages_attempted=attempted,
+            pages_completed=completed,
+            # A page skipped after failing is a hole, even if a later page ended the walk.
+            end_reached=ended == len(category_values) and not problems,
+            claimed_total=expected_total or None,
+            raw_seen=raw_fetched,
+            seen_skus=frozenset(seen),
+        )
         listings = one_product_per_sku(rows)
         if not listings:
             if problems:
                 return Failed("; ".join(problems))
             return Failed(f"Store API reachable but returned no Switch products{completeness}")
         if problems:
-            return Partial(tuple(listings), f"{'; '.join(problems)}{completeness}")
+            return Partial(tuple(listings), f"{'; '.join(problems)}{completeness}", coverage)
         if expected_total > 0 and raw_fetched < expected_total:
-            return Partial(tuple(listings), f"stopped early{completeness}")
-        return Ok(tuple(listings))
+            return Partial(tuple(listings), f"stopped early{completeness}", coverage)
+        return Ok(tuple(listings), coverage)
 
     async def _get(
         self, store: StoreConfig, base_path: str, suffix: str, per_page: int, page: int
@@ -257,7 +286,7 @@ class WooAdapter:
         images = product.get("images") or []
         return RawListing(
             store_id=store.id,
-            sku=str(product.get("sku") or "").strip() or str(product.get("id")),
+            sku=_sku(product),
             url=str(product.get("permalink", "")),
             title=name,
             native_currency=str(prices.get("currency_code") or store.currency),

@@ -14,6 +14,7 @@ from switch_tracker.adapters.base import ProgressSink
 from switch_tracker.core.http import PoliteClient
 from switch_tracker.core.models import (
     AdapterKind,
+    Coverage,
     Failed,
     FetchOutcome,
     Ok,
@@ -26,6 +27,12 @@ from switch_tracker.core.models import (
 )
 from switch_tracker.core.parse import classify, infer_condition, infer_region, parse_price
 from switch_tracker.core.skus import one_product_per_sku
+
+
+def _sku(product: dict[str, Any]) -> str:
+    """The first variant's SKU field, else the product id. ONE rule, for listings and coverage alike."""
+    variants = product.get("variants") or [{}]
+    return str(variants[0].get("sku") or "").strip() or str(product.get("id"))
 
 
 class ShopifyAdapter:
@@ -50,21 +57,29 @@ class ShopifyAdapter:
 
         rows: list[tuple[RawListing, str]] = []
         problems: list[str] = []
+        attempted = completed = raw_seen = 0
+        ended = 0
+        seen: set[str] = set()
 
         for path in paths:
             for page in range(1, self.MAX_PAGES + 1):
                 url = f"{store.base_url}{path}?limit={self.PAGE_SIZE}&page={page}"
+                attempted += 1
                 data = await self._client.get_json(url)
 
                 if not isinstance(data, dict):
                     problems.append(f"{path} page {page}: no parseable JSON")
                     break
+                completed += 1
 
                 products = data.get("products") or []
                 if not products:
+                    ended += 1
                     break
 
+                raw_seen += len(products)
                 for raw in products:
+                    seen.update({_sku(raw), str(raw.get("id"))})
                     listing = self._to_listing(store, raw)
                     if listing is not None:
                         rows.append((listing, str(raw.get("id"))))
@@ -73,14 +88,28 @@ class ShopifyAdapter:
 
                 # The real stopping signal: a short page means the last page.
                 if len(products) < self.PAGE_SIZE:
+                    ended += 1
                     break
+            else:
+                # Still full pages at the backstop: there is more, unread.
+                # Reported as Ok before, which told "still listed" checks the
+                # whole catalogue had been seen.
+                problems.append(f"{path}: stopped at the {self.MAX_PAGES}-page backstop")
 
+        coverage = Coverage(
+            pages_attempted=attempted,
+            pages_completed=completed,
+            end_reached=ended == len(paths),
+            claimed_total=None,
+            raw_seen=raw_seen,
+            seen_skus=frozenset(seen),
+        )
         listings = one_product_per_sku(rows)
         if not listings:
             return Failed("; ".join(problems) or "zero products returned")
         if problems:
-            return Partial(tuple(listings), "; ".join(problems))
-        return Ok(tuple(listings))
+            return Partial(tuple(listings), "; ".join(problems), coverage)
+        return Ok(tuple(listings), coverage)
 
     def _to_listing(self, store: StoreConfig, product: dict[str, Any]) -> RawListing | None:
         variants = product.get("variants") or []
@@ -110,7 +139,7 @@ class ShopifyAdapter:
 
         images = product.get("images") or []
         title = str(product.get("title", ""))
-        sku = str(variant.get("sku") or "").strip() or str(product.get("id"))
+        sku = _sku(product)
 
         return RawListing(
             store_id=store.id,
