@@ -25,6 +25,9 @@ class Settings:
     collect_on_launch: bool = True
     #: Show the browser while scraping. Debugging aid only.
     headful: bool = False
+    #: The physical-game market tracker (switch_tracker.market). False means it
+    #: is never imported: no page, no market.db, nothing added to a collection.
+    market_tracker: bool = True
 
 
 def _as_port(value: object, fallback: int) -> int:
@@ -62,4 +65,5 @@ def load() -> Settings:
         port=_as_port(os.environ.get("PORT") or data.get("port"), 4173),
         collect_on_launch=_as_bool(data.get("collect_on_launch"), True),
         headful=os.environ.get("HEADFUL") == "1" or _as_bool(data.get("headful"), False),
+        market_tracker=_as_bool(data.get("market_tracker"), True),
     )
