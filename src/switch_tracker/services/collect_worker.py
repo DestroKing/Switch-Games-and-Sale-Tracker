@@ -6,7 +6,9 @@ browser store is actually enabled.
 
 from __future__ import annotations
 
+import sys
 from collections.abc import Sequence
+from typing import TYPE_CHECKING
 
 from switch_tracker import paths, settings
 from switch_tracker.adapters.registry import build_registry
@@ -16,6 +18,26 @@ from switch_tracker.core.http import PoliteClient
 from switch_tracker.core.models import AdapterKind, StoreConfig
 from switch_tracker.fx.rates import FxService
 from switch_tracker.services.collect import CollectService, select_stores
+
+if TYPE_CHECKING:
+    from switch_tracker.market.ingest import MarketObserver
+
+
+def market_observer(enabled: bool) -> MarketObserver | None:
+    """The market tracker's hook, or None: switched off, removed, or unable to open.
+
+    Imported here, not at the top, so a price-only install never loads the
+    package. Any failure costs the market data of this run, never the run.
+    """
+    if not enabled:
+        return None
+    try:
+        from switch_tracker.market.ingest import MarketObserver
+
+        return MarketObserver.open(backup_dir=paths.backups_dir())
+    except Exception as exc:  # noqa: BLE001 - ImportError when removed; RuntimeError on a newer market.db
+        print(f"market tracker off for this run: {type(exc).__name__}: {exc}", file=sys.stderr)
+        return None
 
 
 def needs_browser(stores: Sequence[StoreConfig], only: tuple[str, ...]) -> bool:
@@ -49,6 +71,7 @@ async def run(run_id: int, only: tuple[str, ...] = ()) -> int:
 
         provider = BrowserProvider(headless=not config.headful)
 
+    observer = market_observer(config.market_tracker)
     try:
         service = CollectService(
             conn,
@@ -56,12 +79,15 @@ async def run(run_id: int, only: tuple[str, ...] = ()) -> int:
             fx=FxService(conn, client),
             aliases=matcher.load_aliases(),
             backup_dir=paths.backups_dir(),
+            observer=observer,
         )
         # The FULL store list plus the selection -- see CollectService.run:
         # the store table projects every store's enabled flag, so pre-filtering
         # here would stop disabled stores being synced.
         await service.run(stores, run_id=run_id, only=only)
     finally:
+        if observer is not None:
+            observer.close()
         if provider is not None:
             await provider.close()
     return 0

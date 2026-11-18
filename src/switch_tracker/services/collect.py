@@ -11,15 +11,28 @@ import asyncio
 import sqlite3
 from collections.abc import Mapping, Sequence
 from pathlib import Path
+from typing import Protocol
 from urllib.parse import urlsplit
 
 from switch_tracker.adapters.base import Adapter
 from switch_tracker.core import db, matcher
 from switch_tracker.core.concurrency import bounded_gather
 from switch_tracker.core.db import now_iso
-from switch_tracker.core.models import AdapterKind, Failed, Ok, Partial, RawListing, StoreConfig
+from switch_tracker.core.models import AdapterKind, Failed, FetchOutcome, Ok, Partial, RawListing, StoreConfig
 from switch_tracker.events.writer import EventWriter
 from switch_tracker.fx.rates import FxService
+
+
+class CollectObserver(Protocol):
+    """Sees every store's outcome and the end of the run; owns nothing in tracker.db.
+
+    Every call is wrapped: an observer that raises is a warning on the run,
+    never a failed store or a failed collection.
+    """
+
+    def store_done(self, run_id: int, store: StoreConfig, outcome: FetchOutcome, started_at: str) -> None: ...
+
+    def run_done(self, run_id: int) -> None: ...
 
 
 def _is_web_url(url: str) -> bool:
@@ -93,6 +106,7 @@ class CollectService:
         browser_concurrency: int = DEFAULT_BROWSER_CONCURRENCY,
         aliases: Mapping[str, str] | None = None,
         backup_dir: Path | None = None,
+        observer: CollectObserver | None = None,
     ) -> None:
         self._conn = conn
         self._adapters = adapters
@@ -102,6 +116,7 @@ class CollectService:
         self._aliases = aliases or {}
         #: None = no backup (tests). The worker passes paths.backups_dir().
         self._backup_dir = backup_dir
+        self._observer = observer
         self.http_deadline_s = http_deadline_s
         self.browser_deadline_s = browser_deadline_s
         self.http_concurrency = http_concurrency
@@ -190,11 +205,18 @@ class CollectService:
             except Exception as exc:  # noqa: BLE001 - the backup is a copy; the original is intact
                 events.warning(f"database backup failed: {exc}")
 
+        if self._observer is not None:
+            try:
+                self._observer.run_done(run_id)
+            except Exception as exc:  # noqa: BLE001 - see CollectObserver
+                events.warning(f"market tracker: {type(exc).__name__}: {exc}")
+
         events.run_finished()
         return run_id
 
     async def _process_store(self, store: StoreConfig, run_id: int, events: EventWriter) -> None:
         started = asyncio.get_running_loop().time()
+        started_at = now_iso()
         adapter = self._adapters.get(store.kind)
 
         events.store_started(store.id, str(store.kind))
@@ -215,18 +237,19 @@ class CollectService:
 
         deadline = self.browser_deadline_s if store.kind is AdapterKind.BROWSER else self.http_deadline_s
 
+        outcome: FetchOutcome
         try:
             outcome = await asyncio.wait_for(adapter.fetch(store, events), timeout=deadline)
         except TimeoutError:
-            reason = f"gave up after {int(deadline)}s ({store.id})"
-            self._record(run_id, store.id, "failed", 0, elapsed_ms(), reason)
-            events.store_finished(store.id, status="failed", count=0, duration_ms=elapsed_ms(), detail=reason)
-            return
+            outcome = Failed(f"gave up after {int(deadline)}s ({store.id})")
         except Exception as exc:  # noqa: BLE001 - an adapter fault is a store fault, not a run fault
-            reason = f"{type(exc).__name__}: {exc}"
-            self._record(run_id, store.id, "failed", 0, elapsed_ms(), reason)
-            events.store_finished(store.id, status="failed", count=0, duration_ms=elapsed_ms(), detail=reason)
-            return
+            outcome = Failed(f"{type(exc).__name__}: {exc}")
+
+        if self._observer is not None:
+            try:
+                self._observer.store_done(run_id, store, outcome, started_at)
+            except Exception as exc:  # noqa: BLE001 - see CollectObserver
+                events.warning(f"market tracker: {type(exc).__name__}: {exc}", store_id=store.id)
 
         if isinstance(outcome, Failed):
             self._record(run_id, store.id, "failed", 0, elapsed_ms(), outcome.reason)

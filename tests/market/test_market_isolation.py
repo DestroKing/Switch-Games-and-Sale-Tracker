@@ -11,6 +11,7 @@ sys.modules proves nothing.
 from __future__ import annotations
 
 import json
+import sqlite3
 import subprocess
 import sys
 from collections.abc import Iterator
@@ -19,6 +20,7 @@ from pathlib import Path
 import pytest
 
 from switch_tracker import paths, settings
+from switch_tracker.services.collect_worker import market_observer
 
 
 def _run(code: str) -> subprocess.CompletedProcess[str]:
@@ -45,6 +47,27 @@ class TestOffSwitch:
         """``"false"`` as a string is truthy; it must not be read as a choice."""
         (data_dir / "settings.json").write_text(json.dumps({"market_tracker": "false"}), encoding="utf-8")
         assert settings.load().market_tracker is True
+
+
+class TestWorkerHook:
+    def test_switched_off_opens_nothing(self, data_dir: Path) -> None:
+        assert market_observer(False) is None
+        assert not (data_dir / "market.db").exists()
+
+    def test_switched_on_opens_market_db(self, data_dir: Path) -> None:
+        observer = market_observer(True)
+        assert observer is not None
+        observer.close()
+        assert (data_dir / "market.db").exists()
+
+    def test_a_market_db_it_cannot_open_costs_the_market_data_not_the_run(
+        self, data_dir: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        conn = sqlite3.connect(data_dir / "market.db")
+        conn.execute("PRAGMA user_version = 999")
+        conn.close()
+        assert market_observer(True) is None
+        assert "newer than this build" in capsys.readouterr().err
 
 
 #: Every legacy module a price-only install runs. None may load the market
@@ -124,6 +147,10 @@ store = StoreConfig("x", "X", "https://x.example", AdapterKind.SHOPIFY, "INR", 2
 asyncio.run(CollectService(conn, adapters={{AdapterKind.SHOPIFY: Fake()}}, fx=None).run([store]))
 assert conn.execute("SELECT COUNT(*) FROM price_point").fetchone()[0] == 1, "collection"
 assert not os.path.exists(os.path.join({str(tmp_path)!r}, "market.db")), "no market.db"
+
+# Removed but still switched on (settings left behind): the worker carries on without it.
+from switch_tracker.services.collect_worker import market_observer
+assert market_observer(True) is None, "worker hook with the package gone"
 print("OK")
 """
     result = _run(code)
