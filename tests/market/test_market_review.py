@@ -17,7 +17,7 @@ def market(tmp_path):
     return market_db.open_db(tmp_path / "market.db")
 
 def seed(conn: sqlite3.Connection, shop: str, sku: str, title: str, platform: str = "SWITCH") -> int:
-    conn.execute("INSERT OR IGNORE INTO retailer (id, name, kind) VALUES (?, ?, 'INDEPENDENT')", (shop,))
+    conn.execute("INSERT OR IGNORE INTO retailer (id, name, kind) VALUES (?, ?, 'INDEPENDENT')", (shop, shop))
     conn.execute(
         "INSERT OR IGNORE INTO storefront (id, retailer_id, name, base_url, stock_signal) "
         "VALUES (?, ?, ?, 'https://example.test', 'REPORTED')", (shop, shop, shop)
