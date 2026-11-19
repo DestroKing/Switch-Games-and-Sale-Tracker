@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 
+from switch_tracker.core.matcher import match_key
 from switch_tracker.market.identity import extract
 from switch_tracker.market.models import Format
 
@@ -54,7 +55,7 @@ from switch_tracker.market.models import Format
 )
 def test_extracts_title_attributes(title, platform, edition, key, fmt):
     attrs = extract(title, "SKU-1", "UNKNOWN", "IN")
-    assert (attrs.platform, attrs.edition, attrs.key, attrs.format) == (platform, edition, key, fmt)
+    assert (attrs.platform, attrs.edition, attrs.key, attrs.format) == (platform, edition, match_key(key), fmt)
 
 
 def test_unknown_platform_is_unmatched():
