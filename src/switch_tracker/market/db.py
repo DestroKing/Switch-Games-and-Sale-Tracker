@@ -196,7 +196,21 @@ CREATE TABLE audit_log (
 );
 """
 
-MIGRATIONS: tuple[str, ...] = (_V1,)
+
+
+# v2: release merges are aliases, never destructive deletes. Listing scope lookup
+# is the hot path for absence reconciliation.
+_V2 = """
+CREATE TABLE release_alias (
+  release_id INTEGER PRIMARY KEY REFERENCES release(id),
+  target_id  INTEGER NOT NULL REFERENCES release(id),
+  at         TEXT NOT NULL,
+  CHECK (release_id <> target_id)
+);
+CREATE INDEX idx_listing_scope ON listing(storefront_id, scope_id);
+"""
+
+MIGRATIONS: tuple[str, ...] = (_V1, _V2)
 
 #: A week of daily collections, as for tracker.db.
 BACKUPS_KEPT = 7
