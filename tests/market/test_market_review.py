@@ -2,6 +2,16 @@
 
 from __future__ import annotations
 
+
+import pytest
+
+from switch_tracker.market import db as market_db
+
+
+@pytest.fixture
+def market(tmp_path):
+    return market_db.open_db(tmp_path / "market.db")
+
 import sqlite3
 
 import pytest
