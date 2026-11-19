@@ -279,6 +279,26 @@ class TestIsolation:
         assert "gave up" in scan["failure"]
         assert legacy.execute("SELECT status FROM run_store").fetchone()["status"] == "failed"
 
+    async def test_run_done_rematches_before_backup(self, legacy, market, tmp_path: Path) -> None:
+        await collect(legacy, market, ok(row("A")), backup_dir=tmp_path / "backups")
+        assert market.execute("SELECT COUNT(*) FROM listing_match").fetchone()[0] == 1
+        [copy] = (tmp_path / "backups").glob("market-run*.db")
+        copied = sqlite3.connect(copy)
+        assert copied.execute("SELECT COUNT(*) FROM listing_match").fetchone()[0] == 1
+        copied.close()
+
+    async def test_rematch_failure_still_backs_up_and_warns(self, legacy, market, tmp_path: Path, monkeypatch) -> None:
+        from switch_tracker.market import identity
+
+        def fail(conn):
+            raise RuntimeError("rematch exploded")
+
+        monkeypatch.setattr(identity, "rematch", fail)
+        await collect(legacy, market, ok(row("A")), backup_dir=tmp_path / "backups")
+        assert list((tmp_path / "backups").glob("market-run*.db"))
+        warnings = [r[0] for r in legacy.execute("SELECT detail FROM run_event WHERE kind='warning'")]
+        assert any("rematch exploded" in warning for warning in warnings)
+
     async def test_market_db_is_backed_up_at_the_end_of_a_run(self, legacy, market, tmp_path: Path) -> None:
         await collect(legacy, market, ok(row("A")), backup_dir=tmp_path / "backups")
         [copy] = (tmp_path / "backups").glob("market-run*.db")
