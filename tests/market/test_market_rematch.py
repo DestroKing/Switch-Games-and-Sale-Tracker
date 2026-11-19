@@ -5,10 +5,8 @@ from __future__ import annotations
 import json
 import sqlite3
 
-import pytest
-
 from switch_tracker.market.identity import rematch
-from switch_tracker.market.models import Format, MatchTier
+from switch_tracker.market.models import MatchTier
 
 
 def seed(conn: sqlite3.Connection, storefront: str, sku: str, title: str, *, region: str = "IN", platform: str = "SWITCH") -> int:
