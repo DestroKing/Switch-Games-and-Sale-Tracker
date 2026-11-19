@@ -29,3 +29,28 @@ class CoverageStatus(StrEnum):
     @property
     def absence_eligible(self) -> bool:
         return self is CoverageStatus.COMPLETE
+
+
+class Format(StrEnum):
+    """Physical or digital packaging format; UNKNOWN is a distinct identity."""
+
+    FULL_GAME_CARD = "FULL_GAME_CARD"
+    GAME_KEY_CARD = "GAME_KEY_CARD"
+    CODE_IN_BOX = "CODE_IN_BOX"
+    DOWNLOAD_CODE = "DOWNLOAD_CODE"
+    UNKNOWN = "UNKNOWN"
+
+
+class MatchTier(StrEnum):
+    """How confidently a listing is associated with a release."""
+
+    CONFIRMED = "CONFIRMED"
+    EXACT_CODE = "EXACT_CODE"
+    EXACT_KEY = "EXACT_KEY"
+    PROBABLE = "PROBABLE"
+    AMBIGUOUS = "AMBIGUOUS"
+    UNMATCHED = "UNMATCHED"
+
+    @property
+    def counted(self) -> bool:
+        return self in (MatchTier.CONFIRMED, MatchTier.EXACT_CODE, MatchTier.EXACT_KEY)
