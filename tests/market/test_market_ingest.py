@@ -151,6 +151,17 @@ class TestScans:
         assert market.execute("SELECT COUNT(*) FROM scope").fetchone()[0] == 2
 
 
+    async def test_reingesting_the_same_run_is_a_no_op(self, market) -> None:
+        from switch_tracker.core.db import now_iso
+
+        observer = MarketObserver(market)
+        outcome = ok(row("A"))
+        observer.store_done(4242, STORE, outcome, now_iso())
+        observer.store_done(4242, STORE, outcome, now_iso())
+        assert market.execute("SELECT COUNT(*) FROM scan").fetchone()[0] == 1
+        assert market.execute("SELECT confirmations FROM state_span").fetchone()[0] == 1
+
+
 class TestHistory:
     async def test_an_unchanged_state_extends_the_open_span(self, legacy, market) -> None:
         await collect(legacy, market, ok(row("A")), ok(row("A")), ok(row("A")))
