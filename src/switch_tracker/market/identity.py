@@ -7,14 +7,11 @@ stored in market.db, so improving identity rules never requires another crawl.
 from __future__ import annotations
 
 import re
-import sqlite3
-from collections import Counter, defaultdict
 from dataclasses import dataclass
 from enum import StrEnum
 
 from switch_tracker.core.matcher import match_key, platform_from_title
-from switch_tracker.core.db import now_iso
-from switch_tracker.market.models import Format, MatchTier
+from switch_tracker.market.models import Format
 
 
 @dataclass(frozen=True, slots=True)
