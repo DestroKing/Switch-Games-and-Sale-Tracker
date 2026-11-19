@@ -2,23 +2,19 @@
 
 from __future__ import annotations
 
+import sqlite3
 
 import pytest
 
 from switch_tracker.market import db as market_db
+from switch_tracker.market.identity import rematch
+from switch_tracker.market.models import Format
+from switch_tracker.market.review import ReviewError, confirm, merge, reject, reset, split
 
 
 @pytest.fixture
 def market(tmp_path):
     return market_db.open_db(tmp_path / "market.db")
-
-import sqlite3
-
-import pytest
-
-from switch_tracker.market.identity import rematch
-from switch_tracker.market.models import Format
-from switch_tracker.market.review import ReviewError, confirm, merge, reject, reset, split
 
 def seed(conn: sqlite3.Connection, shop: str, sku: str, title: str, platform: str = "SWITCH") -> int:
     conn.execute("INSERT OR IGNORE INTO retailer (id, name, kind) VALUES (?, ?, 'INDEPENDENT')", (shop,))
