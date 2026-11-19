@@ -50,8 +50,23 @@ class MarketObserver:
             raise
 
     def run_done(self, run_id: int) -> None:
-        if self._backup_dir is not None:
-            market_db.backup(self._conn, self._backup_dir, run_id)
+        # Rematching is part of the market observation, but must never prevent
+        # the safety backup. Re-raise afterwards so CollectService records a warning.
+        from switch_tracker.market import identity
+
+        error: Exception | None = None
+        try:
+            identity.rematch(self._conn)
+        except Exception as exc:  # noqa: BLE001 - surfaced as a run warning by CollectService
+            error = exc
+        try:
+            if self._backup_dir is not None:
+                market_db.backup(self._conn, self._backup_dir, run_id)
+        except Exception as exc:  # noqa: BLE001 - preserve the first failure, if any
+            if error is None:
+                error = exc
+        if error is not None:
+            raise error
 
     def _ingest(self, run_id: int, store: StoreConfig, outcome: FetchOutcome, started_at: str) -> None:
         conn, now = self._conn, now_iso()
