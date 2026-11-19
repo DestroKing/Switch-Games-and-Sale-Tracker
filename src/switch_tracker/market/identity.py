@@ -283,7 +283,18 @@ def rematch(conn: sqlite3.Connection) -> dict[MatchTier, int]:
                 for lid in ids:
                     decisions[lid] = (None, MatchTier.AMBIGUOUS, [reason])
 
+        # A product code claimed by distinct identity families is a collision,
+        # not evidence that the later family is the same release.
+        code_families: dict[str, set[tuple[object, ...]]] = defaultdict(set)
+        for lid, attr in attrs.items():
+            if attr.unmatched is not None or attr.problems:
+                continue
+            family = (attr.key, attr.platform, attr.edition, attr.region, attr.format.value)
+            for code in attr.codes:
+                code_families[code].add(family)
+
         # Confirmed listings teach codes without changing their human decisions.
+        # Conflicting cross-family codes are deliberately not learned.
         for row in listings:
             lid = int(row["id"])
             old = current.get(lid)
@@ -291,6 +302,8 @@ def rematch(conn: sqlite3.Connection) -> dict[MatchTier, int]:
                 continue
             confirmed_release = _final_alias(int(old["release_id"]), aliases)
             for code in sorted(attrs[lid].codes):
+                if len(code_families[code]) > 1:
+                    continue
                 if not code_rows.get(code):
                     conn.execute(
                         "INSERT OR IGNORE INTO release_code (code, release_id, source) VALUES (?, ?, ?)",
@@ -307,7 +320,13 @@ def rematch(conn: sqlite3.Connection) -> dict[MatchTier, int]:
                     reasons = [*reasons, f"merged by review into release {final}"]
                     release_id = final
             if tier is MatchTier.EXACT_KEY and release_id is not None:
+                colliding = sorted(code for code in attrs[lid].codes if len(code_families[code]) > 1)
+                if colliding:
+                    release_id, tier = None, MatchTier.AMBIGUOUS
+                    reasons = [f"product code {colliding[0]} is claimed by multiple identity families"]
                 known = {_final_alias(owner, aliases) for code in attrs[lid].codes for owner in code_rows.get(code, set())}
+                if tier is not MatchTier.EXACT_KEY:
+                    known = set()
                 if len(known) == 1:
                     known_release = next(iter(known))
                     platform_row = conn.execute("SELECT platform FROM release WHERE id=?", (known_release,)).fetchone()
