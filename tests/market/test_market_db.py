@@ -98,6 +98,27 @@ class TestMigrations:
         db.migrate(conn, (broken[0], "CREATE TABLE b (y INTEGER);"))
         assert conn.execute("PRAGMA user_version").fetchone()[0] == 2
 
+    def test_v1_to_v2_keeps_existing_rows_and_rejects_self_alias(self, tmp_path: Path) -> None:
+        path = tmp_path / "upgrade.db"
+        conn = db.connect(path)
+        db.migrate(conn, db.MIGRATIONS[:1])
+        conn.execute("INSERT INTO retailer (id, name, kind) VALUES ('r', 'R', 'INDEPENDENT')")
+        conn.execute(
+            "INSERT INTO storefront (id, retailer_id, name, base_url, stock_signal) "
+            "VALUES ('s', 'r', 'S', 'https://s.example', 'REPORTED')"
+        )
+        conn.execute("INSERT INTO game (id, title, key) VALUES (1, 'G', 'g')")
+        conn.execute("INSERT INTO release (id, game_id, platform, created_at) VALUES (1, 1, 'SWITCH', 't')")
+        conn.commit()
+        db.migrate(conn)
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 2
+        assert conn.execute("SELECT name FROM retailer WHERE id='r'").fetchone()[0] == "R"
+        assert conn.execute("SELECT id FROM release WHERE id=1").fetchone()[0] == 1
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute(
+                "INSERT INTO release_alias (release_id, target_id, at) VALUES (1, 1, 't')"
+            )
+
     def test_a_database_newer_than_this_code_is_refused(self, tmp_path: Path) -> None:
         conn = db.connect(tmp_path / "m.db")
         conn.execute(f"PRAGMA user_version = {len(db.MIGRATIONS) + 1}")
