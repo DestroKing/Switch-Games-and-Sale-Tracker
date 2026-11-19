@@ -17,7 +17,7 @@ from switch_tracker.market.models import Format
         ("Red Dead Redemption Standard Edition – Nintendo Switch", "SWITCH", "STANDARD", "red dead redemption", Format.UNKNOWN),
         ("The Witcher 3 Wild Hunt Complete Edition Nintendo Switch", "SWITCH", "COMPLETE", "witcher 3 wild hunt", Format.UNKNOWN),
         ("Minecraft Legends Deluxe Edition Nintendo Switch", "SWITCH", "DELUXE", "minecraft legends", Format.UNKNOWN),
-        ("Kirby's Return to Dream Land Deluxe Nintendo Switch", "SWITCH", "STANDARD", "kirby return dream land deluxe", Format.UNKNOWN),
+        ("Kirby's Return to Dream Land Deluxe Nintendo Switch", "SWITCH", "STANDARD", "Kirby's Return to Dream Land Deluxe", Format.UNKNOWN),
         ("Mario Kart 8 Deluxe Nintendo Switch Game", "SWITCH", "STANDARD", "mario kart 8 deluxe", Format.UNKNOWN),
         ("NBA 2K24 Kobe Bryant Edition (Nintendo Switch)", "SWITCH", "BRYANT", "nba 2k24 kobe", Format.UNKNOWN),
         ("Hitman World of Assassination Signature Edition Nintendo Switch 2", "SWITCH2", "SIGNATURE", "hitman world assassination", Format.UNKNOWN),
