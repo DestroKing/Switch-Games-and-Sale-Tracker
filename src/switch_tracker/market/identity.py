@@ -196,11 +196,11 @@ def rematch(conn: sqlite3.Connection) -> dict[MatchTier, int]:
         for row in listings:
             lid = int(row["id"])
             old = current.get(lid)
+            attr = extract(row["title"], row["sku"], row["platform"], row["region"])
+            attrs[lid] = attr
             if old is not None and old["tier"] == MatchTier.CONFIRMED.value:
                 counts[MatchTier.CONFIRMED] += 1
                 continue
-            attr = extract(row["title"], row["sku"], row["platform"], row["region"])
-            attrs[lid] = attr
             if attr.unmatched:
                 decisions[lid] = (None, MatchTier.UNMATCHED, [attr.unmatched])
             elif attr.problems:
@@ -283,8 +283,22 @@ def rematch(conn: sqlite3.Connection) -> dict[MatchTier, int]:
                 for lid in ids:
                     decisions[lid] = (None, MatchTier.AMBIGUOUS, [reason])
 
-        # Resolve aliases and learn codes in listing-id order. Conflicting codes
-        # are never stolen from another release.
+        # Confirmed listings teach codes without changing their human decisions.
+        for row in listings:
+            lid = int(row["id"])
+            old = current.get(lid)
+            if old is None or old["tier"] != MatchTier.CONFIRMED.value or old["release_id"] is None:
+                continue
+            confirmed_release = _final_alias(int(old["release_id"]), aliases)
+            for code in sorted(attrs[lid].codes):
+                if not code_rows.get(code):
+                    conn.execute(
+                        "INSERT OR IGNORE INTO release_code (code, release_id, source) VALUES (?, ?, ?)",
+                        (code, confirmed_release, f"listing:{lid}"),
+                    )
+                    code_rows[code].add(confirmed_release)
+
+        # Resolve aliases and learn codes in listing-id order.
         for lid in sorted(decisions):
             release_id, tier, reasons = decisions[lid]
             if release_id is not None:
@@ -292,7 +306,18 @@ def rematch(conn: sqlite3.Connection) -> dict[MatchTier, int]:
                 if final != release_id:
                     reasons = [*reasons, f"merged by review into release {final}"]
                     release_id = final
-            if tier in (MatchTier.EXACT_KEY, MatchTier.CONFIRMED) and release_id is not None:
+            if tier is MatchTier.EXACT_KEY and release_id is not None:
+                known = {_final_alias(owner, aliases) for code in attrs[lid].codes for owner in code_rows.get(code, set())}
+                if len(known) == 1:
+                    known_release = next(iter(known))
+                    platform_row = conn.execute("SELECT platform FROM release WHERE id=?", (known_release,)).fetchone()
+                    if platform_row is not None and platform_row[0] == attrs[lid].platform:
+                        release_id, tier = known_release, MatchTier.EXACT_CODE
+                        reasons = [f"known product code identifies release {known_release}"]
+                elif len(known) > 1:
+                    release_id, tier = None, MatchTier.AMBIGUOUS
+                    reasons = ["codes point at releases " + ", ".join(map(str, sorted(known)))]
+            if tier is MatchTier.EXACT_KEY and release_id is not None:
                 for code in sorted(attrs[lid].codes):
                     owner = next(iter(code_rows.get(code, set())), None)
                     if owner is not None and _final_alias(owner, aliases) != release_id:

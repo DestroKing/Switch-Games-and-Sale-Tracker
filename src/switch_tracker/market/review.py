@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 import sqlite3
 from collections.abc import Sequence
+from contextlib import contextmanager
+from typing import Iterator
 
 from switch_tracker.core.db import now_iso
 from switch_tracker.core.matcher import match_key
@@ -39,8 +41,22 @@ def _rematch(conn: sqlite3.Connection) -> None:
     identity.rematch(conn)
 
 
+@contextmanager
+def _transaction(conn: sqlite3.Connection) -> Iterator[None]:
+    """Atomically pair review changes with their audit row, even in autocommit mode."""
+    conn.execute("SAVEPOINT market_review")
+    try:
+        yield
+    except BaseException:
+        conn.execute("ROLLBACK TO market_review")
+        conn.execute("RELEASE market_review")
+        raise
+    else:
+        conn.execute("RELEASE market_review")
+
+
 def confirm(conn: sqlite3.Connection, listing_id: int, release_id: int, note: str = "") -> None:
-    with conn:
+    with _transaction(conn):
         listing = _exists(conn, "listing", listing_id)
         release = _exists(conn, "release", release_id)
         if listing is None:
@@ -123,7 +139,7 @@ def split(
             raise ReviewError("One or more selected listings do not exist")
         platforms = {row["platform"] for row in listings}
         if len(platforms) != 1:
-            raise ReviewError("A split cannot combine listings from different platforms")
+            raise ReviewError("Selected listings must have the same platform")
         if title is not None:
             key = match_key(title)
             if not key:
