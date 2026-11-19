@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+      - market-tracker
   pull_request:
     branches:
       - main
